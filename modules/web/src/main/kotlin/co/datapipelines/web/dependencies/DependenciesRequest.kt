@@ -1,5 +1,6 @@
 package co.datapipelines.web.dependencies
 
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.dependencies.FamilyKey
 import co.datapipelines.dependencies.LookupScope
 import co.datapipelines.dependencies.ObjectAddress
@@ -16,8 +17,8 @@ import java.util.UUID
 /**
  * One parsed tree request (dependency-graph record §11.1, as amended by erratum (8)(a)): the family is the ROUTE, so
  * only `name`, `id` and `version` are read from the query; a `family` field, or any other field, supplied anyway is
- * ignored. [lookupKey] is the family's own lookup key as its native validator canonicalised it (an API path without its
- * one `/api` prefix; every other family the value verbatim).
+ * ignored. [lookupKey] is the family's own lookup key as its native validator canonicalised it (an API route key — its path without
+ * the one `/api` prefix, preceded by `METHOD ` for a mutation method; every other family the value verbatim).
  */
 data class DependenciesRequest(
     val family: FamilyKey,
@@ -44,7 +45,7 @@ data class DependenciesRequest(
     }
 
     companion object {
-        /** §11.1: "at most 200 characters, the longest native grammar" — counted in code points, checked before any grammar. */
+        /** Native value ceiling in code points; an API name's mutation method prefix is separate from its path. */
         const val MAX_VALUE_LENGTH = 200
 
         private val READ_FIELDS = listOf(RequestField.NAME, RequestField.ID, RequestField.VERSION)
@@ -66,8 +67,9 @@ data class DependenciesRequest(
         /**
          * Parses the RAW query string [rawQuery] (still percent-encoded, as `HttpServletRequest.getQueryString` returns
          * it) for [row]'s family. The order is §A's and is the only order: (1) every read value is at most
-         * [MAX_VALUE_LENGTH] code points of valid UTF-8 — a malformed escape or an undecodable byte sequence is "not
-         * UTF-8"; (2) the selector shape fits the family; (3) the family's native validator admits the name or id;
+         * [MAX_VALUE_LENGTH] code points of valid UTF-8, excluding an API name's mutation method prefix — a malformed
+         * escape or an undecodable byte sequence is "not UTF-8"; (2) the selector shape fits the family;
+         * (3) the family's native validator admits the name or id;
          * (4) the version is canonical decimal in `1..Int.MAX_VALUE`. The first failure answers.
          *
          * The raw string is decoded here rather than through the servlet's parameter map because that map decodes with
@@ -83,7 +85,7 @@ data class DependenciesRequest(
                 val field = READ_FIELDS.firstOrNull { decode(rawName) == it.wire } ?: continue
                 values.getOrPut(field) { mutableListOf() } += decode(rawValue)
             }
-            (lengthOrEncoding(values) ?: shape(row.selector, values))?.let { return it }
+            (lengthOrEncoding(row.family, values) ?: shape(row.selector, values))?.let { return it }
             val keyField = row.selector.keyField
             val key = single(values, keyField)
             val canonical = row.nativeKey.canonical(key) ?: return Parsed.Refused(keyField, row.selector.keyRefusal)
@@ -102,14 +104,33 @@ data class DependenciesRequest(
                 Selector.Entity
             }
 
-        private fun lengthOrEncoding(values: Map<RequestField, List<String?>>): Parsed.Refused? =
+        private fun lengthOrEncoding(
+            family: FamilyKey,
+            values: Map<RequestField, List<String?>>,
+        ): Parsed.Refused? =
             READ_FIELDS.firstNotNullOfOrNull { field ->
                 val all = values[field].orEmpty()
-                if (all.any { it == null || it.codePointCount(0, it.length) > MAX_VALUE_LENGTH }) {
+                val invalid =
+                    all.any { raw ->
+                        raw == null || boundedValue(family, field, raw).let { it.codePointCount(0, it.length) > MAX_VALUE_LENGTH }
+                    }
+                if (invalid) {
                     refused(field, RefusalReason.VALUE_TOO_LONG)
                 } else {
                     null
                 }
+            }
+
+        /** Only an API name may carry a method prefix; every other field retains its existing ceiling. */
+        private fun boundedValue(
+            family: FamilyKey,
+            field: RequestField,
+            value: String,
+        ): String =
+            if (family == FamilyKey.API_ENDPOINT && field == RequestField.NAME) {
+                EndpointRouteKey.parse(value)?.path ?: value
+            } else {
+                value
             }
 
         private fun shape(

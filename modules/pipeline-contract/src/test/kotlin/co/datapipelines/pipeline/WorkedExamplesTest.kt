@@ -84,11 +84,12 @@ class WorkedExamplesTest {
     }
 
     @Test
-    fun `§16-4 DDL and §16-5 DML nodes carry no output block and still validate`() {
+    fun `§16-4 DDL carries no output block and §16-5 DML discards its result, and both validate`() {
         val pipeline = parse("spec-16.4-ddl-and-16.5-dml.json")
 
         pipeline.node("create_idx")?.output.shouldBeNull()
-        pipeline.node("record_execution")?.output.shouldBeNull()
+        pipeline.node("record_execution")?.output shouldBe NodeOutput.Discard
+        pipeline.node("record_execution")?.dmlOperation shouldBe DmlOperation.INSERT
         withClue(validator.validate(pipeline, workspaceId).failures.toString()) {
             validator.validate(pipeline, workspaceId).isValid shouldBe true
         }

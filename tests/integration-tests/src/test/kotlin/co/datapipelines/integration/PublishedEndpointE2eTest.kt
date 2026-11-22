@@ -1145,7 +1145,7 @@ class PublishedEndpointE2eTest {
              "description": "074 E2E — the read-only rule's negative fixture.", "parameters": {},
              "nodes": [{"id": "insert_row", "description": "A write", "type": "DML",
                         "source": "ep-source", "template": {"id": "test/insert_row.sql", "version": 1},
-                        "depends_on": []}]}
+                        "operation": "update", "output": {"target": "discard"}, "depends_on": []}]}
             """.trimIndent(),
         )
         // #171 — a DDL node against tempdb is publishable: the snow-days shape (stage, CREATE

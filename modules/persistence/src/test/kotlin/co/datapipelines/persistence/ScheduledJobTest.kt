@@ -6,13 +6,13 @@ import org.junit.jupiter.api.Timeout
 
 /**
  * The closed `job` tag set of `datapipelines.scheduled_jobs.tick_failed` (observability §4.1; #326's
- * four, #636's four). The values are literals, never read back from the enum under test: a job added,
+ * four, #636's four, #1043's one). The values are literals, never read back from the enum under test: a job added,
  * renamed or dropped changes a dashboard's series and must change §4.1 with it.
  */
 @Timeout(5)
 class ScheduledJobTest {
     @Test
-    fun `the job tags are the eight documented in observability 4_1 - in declaration order`() {
+    fun `the job tags are the nine documented in observability 4_1 - in declaration order`() {
         ScheduledJob.entries.map { it.tag } shouldBe
             listOf(
                 "stale_sweep",
@@ -23,6 +23,7 @@ class ScheduledJobTest {
                 "dashboard_refresh_retention",
                 "parameter_evaluation_sweep",
                 "parameter_evaluation_retention",
+                "capture_retention",
             )
     }
 

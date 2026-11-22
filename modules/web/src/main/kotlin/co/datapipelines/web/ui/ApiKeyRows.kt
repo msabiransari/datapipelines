@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import java.time.Instant
@@ -111,12 +112,33 @@ class ApiKeyRows(
             copyable = key.hasSealedSecret,
         )
 
-    /** The bindings a kind has, from ITS table — endpoint keys' paths, dashboard keys' folders (L5), others none. */
+    /**
+     * The bindings a kind has, from ITS table — endpoint keys' paths, dashboard keys' folders (L5), others none.
+     *
+     * #1037: an endpoint key's GET node grants render as the bare path (the association form
+     * preselects exactly these — a bare path is what the picker's options are); a mutation
+     * grant renders as `METHOD /path` so the chip stays visible — hiding a POST a key really
+     * holds would read as "authorises nothing" — while never matching a picker option, so the
+     * set-delta form cannot strip or re-bind it as a GET node grant. Mutation grants are
+     * managed on the REST and MCP bind surfaces until #1040's authoring UI.
+     */
     private fun boundPaths(key: ApiKey): List<String> =
         when (key.kind) {
-            ApiKeyKind.ENDPOINT -> bindings.findByKey(key.id).map { it.pathPrefix }.sorted()
-            ApiKeyKind.DASHBOARD -> dashboardBindings.findByKey(key.id).map { it.namePrefix }.sorted()
-            else -> emptyList()
+            ApiKeyKind.ENDPOINT -> {
+                bindings
+                    .findByKey(key.id)
+                    .map { binding ->
+                        if (binding.method == EndpointMethod.GET) binding.pathPrefix else "${binding.method.name} ${binding.pathPrefix}"
+                    }.sorted()
+            }
+
+            ApiKeyKind.DASHBOARD -> {
+                dashboardBindings.findByKey(key.id).map { it.namePrefix }.sorted()
+            }
+
+            else -> {
+                emptyList()
+            }
         }
 
     companion object {

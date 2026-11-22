@@ -1,5 +1,7 @@
 package co.datapipelines.application.dependencies
 
+import co.datapipelines.application.endpoints.EndpointMethod
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.application.endpoints.EndpointVersionBody
 import co.datapipelines.application.endpoints.PublishedEndpointVersionRepository
 import co.datapipelines.dependencies.Operational
@@ -12,8 +14,10 @@ import co.datapipelines.pipeline.release.ResolvedNode
 
 /**
  * The API family's read of the release graph (#786; dependency-graph record §6 `PIPELINE_PIN`, §8 "an API draft version
- * is a releasable root", §11.1): an API version is looked up by its workspace and its IMMUTABLE path (the family's pin
- * key — a path change makes another entity, §24) at an exact version; its one outgoing pin is the exact pipeline version
+ * is a releasable root", §11.1): an API version is looked up by its workspace and its IMMUTABLE route (the family's pin
+ * key, an [EndpointRouteKey]: the bare path for GET, `METHOD path` for a mutation method; a path or method change makes
+ * another entity, §24, and sibling methods at one path are separate entities whose version numbers overlap, #1037) at an
+ * exact version; its one outgoing pin is the exact pipeline version
  * its body names, at field path `pipeline_version`. Registered through G1's [ReleaseDependencyFamilies.descriptor], so
  * the walk, the batching and the savepoint isolation are G1's; this class adds a family, not a walker.
  *
@@ -29,7 +33,8 @@ class EndpointDependencySource(
 ) : OperationalDependencySource {
     override fun read(identity: ReleaseNodeIdentity): SourceRead? {
         if (identity.family != ReleaseFamily.ENDPOINT) return null
-        val (entity, version) = versions.findByPath(identity.workspaceId, identity.entityId, identity.version) ?: return null
+        val route = EndpointRouteKey.parse(identity.entityId) ?: return null
+        val (entity, version) = versions.findByPath(identity.workspaceId, route.path, identity.version, route.method) ?: return null
         val status = PipelineDependencySource.statusOf(version.status)
         val pins = if (version.status == PipelineVersionStatus.DISCARDED) emptyList() else pinsOf(identity.workspaceId, version.body)
         return SourceRead(
@@ -59,11 +64,15 @@ class EndpointDependencySource(
                 ),
             )
 
-        /** The release identity of the API at [pathPattern], version [version], in [workspaceId]. */
+        /**
+         * The release identity of the API route ([method], default GET — the legacy path-only spelling) at
+         * [pathPattern], version [version], in [workspaceId].
+         */
         fun identity(
             workspaceId: java.util.UUID,
             pathPattern: String,
             version: Int,
-        ): ReleaseNodeIdentity = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, pathPattern, version)
+            method: EndpointMethod = EndpointMethod.GET,
+        ): ReleaseNodeIdentity = ReleaseNodeIdentity(workspaceId, ReleaseFamily.ENDPOINT, EndpointRouteKey.of(method, pathPattern), version)
     }
 }

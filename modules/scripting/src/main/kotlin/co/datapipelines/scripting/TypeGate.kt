@@ -128,6 +128,39 @@ class TypeGate private constructor(
         return GateResult.Pass(value)
     }
 
+    /**
+     * Checks a structured-body input (`kind: body`, #1038): the value must be a JSON object or an
+     * array whose every element is a JSON object — `{}`, `[]` and a singleton array included —
+     * whose canonical form fits [maxBytes]. The members are never checked against a schema: the
+     * transformer owns them. Deliberately separate from [gateObject], which keeps its object-only
+     * meaning for an object-valued Context key.
+     */
+    fun gateBody(
+        value: Any?,
+        maxBytes: Long,
+    ): GateResult {
+        val shapeOk = value is Map<*, *> || (value is List<*> && value.all { it is Map<*, *> })
+        if (!shapeOk) {
+            return GateResult.Refuse(
+                GateRefusal.ValueTypeMismatch(null, BODY_COLUMN, "object or array of objects", bodyTypeName(value)),
+            )
+        }
+        val bytes =
+            CanonicalJson
+                .write(value)
+                .toByteArray(Charsets.UTF_8)
+                .size
+                .toLong()
+        if (bytes > maxBytes) {
+            return GateResult.Refuse(GateRefusal.ValueTooLarge(null, BODY_COLUMN, bytes))
+        }
+        return GateResult.Pass(value)
+    }
+
+    /** The refused body's kind, never its contents: a list names its first non-object element's type. */
+    private fun bodyTypeName(value: Any?): String =
+        if (value is List<*>) "array holding ${typeName(value.first { it !is Map<*, *> })}" else typeName(value)
+
     /** One value's verdict against [column]; the row number rides on the refusals. */
     private fun checkValue(
         value: Any?,
@@ -418,6 +451,7 @@ class TypeGate private constructor(
 
     companion object {
         private const val OBJECT_COLUMN = "<object>"
+        private const val BODY_COLUMN = "<body>"
         private const val UNREACHABLE_PRECISION = Int.MAX_VALUE
         private const val MAX_INT64_BITS = 63
         private val INT32_MIN = BigDecimal.valueOf(Int.MIN_VALUE.toLong())

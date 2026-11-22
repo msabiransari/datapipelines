@@ -58,6 +58,19 @@ class WebPropertiesSpecDriftTest {
             props.keyRequestBudget.windowSeconds.toString()
         documented.getValue("datapipelines.endpoints.key-request-budget.max-requests") shouldBe
             props.keyRequestBudget.maxRequests.toString()
+        // #1037 — the operator run-gate on published non-GET routes; default OFF in both the
+        // doc and the binder, so a deployment gets 503 endpoint.mutations_disabled until it
+        // opts in.
+        documented.getValue("datapipelines.endpoints.mutations-enabled") shouldBe props.mutationsEnabled.toString()
+        props.mutationsEnabled shouldBe false
+        // #1039 — the start-claim takeover window of a durable mutation reservation.
+        documented.getValue("datapipelines.endpoints.mutation-start-window-seconds") shouldBe props.mutationStartWindowSeconds.toString()
+        // #1038 — the structured request body's envelope budget, shared by every body-accepting surface.
+        documented.getValue("datapipelines.endpoints.body-max-bytes") shouldBe props.bodyMaxBytes.toString()
+        documented.getValue("datapipelines.endpoints.body-max-depth") shouldBe props.bodyMaxDepth.toString()
+        // #1043 — the runtime capture window and the captured detail's retention from admission.
+        documented.getValue(CaptureDurations.WINDOW_KEY) shouldBe props.captureWindowSeconds.toString()
+        documented.getValue(CaptureDurations.RETENTION_KEY) shouldBe props.captureDetailRetentionHours.toString()
     }
 
     @Test

@@ -102,8 +102,38 @@ object PipelineErrorCodes {
         /** §12.4 — each node `type` is one of `DQL`, `DML`, `DDL`. */
         const val TYPE_INVALID = "pipeline.validation.type_invalid"
 
-        /** §12.4 — DML nodes must NOT have an `output` block. */
+        /**
+         * §12.4 — a DML node's `output` block names a target a DML result cannot take. Since
+         * #1034 a DML node DOES have an output (its result rows: `tempdb`, `caller` or
+         * `discard`); the frozen code (§15.1) now names the one refused shape, a `datasource`
+         * target — a DML node writes through its own statement, never through a write-back.
+         */
         const val DML_HAS_OUTPUT = "pipeline.validation.dml_has_output"
+
+        /** §12.4 (#1034) — a DML node declares no `operation` (operation-less DML, waived legacy shape). */
+        const val DML_OPERATION_REQUIRED = "pipeline.validation.dml_operation_required"
+
+        /** §12.4 (#1034) — a DML node's `operation` is not `insert`, `update` or `delete`. */
+        const val DML_OPERATION_INVALID = "pipeline.validation.dml_operation_invalid"
+
+        /**
+         * §12.4 (#1034) — an insert's `key` is missing, names no valid column identifier, or
+         * declares a type outside INTEGER / BIGINTEGER / STRING; or an update/delete declares one.
+         */
+        const val DML_KEY_INVALID = "pipeline.validation.dml_key_invalid"
+
+        /**
+         * §12.4 (#1034) — an insert's `input` is missing, declares both or neither of
+         * `parameters` / `table`, names an undeclared parameter, or names a tempdb table no
+         * ancestor stages; or an update/delete declares one.
+         */
+        const val DML_INPUT_INVALID = "pipeline.validation.dml_input_invalid"
+
+        /** §12.4 (#1034) — a DML node omits `output`: its result goes to `tempdb`, `caller` or `discard`, explicitly. */
+        const val DML_OUTPUT_REQUIRED = "pipeline.validation.dml_output_required"
+
+        /** §12.4 (#1034) — `operation`, `key` or `input` on a node that is not DML. */
+        const val DML_FIELD_FORBIDDEN = "pipeline.validation.dml_field_forbidden"
 
         /** §12.4 — DDL nodes must NOT have an `output` block. */
         const val DDL_HAS_OUTPUT = "pipeline.validation.ddl_has_output"
@@ -502,6 +532,17 @@ object PipelineErrorCodes {
         const val INSTANCE_LOST = "pipeline.execution.instance_lost"
 
         /**
+         * §13.3 (#1038) — the execution's structured request body is refused before any node runs:
+         * a fixture that is not one bounded JSON object or array of objects, a missing body the
+         * pipeline requires, a body on a pipeline that declares none, or a `parameters` key naming
+         * the output of a SCRIPT node that reads the body. `details.reason` names which
+         * (`malformed_json`, `invalid_encoding`, `duplicate_member`, `invalid_root`,
+         * `number_out_of_range`, `too_many_bytes`, `too_deep`, `token_too_large`, `required`,
+         * `not_accepted`, `override_refused`); a supplied value is never echoed. HTTP 400.
+         */
+        const val REQUEST_BODY_INVALID = "pipeline.execution.request_body_invalid"
+
+        /**
          * §13.3 (121) — the caller supplied a PROPER SUBSET of a multi-output node's keys.
          * Override is all-or-nothing per node: every key supplied and the node is skipped
          * (`provided_by: "caller"` on its stats), none and it computes; some is refused before
@@ -535,6 +576,25 @@ object PipelineErrorCodes {
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"
 
         /**
+         * (write-transactions §4 row 1) — run admission refused this plan's durable write set:
+         * an eligible writer participates but the plan holds a second durable destination
+         * (eligible, excluded or external DDL — two registrations for one server count as
+         * two), an external DDL node, or a child whose body could not be read. `details.reason`
+         * names which (`second_durable_destination` / `external_ddl` / `unknown_child_writes`
+         * / `registration_ineligible` for a repoint discovered at enlist). Refused BEFORE any
+         * business write; a run already accepted ends FAILED.
+         */
+        const val LOCAL_WRITE_REFUSED = "pipeline.execution.local_write_refused"
+
+        /**
+         * (write-transactions §4/§5) — the single local write transaction's commit refused
+         * after every required node succeeded. The root attempts rollback; the run ends
+         * FAILED. Telemetry records the outcome honestly (a lost acknowledgement is
+         * `unknown`), because "a blocked database cannot justify claiming rollback".
+         */
+        const val LOCAL_WRITE_COMMIT_FAILED = "pipeline.execution.local_write_commit_failed"
+
+        /**
          * §13.3 (139) — an AGENT executed a DRAFT pipeline version over MCP while one of its
          * pinned template versions is a DRAFT that was written AFTER this key's last
          * `templates_render` of it. `details.templates` carries each `{id, version, updated_at,
@@ -542,6 +602,31 @@ object PipelineErrorCodes {
          * the entry point. RELEASED pins are exempt — they cannot change.
          */
         const val TEMPLATE_UNRENDERED = "pipeline.execution.template_unrendered"
+    }
+
+    /**
+     * §13.27 (#1043, published-mutation-apis §6, §7 "Runtime capture") — a workspace administrator's temporary capture
+     * of a published mutation's declared transformer outputs. Every code here answers an interactive session only; no
+     * value, filter text or captured output is ever echoed.
+     */
+    object ExecutionCapture {
+        /** 409: a capture window is already active for this route and method; `details.capture_id` names it. */
+        const val ALREADY_ACTIVE = "execution.capture.already_active"
+
+        /**
+         * 404: no capture window with that id on that route, or no captured detail for that execution, in the
+         * selected workspace — an execution that was never captured answers exactly as an absent one.
+         */
+        const val NOT_FOUND = "execution.capture.not_found"
+
+        /** 410: the execution was captured, but its private details passed their expiry (`details.expired_at`). */
+        const val EXPIRED = "execution.capture.expired"
+
+        /**
+         * 400: the capture request is refused before anything is written — a GET route (`details.reason` =
+         * `method_not_capturable`) or a correlation filter that is not one UUID (`correlation_id_invalid`).
+         */
+        const val INVALID = "execution.capture.invalid"
     }
 
     /** §13.4 — node execution. */
@@ -626,6 +711,25 @@ object PipelineErrorCodes {
          * the parameter.
          */
         const val SQL_PARAMETER_MISSING = "pipeline.node.sql_parameter_missing"
+
+        /**
+         * §13.4 (#1034) — an insert could not correlate one input row with exactly one key from
+         * the SAME statement: the driver returned no key, several, a column other than the
+         * declared key, a null, a value of another type, or a value different from the supplied
+         * `id` (a trigger rewrote it). The node fails before any output row is published; a
+         * participating transaction rolls back, an ordinary connection rolls back the node's own
+         * statements. `details.reason` names which.
+         */
+        const val DML_KEY_CORRELATION_FAILED = "pipeline.node.dml_key_correlation_failed"
+
+        /** §13.4 (#1034) — an insert statement affected a row count other than exactly one for its input row. */
+        const val DML_AFFECTED_ROWS_MISMATCH = "pipeline.node.dml_affected_rows_mismatch"
+
+        /**
+         * §13.4 (#1034) — an insert targets a dialect whose generated-key return has not been
+         * qualified for one-to-one correlation (write-transactions §5). Refused before any SQL.
+         */
+        const val DML_INSERT_UNQUALIFIED = "pipeline.node.dml_insert_unqualified"
 
         /**
          * §13.4 (072) — a CALCULATOR node's evaluation failed. HTTP 500.
@@ -1172,6 +1276,13 @@ object PipelineErrorCodes {
          */
         const val RATE_LIMIT_UNAVAILABLE = "rate_limit.unavailable"
         const val IDEMPOTENCY_KEY_REUSED = "idempotency.key_reused_for_different_request"
+
+        /**
+         * #1039 (published-mutation-apis §4) — 503: a published mutation's durable reservation could not be read or
+         * recorded, or its state is indeterminate. Refused BEFORE any new business SQL: without a reservation the
+         * platform cannot promise a retry will not run the request twice, so it runs nothing.
+         */
+        const val IDEMPOTENCY_RESERVATION_UNAVAILABLE = "idempotency.reservation_unavailable"
     }
 
     /**
@@ -1406,6 +1517,12 @@ object PipelineErrorCodes {
          * `api` (a normalised `/api/api/…` pattern). `details.segment` names it. Checked at
          * publish and re-checked when the serve registry is built, so a row written around the
          * publish path is never served.
+         *
+         * #1037 (published-mutation-apis §3.1) — the same code refuses a pattern that could
+         * match the reserved result-polling suffixes of an endpoint's own executions
+         * (`…/executions/{id}` and `…/executions/{id}/result`, the keys-v2 A16/B3 reads): the
+         * serve handler recognises those URLs before the registry, so a route beneath them would
+         * be silently shadowed exactly there. `details.segment` names the colliding suffix.
          */
         const val PATH_RESERVED = "endpoint.path_reserved"
 
@@ -1413,6 +1530,13 @@ object PipelineErrorCodes {
          * §4.1 — the pattern could match the same URL as one already published (`/a/{x}` against
          * `/a/b`). `details.conflicting_path` names the other. Ambiguity is REFUSED, never
          * resolved by precedence: at request time at most one pattern may match.
+         *
+         * #1037 (published-mutation-apis §2) — a route is a method+path pair, so the refusal is
+         * per method: the SAME method in the SAME workspace conflicts (named as above — the
+         * caller owns that workspace's tree); ANY method in ANOTHER workspace conflicts with a
+         * REDACTED body that names nothing but the caller's own pattern — no other path, no
+         * method, no workspace — because whether some other workspace publishes at a path is
+         * exactly what this refusal must not reveal.
          */
         const val PATH_CONFLICT = "endpoint.path_conflict"
 
@@ -1429,19 +1553,56 @@ object PipelineErrorCodes {
         const val PIPELINE_NOT_READONLY = "endpoint.pipeline_not_readonly"
 
         /**
+         * #1038 (published-mutation-apis §3.3) — the route's method cannot deliver the pinned pipeline's structured
+         * request body: a GET route pinning a pipeline whose `request_body` is `required` (a GET carries no body, so
+         * every call would be refused). Raised at publish, draft save, release, current switch and import. 409.
+         */
+        const val REQUEST_BODY_INCOMPATIBLE = "endpoint.request_body_incompatible"
+
+        /**
          * §5.1 — the published pipeline has no servable version: nothing the pointer names is
          * eligible (RELEASED always; a DRAFT only under development posture — D63).
          */
         const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
 
         /**
-         * §5.6 — no endpoint matches. Deliberately identical for an unknown path and a DISABLED
-         * one: distinguishing them would let an unauthenticated caller enumerate the registry.
+         * §5.6 — no endpoint matches, or no method of the addressed path is visible to this
+         * caller. Deliberately identical for an unknown path and a DISABLED one: distinguishing
+         * them would let an unauthenticated caller enumerate the registry.
          */
         const val NOT_FOUND = "endpoint.not_found"
 
-        /** §5.6 — any method but `GET` on the published path; the response carries `Allow: GET`. */
+        /**
+         * §5.6 — a method the addressed path does not serve THIS caller: some method is visible
+         * (a live route plus a grant the presenting key holds) but the requested one is not
+         * published there or not granted. `Allow` carries exactly the visible methods, and
+         * `details.method` the requested one. A path with NO visible method is
+         * [NOT_FOUND], not this — the caller must not learn it exists.
+         */
         const val METHOD_NOT_ALLOWED = "endpoint.method_not_allowed"
+
+        /**
+         * #1037 (published-mutation-apis §3.1) — 400: a publish names a method this surface does
+         * not publish (`PATCH` today, and any unknown verb): a route's method is one of GET,
+         * POST, PUT, DELETE, stated at publish and immutable like the path.
+         */
+        const val METHOD_INVALID = "endpoint.method_invalid"
+
+        /**
+         * #1037 (published-mutation-apis §7) — 503: the request is an otherwise-authorized
+         * mutation route (`datapipelines.endpoints.mutations-enabled` off, or the writing side
+         * not enabled on this deployment), refused BEFORE any durable business work. The
+         * identity checks — route resolution, grants, the 404/405 discipline — answered the same
+         * either way; only the run is withheld.
+         */
+        const val MUTATIONS_DISABLED = "endpoint.mutations_disabled"
+
+        /**
+         * #1039 (published-mutation-apis §4) — 503: a dependency the published mutation needs before admission was
+         * unavailable and no more specific code applies (the metadata store while the route's pin is resolved, the run's
+         * fail-closed execution record). Nothing ran; the same key may be retried.
+         */
+        const val DEPENDENCY_UNAVAILABLE = "endpoint.dependency_unavailable"
 
         /** §5.3 — an `Accept` this surface cannot satisfy (v1 serves `application/json` only). */
         const val NOT_ACCEPTABLE = "endpoint.not_acceptable"
@@ -1467,6 +1628,16 @@ object PipelineErrorCodes {
          * promotion pre-validation, so the target is left byte-unchanged.
          */
         const val PROMOTION_KEY_MISSING = "endpoint.promotion.key_missing"
+
+        /**
+         * #1037, narrowed by #1040 (published-mutation-apis §7) — 409: a method-bearing route cannot travel EXACTLY. On
+         * the sender, the target's inventory does not advertise the route's method, exact pins, its body mode or
+         * method grants (a receiver that predates #1040 advertises none), so the batch is refused before anything is
+         * pushed; on the receiver, an entry lacks its pin, hash or a known body mode, carries node bindings, or names
+         * a method outside POST/PUT/DELETE, so the batch is refused before anything is imported. Either way the
+         * target is left byte-unchanged — a route is never reinterpreted as GET or on another pin.
+         */
+        const val PROMOTION_METHOD_UNSUPPORTED = "endpoint.promotion.method_unsupported"
 
         /** #786 (record §24) — 404: the API has no version with that number (or the API is not visible). */
         const val VERSION_NOT_FOUND = "endpoint.version.not_found"
@@ -1578,6 +1749,32 @@ object PipelineErrorCodes {
 
         /** §5.3 — a single parameter value over 4 KB. */
         const val VALUE_TOO_LARGE = "endpoint.request.value_too_large"
+
+        /**
+         * #1038 — one entry of [INVALID]'s `details.errors[]` for the structured request body: malformed JSON, a
+         * duplicate member, an invalid root or array element, invalid UTF-8, a missing body the route requires, or a
+         * body on a route that takes none. `parameter` is null; `reason` names which; no value is echoed.
+         */
+        const val BODY_INVALID = "endpoint.request.body_invalid"
+
+        /**
+         * #1039 — one entry of [INVALID]'s `details.errors[]`: a published POST, PUT or DELETE without an
+         * `Idempotency-Key`, or with one outside its grammar (1–128 of `A–Z a–z 0–9 . _ : -`). `parameter` is null;
+         * `reason` is `missing` or `malformed`; the supplied value is never echoed.
+         */
+        const val IDEMPOTENCY_KEY_INVALID = "endpoint.request.idempotency_key_invalid"
+
+        /**
+         * #1038 — the request body exceeds `body-max-bytes` (counted while reading, chunked included) or `body-max-depth`.
+         * 413.
+         */
+        const val TOO_LARGE = "endpoint.request.too_large"
+
+        /**
+         * #1038 — a body whose media type is not `application/json` (charset absent or UTF-8), or a content encoding
+         * other than identity. 415.
+         */
+        const val UNSUPPORTED_MEDIA_TYPE = "endpoint.request.unsupported_media_type"
     }
 
     /**

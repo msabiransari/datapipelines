@@ -11,7 +11,7 @@
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">
-        <span class="app-method">GET</span>
+        <span class="app-method" th:text="${page.method}" data-api-method>GET</span>
         <span class="ds-mono" th:text="${page.url}" data-api-url>/api/finance/v1/revenue</span>
       </h1>
       <p class="app-page-sub">Every version of this API, newest first. Each version pins one exact pipeline version;
@@ -78,6 +78,18 @@
           <dl class="u-text-sm">
             <dt>Pipeline</dt>
             <dd class="ds-mono" th:text="${page.selected.pinLabel}" data-api-pin>finance/revenue@3</dd>
+            <!-- #1040: the pinned version's request-body contract — what a caller must send and which transformers
+                 read it. Derived from the exact pin, never stored, so it cannot disagree with what the serve path admits. -->
+            <dt>Request body</dt>
+            <dd th:text="${page.selectedBody != null ? page.selectedBody.mode : 'unknown (the pinned version is gone)'}"
+                data-api-body-mode>none</dd>
+            <dt>Body read by</dt>
+            <dd data-api-body-readers>
+              <span class="app-chips" th:if="${page.selectedBody != null and not #lists.isEmpty(page.selectedBody.readers)}">
+                <span class="app-chip app-chip-mono" th:each="r : ${page.selectedBody.readers}" th:text="${r}">shape (lending/shape.py@2)</span>
+              </span>
+              <span th:if="${page.selectedBody == null or #lists.isEmpty(page.selectedBody.readers)}">—</span>
+            </dd>
             <dt>Timeout</dt>
             <dd th:text="${page.selected.timeoutSeconds} + ' s'">30 s</dd>
             <dt>Description</dt>
@@ -85,6 +97,10 @@
             <dt>Body hash</dt>
             <dd class="ds-mono u-text-meta u-break" th:text="${page.selected.bodyHash}">9f2c…</dd>
           </dl>
+          <p class="u-text-sm u-secondary" th:if="${page.method == 'PUT' or page.method == 'DELETE'}" data-api-repeat-semantics>
+            For PUT and DELETE, author the pipeline so identical requests have the same intended business effect
+            even with different Idempotency-Key values. A new key starts a new execution.
+          </p>
           <div class="app-page-actions" data-api-verbs>
             <th:block th:if="${page.selected.isDraft}">
               <button type="button" class="ds-button ds-button-sm" data-api-verb="edit"
@@ -131,7 +147,7 @@
           </summary>
           <div class="app-card-b">
             <div class="dp-deps" data-dp-deps data-family="api_endpoint" data-dp-deps-state="idle"
-                 th:attr="data-name=${#strings.substringAfter(page.url, '/api')},data-version=${page.selected.version}">
+                 th:attr="data-name=${page.routeKey},data-version=${page.selected.version}">
               <p class="dp-deps-note" data-dp-deps-note role="status">Dependencies load when this section is opened.</p>
             </div>
           </div>
@@ -148,13 +164,28 @@
             <span class="app-chip" th:if="${page.enabled}" data-api-enabled>enabled</span>
             <span class="app-chip app-chip-warn" th:unless="${page.enabled}" data-api-enabled><i class="ds-status"></i>disabled</span>
           </p>
-          <p class="u-text-sm u-mb-xs">API keys bound at this path:</p>
+          <!-- #1037/#1040: a GET route lists the keys bound at its node; a mutation route lists the keys holding an
+               exact grant of ITS method on this one route (a grant never covers a sibling method at the path). -->
+          <p class="u-text-sm u-mb-xs" data-api-keys-label
+             th:text="${page.method == 'GET'} ? 'API keys bound at this path:' : 'API keys granted ' + ${page.method} + ' on this route:'">API keys bound at this path:</p>
           <span class="app-chips" th:if="${not #lists.isEmpty(page.boundKeyNames)}" data-api-keys>
             <span class="app-chip app-chip-mono" th:each="k : ${page.boundKeyNames}" th:text="${k}">ci</span>
           </span>
           <span class="app-chip app-chip-warn" th:if="${#lists.isEmpty(page.boundKeyNames)}" data-api-keys><i class="ds-status"></i>none</span>
           <p class="app-card-note app-flush">Enabling and key bindings belong to the API itself and apply to whichever
             version is current.</p>
+        </div>
+      </div>
+
+      <!-- #1043 (ui-screens §4.18c): runtime capture of this POST, PUT or DELETE — workspace administrators only. The
+           card loads its own state (and re-renders itself after start and stop). -->
+      <div class="ds-card" th:if="${canManageCapture}" data-api-capture>
+        <div class="app-card-h">
+          <h2 class="ds-title">Runtime capture</h2>
+        </div>
+        <div class="app-card-b" id="api-capture"
+             th:attr="hx-get=@{'/partials/endpoints/{id}/capture'(id=${page.id})}" hx-trigger="load" hx-swap="outerHTML">
+          <p class="u-text-sm u-secondary">Loading capture state…</p>
         </div>
       </div>
     </div>

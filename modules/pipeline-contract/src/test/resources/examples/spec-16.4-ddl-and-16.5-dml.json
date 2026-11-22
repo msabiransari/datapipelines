@@ -3,7 +3,13 @@
   "name": "acme/finance/revenue_with_index_and_audit",
   "display_name": "Revenue with Index and Audit",
   "description": "Hosts the §16.4 DDL node and the §16.5 DML node verbatim.",
-  "parameters": {},
+  "parameters": {
+    "pipeline_id": {
+      "type": "STRING",
+      "required": true,
+      "description": "The pipeline whose run is audited."
+    }
+  },
   "nodes": [
     {
       "id": "revenue_by_customer",
@@ -36,6 +42,10 @@
       "description": "Insert an audit row.",
       "source": "pg-meta",
       "template": {"id": "acme/finance/record_execution.sql", "version": 1},
+      "operation": "insert",
+      "key": {"column": "execution_id", "type": "BIGINTEGER"},
+      "input": {"parameters": ["pipeline_id"]},
+      "output": {"target": "discard"},
       "depends_on": ["return_report"]
     }
   ]

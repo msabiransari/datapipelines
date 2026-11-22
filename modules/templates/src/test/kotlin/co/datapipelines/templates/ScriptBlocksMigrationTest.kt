@@ -176,7 +176,7 @@ class ScriptBlocksMigrationTest {
             body = "rows",
             contractJson = ScriptBlocks.writeContract(probeContract()),
             invariantsJson = ScriptBlocks.writeInvariants(emptyList()),
-            testsJson = ScriptBlocks.writeTests(listOf(probeCase())),
+            testsJson = ScriptBlocks.writeTests(listOf(probeCase()), probeContract()),
         ) shouldBe base
     }
 

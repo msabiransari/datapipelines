@@ -6,7 +6,11 @@ import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RequestBodyAdmission
 import co.datapipelines.pipeline.RequestLimits
+import co.datapipelines.typesystem.body.StructuredBody
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
+import co.datapipelines.typesystem.body.StructuredBodyDecoding
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
@@ -45,6 +49,8 @@ import java.util.UUID
 class PipelineExecuteController(
     private val pipelines: PipelineService,
     private val launcher: ExecutionStreamLauncher,
+    /** The shared bounded decoder (#1038) the `request_body` fixture is read with. */
+    private val bodyDecoder: StructuredBodyDecoder = StructuredBodyDecoder(),
 ) {
     /**
      * §6.1 — returns the live event stream. Empty body means "latest version, no parameters".
@@ -76,6 +82,7 @@ class PipelineExecuteController(
         val explicitVersion = versionOf(tree)
         val parametersNode = parametersOf(tree)
         val parametersJson = echoOf(parametersNode)
+        val requestBody = requestBodyOf(body)
         val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         // D56: with no `version` in the body, run the WORKING version — the draft when one
         // exists, else the latest release. Resolved by the aggregate (PipelineService), the same
@@ -116,8 +123,24 @@ class PipelineExecuteController(
                 // ignored on the other.
                 resultPageRows = request.requestedResultPageRows(),
                 idempotencyKey = request.idempotencyKey(),
+                requestBody = requestBody,
             ),
         )
+    }
+
+    /**
+     * The optional `request_body` fixture (#1038; pipeline-contract §3.4) — decoded from the RAW
+     * request text by the shared bounded decoder, not from the lenient tree: a duplicate member
+     * anywhere inside it, or the member given twice, is refused rather than silently last-wins,
+     * and its numbers keep their exact decoded value. Separate from `parameters` and never part
+     * of [echoOf]'s `parameters_json`; the refusal names a reason, never a value.
+     */
+    private fun requestBodyOf(body: String?): StructuredBody {
+        if (body.isNullOrBlank()) return StructuredBody.Absent
+        return when (val decoded = bodyDecoder.decodeMember(body, REQUEST_BODY_FIELD)) {
+            is StructuredBodyDecoding.Decoded -> decoded.body
+            is StructuredBodyDecoding.Refused -> throw RequestBodyAdmission.decodeRefused(decoded.refusal)
+        }
     }
 
     private fun parseBody(body: String?): ObjectNode {
@@ -209,6 +232,9 @@ class PipelineExecuteController(
 
         /** [MAPPER]'s request copy — what the execute body is read with (#291). */
         val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
+
+        /** The execute body's structured request-body fixture member (#1038). */
+        const val REQUEST_BODY_FIELD = "request_body"
 
         /** The `details.reason` §6.3's magnitude refusal carries (`ParameterCoercion`'s token). */
         const val TOO_MANY_DIGITS = "too_many_digits"

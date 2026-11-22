@@ -160,6 +160,22 @@ class ExecutionDetailControllerTest {
     }
 
     @Test
+    fun `a confirmed success whose result was never delivered is unavailable - not available, expired or no-caller-result`() {
+        authenticate()
+        // #1035: the stored key may still exist (an announcement that could not be built) or be gone (a lost store);
+        // either way the page must not offer it, and must not read as a run with no caller result.
+        listOf(view(), null).forEach { stored ->
+            val record = record(ExecutionStatus.SUCCESS).copy(resultUnavailable = true)
+            every { executions.findById(workspaceId, executionId) } returns record
+            stubReads(record, stored)
+
+            val model = ExtendedModelMap()
+            controller.detail(executionId, model)
+            model["resultState"] shouldBe "unavailable"
+        }
+    }
+
+    @Test
     fun `a success with zero rows is no-caller-result, not expired`() {
         authenticate()
         val record = record(ExecutionStatus.SUCCESS, rowCount = 0)

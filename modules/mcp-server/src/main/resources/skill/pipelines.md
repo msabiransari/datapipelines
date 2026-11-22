@@ -127,6 +127,7 @@ own formula; declaring the window three different ways.
 
 - **`pipelines-learning`** — step 1 or 1½: the read order, reading a schema like an analyst.
 - **`pipelines-dag`** — wiring multi-node work: shaping the DAG, tempdb, indexes, timeouts.
+- **`pipelines-optimization`** — choosing a faster DAG or SQL shape without changing the answer: parallel reads, reducing before a join, join location, and measuring the rewrite.
 - **`pipelines-numbers`** — the measurement contract before the arithmetic; aggregation.
 - **`pipelines-verification`** — step 5: the check shapes, the recipe, exercising the door.
 - **`pipelines-engine-quirks`** — a tempdb statement failed oddly, or before the first tempdb

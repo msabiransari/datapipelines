@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.typesystem.TypeMappingWarning
+import co.datapipelines.typesystem.body.StructuredBody
 import com.fasterxml.jackson.databind.JsonNode
 import java.time.Instant
 import java.time.ZoneId
@@ -25,13 +26,20 @@ data class ExecutionReference(
     val timezone: ZoneId,
 )
 
-/** The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note). */
+/**
+ * The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note).
+ *
+ * [OUTCOME_UNKNOWN] (#1035, write-transactions §4) is terminal: the family's shared commit was
+ * attempted and its acknowledgement lost, so the customer database may or may not hold the
+ * writes. It is neither success nor failure and nothing replays the writes to find out.
+ */
 @Suppress("KDocUnresolvedReference")
 enum class ExecutionStatus {
     RUNNING,
     SUCCESS,
     FAILED,
     ABORTED,
+    OUTCOME_UNKNOWN,
 }
 
 /**
@@ -142,7 +150,59 @@ data class ExecuteRequest(
     val readOnly: Boolean = false,
     /** Internal admission check inherited by children and applied to their exact loaded bodies. */
     val pipelineAdmission: ((Pipeline, UUID, Int) -> Unit)? = null,
-)
+    /**
+     * (write-transactions §3.3) The execution FAMILY's local write transaction — non-null only
+     * on a CHILD request, which inherits the root's so every participant in the family (the
+     * root's nodes, pinned children, write-back) shares one connection and one settle point.
+     * The ROOT request leaves it null; the root executor plans, creates and settles the
+     * transaction itself. Inherited by a PIPELINE node's child request like [readOnly].
+     */
+    val localWriteTransaction: LocalWriteTransaction? = null,
+    /**
+     * #1038 (pipeline-contract §3.4): the execution's structured request body, decoded by the
+     * surface's bounded decoder — [StructuredBody.Absent] when none was supplied. Admitted by
+     * `RequestBodyAdmission` before any node runs and read only by the SCRIPT inputs that bind
+     * `@request_body`; never a parameter, a Context key or part of `parameters_json`. A PIPELINE
+     * node's child request does NOT inherit it: a child receives no body.
+     */
+    val requestBody: StructuredBody = StructuredBody.Absent,
+    /**
+     * #1038 (published-mutation requirement §4, §6): true on a child request whose parent is a body
+     * execution, so the whole family reports failures in the bounded form. Set only by a PIPELINE
+     * node's child request, from [NodeExecutionContext.boundedDiagnostics]; a root request leaves it
+     * false and [boundedDiagnostics] derives the policy from its body.
+     */
+    val inheritedBoundedDiagnostics: Boolean = false,
+    /**
+     * #1039 (published-mutation requirement §4, §6): true on the ROOT request of a published POST, PUT or DELETE, so a
+     * mutation reports its failures in the bounded form even when it carries no body (a bodyless DELETE). Children
+     * inherit the policy through [NodeExecutionContext.boundedDiagnostics] like a body execution's.
+     */
+    val boundedDiagnosticsRequired: Boolean = false,
+    /**
+     * #1043 (published-mutation-apis §6, §7 "Runtime capture"): true on a published POST, PUT or DELETE and every child it
+     * composes. Such a run's ordinary history — the node stats' `context_value`/`context_values`, the lifecycle events
+     * and the terminal Context snapshot in `parameters_json` — keeps no value a node computed: status, codes, timing,
+     * counts and the declared keys stay, while the values themselves are only ever retained by an administrator's
+     * capture ([valueCapture]). The run's own inputs (org config, platform keys, typed parameters) stay in the snapshot.
+     * Every other surface leaves it false and keeps its history contract unchanged.
+     */
+    val privateNodeValues: Boolean = false,
+    /**
+     * #1043: the capture an administrator's session decided at this execution's admission, or null (every run that was
+     * not captured — the default). Root only: a PIPELINE node's child request does not inherit it.
+     */
+    val valueCapture: NodeValueCapture? = null,
+) {
+    /**
+     * #1038: whether this execution reports a failure as a bounded code and metadata only ([BoundedFailure]):
+     * every execution that carries a structured request body, every published mutation (#1039), and every child of
+     * either. Engine
+     * messages, driver text, author free text and rendered SQL then reach no event, stored error,
+     * stats row, replay or log; the legacy form is unchanged for every other execution.
+     */
+    val boundedDiagnostics: Boolean get() = requestBody.present || inheritedBoundedDiagnostics || boundedDiagnosticsRequired
+}
 
 /**
  * What one execution produced (§5.2).
@@ -152,6 +212,10 @@ data class ExecuteRequest(
  *
  * [warnings] carries the non-fatal type-mapping warnings drained out of every `StageResult`
  * (staging §8.2) and out of the caller result's schema mapping. They never fail an execution.
+ *
+ * [resultUnavailable] (#1035) is true only on a SUCCESS whose commit is confirmed but whose caller
+ * result could not be delivered: [resultRef] then names a result no reader can fetch, and a surface
+ * reports the result unavailable — never an empty result that reads as a zero-caller run.
  */
 data class ExecutionResult(
     val executionId: UUID,
@@ -162,6 +226,7 @@ data class ExecutionResult(
     val completedAt: Instant,
     val durationMs: Long,
     val warnings: List<TypeMappingWarning> = emptyList(),
+    val resultUnavailable: Boolean = false,
 )
 
 /**

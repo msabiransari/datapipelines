@@ -1,19 +1,26 @@
 package co.datapipelines.templates
 
+import com.fasterxml.jackson.core.JsonFactory
 import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.core.JsonParseException
 import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.core.StreamReadFeature
 import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonDeserializer
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.JsonSerializer
 import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializerProvider
 import com.fasterxml.jackson.databind.cfg.CoercionAction
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.databind.module.SimpleModule
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.databind.type.LogicalType.Textual
+import com.fasterxml.jackson.databind.util.RawValue
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.fasterxml.jackson.module.kotlin.readValue
 import java.time.Instant
@@ -37,6 +44,14 @@ import com.fasterxml.jackson.databind.type.LogicalType.Boolean as JacksonBoolean
  * for a single field — and the explicit formatter also pins the *spelling*, which the JSR-310
  * module leaves to `WRITE_DATES_AS_TIMESTAMPS` (numeric epoch by default, ISO only once
  * disabled). One field, one format, no configuration to get wrong.
+ *
+ * ## Exact decimals in trees (#1038)
+ *
+ * An authored body fixture keeps its exact decimals ([FixtureInputs]), and the read shapes build
+ * a tree from the [Template] (the REST draft pointer, the MCP authoring response). Jackson's node
+ * factory strips trailing zeros from a decimal by default, which would turn `0.50` into `0.5` on
+ * the way out — a different fixture once an author saves it back. Trailing zeros are kept. This
+ * mapper binds fractions as doubles everywhere else, so only a fixture's exact decimals meet it.
  */
 object TemplateJson {
     fun objectMapper(): ObjectMapper =
@@ -51,9 +66,33 @@ object TemplateJson {
                     config.setCoercion(it, CoercionAction.Fail)
                 }
             }.withCoercionConfig(JacksonBoolean) { it.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail) }
+            .configure(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES, false)
             .build()
 
     private val MAPPER = objectMapper()
+
+    private val STRICT_FACTORY: JsonFactory = JsonFactory.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
+
+    /** The template's wire tree, with its `tests` kept exactly when a tree could not hold them ([testsNode]). */
+    fun toTree(template: Template): ObjectNode {
+        val node = MAPPER.valueToTree<ObjectNode>(template)
+        template.tests?.let { node.set<JsonNode>("tests", testsNode(it)) }
+        return node
+    }
+
+    /** The wire node for an authored `tests` block: an ordinary tree, or its exact text when a member repeats. */
+    fun testsNode(tests: List<ScriptTestCase>): JsonNode {
+        val text = MAPPER.writeValueAsString(tests)
+        return if (repeatsAMember(text)) MAPPER.nodeFactory.pojoNode(RawValue(text)) else MAPPER.valueToTree(tests)
+    }
+
+    private fun repeatsAMember(text: String): Boolean =
+        try {
+            STRICT_FACTORY.createParser(text).use { parser -> while (parser.nextToken() != null) parser.skipChildren() }
+            false
+        } catch (_: JsonParseException) {
+            true
+        }
 
     /** Serializes an `imports` array to the compact JSON stored in `template_versions.imports_json`. */
     fun writeImports(imports: List<TemplateImport>): String = MAPPER.writeValueAsString(imports)

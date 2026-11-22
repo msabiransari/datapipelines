@@ -101,6 +101,7 @@ class ApiConsoleController(
                 val name = names[endpoint.id]
                 EndpointRow(
                     id = endpoint.id,
+                    method = endpoint.method.name,
                     url = PUBLISHED_PREFIX + endpoint.pathPattern,
                     segments = endpoint.parsed.segments.map { segment -> segment is EndpointPath.Segment.Variable },
                     pipelineDisplayName = name?.displayName ?: name?.name ?: DELETED_PIPELINE,
@@ -108,7 +109,15 @@ class ApiConsoleController(
                     servedVersion = served[endpoint.id]?.version,
                     servedDraft = served[endpoint.id]?.draft ?: false,
                     timeoutSeconds = endpoint.current?.body?.timeoutSeconds,
-                    boundKeyNames = boundByPath[endpoint.pathPattern].orEmpty().mapNotNull { keyNames[it.apiKeyId] }.sorted(),
+                    // #1037: the row's OWN method's grants only. A GET row's "associated keys"
+                    // are its GET node bindings; a mutation row's are its exact entity grants —
+                    // never the sibling method's, which is a different route's authorization.
+                    boundKeyNames =
+                        boundByPath[endpoint.pathPattern]
+                            .orEmpty()
+                            .filter { it.method == endpoint.method }
+                            .mapNotNull { keyNames[it.apiKeyId] }
+                            .sorted(),
                     enabled = endpoint.isEnabled,
                 )
             },
@@ -136,6 +145,8 @@ class ApiConsoleController(
     data class EndpointRow(
         /** #786: the API's id — the row links to its versions page, `/api-console/endpoints/{id}`. */
         val id: java.util.UUID,
+        /** #1037: the route's method — half of its identity; a GET and a POST at one pattern are two rows. */
+        val method: String,
         val url: String,
         val segments: List<Boolean>,
         val pipelineDisplayName: String,

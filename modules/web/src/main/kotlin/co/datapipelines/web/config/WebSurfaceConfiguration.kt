@@ -351,6 +351,7 @@ class WebSurfaceConfiguration {
         scope: CoroutineScope,
         subPipelineRunner: SubPipelineRunner,
         eventRecorder: ExecutionEventRecorder,
+        localWritePlanner: co.datapipelines.executor.LocalWritePlanner,
     ): ExecutionStreamLauncher =
         ExecutionStreamLauncher(
             lakeAppendPort = lakeAppendPort,
@@ -381,6 +382,7 @@ class WebSurfaceConfiguration {
             subPipelineRunner = subPipelineRunner,
             scriptSupport = scriptSupport,
             eventRecorder = eventRecorder,
+            localWritePlanner = localWritePlanner,
         )
 
     /**
@@ -415,6 +417,7 @@ class WebSurfaceConfiguration {
         executionRepository: ExecutionRepository,
         subPipelineRunner: SubPipelineRunner,
         eventRecorder: ExecutionEventRecorder,
+        localWritePlanner: co.datapipelines.executor.LocalWritePlanner,
     ): RecordingExecutionRunner =
         RecordingExecutionRunner(
             lakeAppendPort = lakeAppendPort,
@@ -440,6 +443,9 @@ class WebSurfaceConfiguration {
             scriptSupport = scriptSupport,
             eventRecorder = eventRecorder,
             idempotencyStore = idempotencyStore,
+            // This runner serves the writable roots the stream does not: MCP runs, published
+            // endpoints and the scheduler — same planner, same run-admission gate.
+            localWritePlanner = localWritePlanner,
         )
 
     /**

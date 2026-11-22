@@ -3,6 +3,7 @@ package co.datapipelines.web.endpoints
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointMatcher
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.PublishedEndpoint
@@ -104,8 +105,8 @@ class PublishedEndpointDeactivatedWorkspaceTest {
     fun `an endpoint of a deactivated workspace is refused exactly like an unknown path, before its pipeline is read`() {
         val service = service(workspaceActive = false)
 
-        val deactivated = service.serve("/nyc/v1/revenue", foreignUserKey, request)
-        val unknown = service.serve("/nyc/v1/nothing-here", foreignUserKey, request)
+        val deactivated = service.serve("/nyc/v1/revenue", EndpointMethod.GET, foreignUserKey, request)
+        val unknown = service.serve("/nyc/v1/nothing-here", EndpointMethod.GET, foreignUserKey, request)
 
         deactivated.shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()
         deactivated.status shouldBe 404
@@ -121,7 +122,7 @@ class PublishedEndpointDeactivatedWorkspaceTest {
         val service = service(workspaceActive = true)
         every { versions.findCurrent(endpoint.id) } returns null
 
-        val outcome = service.serve("/nyc/v1/revenue", foreignUserKey, request)
+        val outcome = service.serve("/nyc/v1/revenue", EndpointMethod.GET, foreignUserKey, request)
 
         // Past the gate: the next stage (the pointer) is what answered, not the 404 rule.
         outcome.shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()

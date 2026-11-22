@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.123 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.135 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-22
 
 ---
 
@@ -447,7 +447,7 @@ pinning the exact draft, and live dashboard versions pinning it. A sole-draft pu
 entity and checks stored dashboard pins to any version (DISCARDED included for a dashboard with
 a live version); parent scope remains live/exact. `details.pinned_by` names `{pipeline, version, node}`;
 `details.referencing_dashboards` names `{dashboard, version, status}` when non-empty; since #786
-`details.referencing_api_versions` (`{path, version, status, pipeline_version}`) and
+`details.referencing_api_versions` (`{path, version, status, pipeline_version}`, where `path` is the API's route key — the bare path for GET, `METHOD path` for a mutation route, #1037) and
 `details.referencing_schedules` (`{schedule, pipeline_version}`) name the live API versions and schedules the
 same way (any version for a sole-draft purge). Refusal
 precedes all deletion and preserves executions, hash and pointer.
@@ -679,7 +679,8 @@ Idempotency-Key: ...   (strongly recommended)
     "start_date": "2026-01-01",
     "end_date": "2026-03-31",
     "include_cancelled": false
-  }
+  },
+  "request_body": {"lines": [{"sku": "A", "qty": 2}]}   // optional; only for a pipeline that declares request_body (§6.1.4)
 }
 ```
 
@@ -733,6 +734,40 @@ authenticated caller: the stream's completion re-enters the server as an async d
 authorization interceptor judged that dispatch against its empty security context (#404,
 [auth §8.2](auth.md#82-filter-order-per-request)). A refusal after the first event is not an
 HTTP status at all — it is the stream's own terminal event (§6.5).
+
+#### 6.1.4 The structured request body (#1038)
+
+A pipeline that declares `request_body` ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body))
+takes one JSON object or array of objects in the optional `request_body` member — the draft fixture of the
+body its published API will accept, delivered unchanged to the SCRIPT transformer that binds `@request_body`.
+It is read from the raw request text by the one bounded decoder the published codec and `pipelines_execute`
+share: a member repeated anywhere inside it (or `request_body` itself given twice) is refused, not resolved
+last-wins; numbers keep their exact decoded value; depth and size are bounded by
+`datapipelines.endpoints.body-max-depth` and `body-max-bytes` ([configuration §3.22](configuration.md)).
+`null` is not absence. It is separate from `parameters`, never echoed into the stored parameters, and joins
+the `Idempotency-Key` fingerprint when present: the same key with a different `request_body` is
+`409 idempotency.key_reused_for_different_request`.
+
+Every refusal is `400 pipeline.execution.request_body_invalid` with a `details.reason` — a decoder reason
+(`malformed_json`, `invalid_encoding`, `duplicate_member`, `invalid_root`, `number_out_of_range`,
+`too_many_bytes`, `too_deep`, `token_too_large`, with an `offset` or `index` where one applies) or an admission reason
+(`required`, `not_accepted`, `override_refused` with `details.keys`) — and never a value or a member name.
+Every refusal is decided before any node runs, so nothing is written.
+
+A run that carries a `request_body` (and every child pipeline it starts) reports a failure as its code and node
+metadata only — on the `node_failed`/`pipeline_failed` events, the live and replayed stream, the stored execution
+record and `GET /api/v1/executions/{id}/events` — never a value from the body, an engine or driver message, a
+transformer's rejection reason or invariant text ([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
+
+The byte budget counts the fixture's canonical encoding, so the same body costs the same bytes here and on
+`pipelines_execute` however it is spelled. An authored body fixture (`POST /api/v1/templates/evaluate`, a template
+create or update) is read from the request's own text in the same way: a repeated member is refused and fractions
+stay exact. A saved fixture keeps its member order, every repeated member and its exact numbers through the stored
+tests, `GET` read-back (the `tests` of a template read repeat a member as the author wrote it), re-save, export and
+release, so a case that expects a duplicate's refusal, or an order-dependent result, judges the same at release as
+at save (#1080). An authored body case reports its evaluation and suite verdict with the same bounded diagnostics: code,
+safe details, the case's rule word and `reason`, with console and invariant text withheld
+([pipeline-contract §3.4](pipeline-contract.md#34-structured-request-body)).
 
 ### 6.2 Why SSE, not WebSocket
 
@@ -856,6 +891,10 @@ The `error` object is the **failure record** (057/T85): one object, completed on
 
 Emitted when execution finishes successfully, immediately before `data_ready`.
 
+**After the commit (#1035).** When the run enrolled a local write transaction ([DAG Executor §16.4](dag-executor.md#164-the-single-registration-local-write-transaction-1033)), `pipeline_completed` — and `data_ready` — are emitted only after the root's commit is confirmed; until then the stream carries node events and nothing that reads as success. A CHILD of such a family never streams its own `pipeline_completed`/`data_ready` before the settle (its record stays `RUNNING`, pending), and none is emitted for it afterwards.
+
+**`result_unavailable` (#1035 r3).** When the commit is confirmed but the caller result cannot be delivered, `pipeline_completed` carries `"result_unavailable": true` and no `data_ready` follows — so a stream client can tell this from a zero-caller run without reading the record. The field is absent on every other `pipeline_completed`.
+
 ```json
 {
   "execution_id": "exec-uuid",
@@ -876,7 +915,7 @@ Emitted when execution finishes successfully, immediately before `data_ready`.
 
 #### 6.4.6 `pipeline_failed`
 
-Emitted when execution halts due to any node failure. Its `error` object is the SAME failure record `node_failed` carried for the failed node (§6.4.4), unchanged — and is also what `pipeline_executions.error_json` stores, so `GET /executions/{id}` and the execution detail page show it after the fact. A timeout or setup failure carries the same shape minus `node`/`sql` (neither exists for it).
+Emitted when execution halts due to any node failure — and when the family's shared commit was attempted and its acknowledgement lost (#1035): then the payload's `status` is **`"OUTCOME_UNKNOWN"`** instead of `"FAILED"`, `failed_node_id` is `null`, and `error.code` is `pipeline.execution.local_write_commit_failed`. The event name does not change — existing stream clients already treat `pipeline_failed` as terminal-and-not-success — and `status` says which; the database may or may not hold the writes, the engine never re-runs them, and the operator checks the target before any deliberate re-run ([DAG Executor §16.5](dag-executor.md#165-the-commit-boundary-and-outcome_unknown-1035)). Its `error` object is the SAME failure record `node_failed` carried for the failed node (§6.4.4), unchanged — and is also what `pipeline_executions.error_json` stores, so `GET /executions/{id}` and the execution detail page show it after the fact. A timeout or setup failure carries the same shape minus `node`/`sql` (neither exists for it).
 
 ```json
 {
@@ -933,6 +972,7 @@ data: {
 
 - `rows` — the first page. For results ≤ one page, `rows` IS the whole result (`has_more: false`) and no cursor read is needed.
 - `result_url` + `expires_at` — cursor for paging the full result within TTL (§7). Always present, small results included — a client may re-fetch or download in another format within the TTL.
+- On a run that enrolled a local write transaction, `data_ready` is emitted only after the commit is confirmed (#1035). If the commit is confirmed and the result then cannot be delivered, the execution is `SUCCESS` and no `data_ready` follows; the record carries `result_unavailable: true` (§10.2) and the cursor answers `503 result.storage_unavailable`. "Cannot be delivered" is decided after the confirmation from the stored result as it is then — the result prepared before the commit is read back from the store, and a result that is gone (or a store failure) is never announced, never served as an empty page and never cached in the event history as `data_ready`.
 - There is no `delivery_mode` field — the delivery model is uniform (v1.3; the former inline/claim-check split is gone).
 
 #### 6.4.8 `execution_aborted`
@@ -998,7 +1038,7 @@ There is no percentage: no operation knows its total. A slow source query is `ex
 Within a single execution stream, events are ordered:
 1. Exactly one `execution_started` (first).
 2. For each node: zero or one `node_started` → zero or more `node_progress` (§6.4.9) → zero or one of (`node_completed` | `node_failed`). A node's terminal `node_progress` sample (`completed`/`failed`/`aborted`) precedes its `node_completed`/`node_failed`; no `node_progress` for a node follows the node's terminal event, and none follows the execution's.
-3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` | `execution_aborted`.
+3. Exactly one terminal sequence: (`pipeline_completed` [→ `data_ready` if a caller node exists]) | `pipeline_failed` (`status` `FAILED` or `OUTCOME_UNKNOWN`) | `execution_aborted`. On a family sharing a local write transaction the terminal sequence follows the commit's settlement (#1035): a CHILD's history (`GET /executions/{id}/events`, its `format=json` form and the MCP `events` resource) carries no terminal event while its root is open, and then ends in ONE terminal event — `pipeline_completed` after a `SUCCESS` root, `pipeline_failed` (`status` `FAILED` or `OUTCOME_UNKNOWN`) after a failed one, `execution_aborted` after an abort — with the next `event_id` and the same content on every surface.
 4. Stream closes after the terminal event.
 
 For parallel nodes, events are emitted in real-time as they occur (interleaved). Order between parallel nodes is non-deterministic — on the live stream and, independently, in the §10.3 replay, whose order between parallel nodes is the persistence order; a node's own events keep their order in both.
@@ -1114,11 +1154,11 @@ Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result
 |---|---|---|
 | `result.execution_not_found` | 404 | Execution ID unknown |
 | `result.execution_incomplete` | 409 | Execution has not completed yet |
-| `result.execution_failed` | 410 | Execution ended in failure — no result to retrieve |
+| `result.execution_failed` | 410 | Execution ended in failure — no result to retrieve. Also `OUTCOME_UNKNOWN` (#1035: the commit was attempted and not acknowledged; `details.status: "OUTCOME_UNKNOWN"`) |
 | `result.expired` | 410 | TTL elapsed; result no longer available |
 | `result.format_unsupported` | 400 | Unknown `format` parameter |
 | `result.too_large` | 500 | (During execution) result exceeded the size cap; execution failed |
-| `result.storage_unavailable` | 503 | Redis unavailable: during execution the execution fails; on a read the request is refused (§10.3's replay, `details.reason: event_log_unavailable`) and may be retried. 500 until v2.91 (#487) |
+| `result.storage_unavailable` | 503 | Also (#1035): the execution is `SUCCESS` — its commit is confirmed — but the caller result was never delivered (`details.reason: result_delivery_failed`); the status is not changed by a delivery failure and the business SQL is never re-run. Redis unavailable: during execution the execution fails; on a read the request is refused (§10.3's replay, `details.reason: event_log_unavailable`) and may be retried. 500 until v2.91 (#487) |
 
 ---
 
@@ -1614,7 +1654,7 @@ GET /executions?pipeline_id={id}&status={status}&offset=0&limit=50
 
 Filters:
 - `pipeline_id` — limit to one pipeline.
-- `status` — `RUNNING | SUCCESS | FAILED | ABORTED`.
+- `status` — `RUNNING | SUCCESS | FAILED | ABORTED | OUTCOME_UNKNOWN` (#1035: terminal; the commit was attempted and not acknowledged — see §6.4.6).
 - `started_after` / `started_before` — ISO 8601 timestamp range.
 
 Each page item carries the §10.2 metadata projection minus `result_url` /
@@ -1626,7 +1666,8 @@ result is unexpired):
 | `execution_id` | uuid | The execution's id |
 | `pipeline_id` | uuid | The pipeline that ran |
 | `pipeline_version` | int | The version of the pipeline that ran |
-| `status` | string | `RUNNING` \| `SUCCESS` \| `FAILED` \| `ABORTED` |
+| `status` | string | `RUNNING` \| `SUCCESS` \| `FAILED` \| `ABORTED` \| `OUTCOME_UNKNOWN` (#1035) |
+| `result_unavailable` | bool | #1035: `true` only on a `SUCCESS` whose commit is confirmed but whose caller result was never delivered (instance lost or store failed after the commit); `false` otherwise. Reported beside the status, never as one |
 | `draft_run` | bool | The version that ran was a draft at the time (or still is / was discarded) — an informational history label, never execution behaviour or promotion eligibility ([Versioning §8](versioning.md#8-executing-drafts)) |
 | `parameters` | object | The execution-time parameters the caller sent |
 | `started_at` | timestamp | Start of execution |
@@ -1639,7 +1680,7 @@ result is unexpired):
 | `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
 | `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
 | `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) \| `DASHBOARD` (#10 — a dashboard refresh started it; `executed_by` is the refreshing person, [Dashboards §5](dashboards.md#5-the-runtime); it writes no stored result and is cancelled only through its refresh's abort) |
-| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
+| `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child. Written with the terminal status (#1035 r3), and kept — the prepared result's count — on a `SUCCESS` with `result_unavailable: true`, so a run that had a caller result never reads as a zero-caller run |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
 | `parent_node_id` | string \| null | That node's id; null for a root |
@@ -1675,6 +1716,7 @@ Returns the execution record (without rows — use §7 for result data):
     "result_expires_at": "...",
     "result_row_count": 1204,       // null for a zero-caller pipeline, and for a `direct`-delivered child
     "result_size_bytes": 48213,
+    "result_unavailable": false,          // #1035: SUCCESS, commit confirmed, caller result never delivered
     "executed_by": "user-uuid",           // D11: the run's user — the session's, or the key's OWNER
     "executed_by_key_kind": null,         // "user" | "endpoint" | "server" when a key started it; null for a session
     "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT" | "SCHEDULE" | "DASHBOARD",
@@ -1685,6 +1727,8 @@ Returns the execution record (without rows — use §7 for result data):
   }
 }
 ```
+
+**Family settlement (#1035).** A child of a family that shares one local write transaction stays `RUNNING` (no result, no `completed_at`) until the root settles, then reports the root's final status — `SUCCESS`, `FAILED`/`ABORTED`, or `OUTCOME_UNKNOWN` — and its error. Its event history is held the same way: no terminal event until then, and one terminal event carrying that outcome afterwards. A `?root_execution_id=` listing therefore never shows a child ahead of its root. A duplicate `Idempotency-Key` inside the reservation TTL returns the same execution, unknown included.
 
 **Composition lineage.** The three lineage fields are the composition family's links ([Pipeline Contract §8.5](pipeline-contract.md#85-pipeline-nodes), [Metadata DB §4.6](metadata-db.md#46-pipeline_executions)) and are always present — `null` on a root rather than omitted, so "this is a root" and "this server does not report lineage" stay distinguishable. They answer the question a client is left with when a `node_completed` names a `child_execution_id` (§6.4.3): fetch that id here, and `parent_execution_id` / `parent_node_id` say where it came from. `root_execution_id` is never null (it is the execution's own id for a root), so grouping a family needs no special case. §10.1's listing carries the same fields — it is the same projection, minus `result_url` / `result_expires_at`.
 
@@ -2098,10 +2142,25 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
     "datasources": ["sales_db", "warehouse"],
     "parameter_sets": [ { "name": "acme/sales/region_filters", "current_version": 4, "body_hash": "sha256-..." } ],
     "visualizations": [ { "name": "acme/charts/monthly_revenue", "current_version": 1, "body_hash": "sha256-..." } ],
-    "dashboards": [ { "name": "acme/dash/revenue_overview", "current_version": 2, "body_hash": "sha256-..." } ]
+    "dashboards": [ { "name": "acme/dash/revenue_overview", "current_version": 2, "body_hash": "sha256-..." } ],
+    "endpoint_capabilities": {
+      "methods": ["POST", "PUT", "DELETE"],
+      "exact_pin": true,
+      "request_body_modes": ["none", "optional", "required"],
+      "method_grants": true
+    }
   }
 }
 ```
+
+**`endpoint_capabilities` (#1040, published-mutation-apis §7)** is what this receiver can import of a
+method-bearing API route: the methods it stores as their own identity, whether it imports a route on the
+sender's EXACT pipeline version (`exact_pin`), the request-body modes it understands, and whether it binds an
+exact method grant (`method_grants`). It describes the binary — what this deployment can store faithfully — never
+the `mutations-enabled` serving switch, so a receiver may import a mutation route it does not yet serve. A
+receiver that predates #1040 answers no such object, and the sender then refuses before building a batch
+(`409 endpoint.promotion.method_unsupported`, §18.2) rather than send a route the target would import as a `GET`
+or refuse.
 
 `parameter_sets` (#194 lane D, the record's §8.3), `visualizations` and `dashboards` (#10 L1c) are the same `(name, current_version, body_hash)` triple for the workspace's sets and released artifacts; a sender that predates an engine reads an inventory whose extra lists it ignores.
 
@@ -2147,6 +2206,33 @@ A **template-backed set is received** (#302): each entry's full parameter-set va
 
 Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-import-with-preserved-versions) lifecycle fields (`version`, `body_hash`, `released_at`), so the receiver's preserved-version import path applies unchanged: version numbers are honored, never renumbered; `body_hash` is recomputed and must match; a local DRAFT is never clobbered; a same-hash re-import is a no-op.
 
+**The `endpoints` arm's method entries (#1040).** A `GET` route travels as it always has — `path`, `pipeline`,
+`timeout_seconds`, `description` and its node `bindings`, pinned on the target to that pipeline's CURRENT
+version (the exact-pin transfer of a `GET` route is #879). A `POST`, `PUT` or `DELETE` route travels EXACTLY
+pinned and adds `method`, `pipeline_version`, `pipeline_body_hash` (the pinned pipeline version's content
+hash), `request_body` (its body mode: `none`, `optional` or `required`) and `grants` — the names of the source
+workspace's keys holding an exact grant of that method on that route; its `bindings` is always empty, because a
+mutation route is never granted by a node.
+
+```json
+{ "path": "/lending/v1/applications", "method": "POST", "pipeline": "acme/lending/apply",
+  "pipeline_version": 3, "pipeline_body_hash": "sha256-...", "request_body": "required",
+  "timeout_seconds": 30, "description": "", "bindings": [], "grants": ["lending-writer"] }
+```
+
+The receiver imports such an entry on THAT pipeline version, which the same batch or this deployment must hold
+RELEASED with the same content — never this deployment's current, never a reinterpretation: a version present
+here with different content refuses `409 pipeline.import.version_conflict`, an absent one
+`400 endpoint.pipeline_version.not_found`, a non-RELEASED one `409 endpoint.pipeline_version.not_eligible`. Version
+numbers of the API are the receiver's own (the pin is the portable identity): an absent route is created with
+v1 RELEASED and current; a route already current on the same pin is left alone; a route on another pin gains a
+new RELEASED version that becomes current. Each grant is bound as an exact grant of that method on the
+receiver's own route entity, by key NAME — a target missing a named key refuses `409
+endpoint.promotion.key_missing` before anything lands. An entry with no pin, no hash, an unknown body mode, a
+non-empty `bindings` or a method outside `POST`/`PUT`/`DELETE` refuses the batch `409
+endpoint.promotion.method_unsupported` (`details.unsupported_routes` naming each `path`) before anything is
+imported. Every refusal rolls the whole batch back.
+
 `source_env` is the sender's `deployment.name` and `key_fingerprint` a truncated SHA-256 of the key it presented — **never the key**. Both are recorded by the receiver against the import (`auth.promotion.accepted`), so a promoted row's provenance survives in the audit trail. Every promoted row is stamped with the receiver's own system service account ([Auth §4.5](auth.md#45-the-system-service-account-r7)) — the payload carries no user id that would mean anything locally.
 
 ```json
@@ -2169,8 +2255,11 @@ Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-impor
 | `parameter.import.missing_template` | 400 | A pushed set pins a template version neither in the batch nor stored here — refused before anything lands |
 | `parameter.validation.*` | 400 | A pushed set failed its validation on this deployment (the selector probe included — it runs BEFORE the batch's transaction, on this deployment's own datasources); `details.failures[]` lists every one |
 | `parameter.version.conflict` | 409 | A pushed set's landing refused: the id held by another workspace (`details.reason = id_taken`), a hash mismatch, or a taken version number — the batch rolls back whole, templates included |
+| `endpoint.promotion.method_unsupported` | 409 | A method entry this receiver cannot import exactly — no pin, no hash, an unknown body mode, node `bindings`, or a method outside `POST`/`PUT`/`DELETE` (#1040); `details.unsupported_routes` names each entry's `path` |
+| `endpoint.promotion.key_missing` | 409 | A `GET` entry's binding or a method entry's grant names a key this workspace does not have |
+| `endpoint.pipeline_version.not_found` / `.not_eligible` | 400 / 409 | A method entry pins a pipeline version this deployment does not hold, or holds but not RELEASED (#1040) |
 
-The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring` — happen before the request is made and never reach this endpoint.
+The whole batch rolls back on any of the above. The sender's own refusals — `pipeline.promotion.not_released`, `.not_newer`, `.missing_datasources`, `.target_is_authoring`, and `endpoint.promotion.method_unsupported` for a method route the target's inventory does not advertise (#1040, §18.1) — happen before the request is made and never reach this endpoint.
 
 ---
 
@@ -2178,7 +2267,13 @@ The whole batch rolls back on any of the above. The sender's own refusals — `p
 
 One exact version of a read-only pipeline served as a **`GET` API** at `/api/<category>/<version>/<path…>`, whose
 response is the `data_ready` payload — the first page plus the cursor — with no event handling on
-the client (this section is the contract). Ruling R-EP5: the **category** is the engineer's
+the client (this section is the contract). Since #1037 a route's identity is **method + path**: a
+`POST`, `PUT` or `DELETE` route may be published at the same grammar — its body arrives with #1038, and
+since #1039 it is SERVED: one `Idempotency-Key` per request, one durable reservation before any business
+SQL, and one execution per reservation however many replicas the retries reach (§19.3a). While the operator
+gate [`mutations-enabled`](configuration.md#322-published-endpoints) is off (the default) a FRESH mutation
+answers `503 endpoint.mutations_disabled` before any reservation. Ruling R-EP5: the
+**category** is the engineer's
 namespace — a business domain, a team, a product line — and the product's own API is simply its
 reserved namespace: a category matching `v[0-9]+` (`/api/v1/…` today, any `v<n>` tomorrow) or the
 literal `api` can never be published, so a published path cannot shadow a product route *by
@@ -2204,12 +2299,17 @@ built — a row written around the publish path is never served. The reservation
 contract: the catch-all handler's own pattern excludes those categories, so an unknown
 `/api/v1/…` path answers the product's 404, not the endpoint one.
 
-**Ambiguity is refused, not resolved.** `/nyc/v1/{x}` and `/nyc/v1/b` both match
+**Ambiguity is refused, not resolved — per method (#1037).** `/nyc/v1/{x}` and `/nyc/v1/b` both match
 `GET /api/nyc/v1/b`, so
 publishing the second is `409 endpoint.path_conflict` naming the first. Literal-beats-variable
 precedence is deliberately NOT offered in v1: because ambiguity cannot be published, at most one
-pattern can match a request, and a reader of the registry can tell what a URL does by finding the
-one row it matches. `UNIQUE (path_pattern)` is deployment-wide — a URL is global.
+pattern can match a request **of one method**, and a reader of the registry can tell what a URL does by finding the
+one row it matches. `UNIQUE (path_pattern, method)` is deployment-wide — a URL is global, and
+since #1037 a URL is global **per method**: the same pattern may carry a `GET` and a `POST` route
+as two entities with independent versions, pins and grants, and a conflict is judged against the
+published routes of the SAME method only. A cross-workspace conflict is redacted: the refusal
+names no path the caller's workspace does not publish (`details` carry `path` only for an
+own-workspace blocker, `Named`/`Redacted` in metadata-db §4.13).
 
 Publish and unpublish run under the workspace's writer guard, then the deployment-wide registry key, so the
 ambiguity check reads every committed path (#841, [release-dependencies design §4.4](superpowers/specs/2026-10-13-release-dependencies-design.md#44-the-metadata-writer-protocol-amended-2026-11-10-841-g0)).
@@ -2233,13 +2333,24 @@ the datasource.
 
 That rule is what makes `GET` safe here, and it is not a formality: `GET` is retried on timeout,
 preloaded by browsers and followed by crawlers. It is checked when the API is created and at every draft save,
-and **re-checked on every serve** of the exact pipeline version the API's current version pins. The pin never
+and **re-checked on every serve** of the exact pipeline version the API's current version pins. **Since #1037 the
+read-only rule is a `GET` rule** — a non-GET route may pin a writing pipeline (its runs are gated by
+`mutations-enabled` and, later, #1039's admission rules); every rule that is about the PIN rather than
+the verb — the version exists in the workspace, is eligible under the posture, and every path variable
+names a declared parameter — runs for every method. The pin never
 moves when the pipeline's current version moves: a later pipeline release reaches the URL only through a new API
-version that pins it, released or switched to explicitly. Every serve also runs read-only at the connection (#463): each
+version that pins it, released or switched to explicitly. Every `GET` serve also runs read-only at the connection (#463): each
 `DQL` datasource statement of the pinned version and of its composed children runs in the per-lease read-only mode,
 so on the dialects marked `DATABASE` in [DAG Executor §8.2](dag-executor.md#82-error-code-mapping)'s table the
 database itself refuses a write (`pipeline.node.query_execution_failed`), and on the others the rule above and a
 SELECT-only database user remain the guard.
+
+**A route must be able to deliver the body its pin requires (#1038).** A `GET` route carries no body, so
+pinning a pipeline version that declares `request_body` with `required: true`
+([Pipeline Contract §3.4](pipeline-contract.md#34-structured-request-body)) refuses with
+`409 endpoint.request_body_incompatible` naming the pipeline and the method — at create, at version save, at
+release and at promotion import. A mutation route may pin it; a pipeline whose body is optional may sit behind
+any method (a `GET` serve supplies none).
 
 Every path variable must name a declared parameter of that version
 (`400 endpoint.path_variable_unknown`); the pipeline may declare more, and they come from the
@@ -2253,6 +2364,18 @@ and a session is `401`. Authorisation is the key's hierarchical bindings
 ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): an `endpoint` key (role
 `api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
 path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
+
+**A non-GET route adds the method-grant rule (#1037, [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).**
+A browser session is refused `401` before anything resolves — CSRF processing included. What is
+VISIBLE to the presenting key is, per method: the `GET` route iff the ancestor walk above admits
+it, and a mutation route iff the key holds that route's **exact grant** (one entity — method plus
+full pattern; never inherited, never the sibling method's). The refusal discipline is opaque: a
+method that is not visible is simply absent — a `405 endpoint.method_not_allowed`'s `Allow` lists
+only the VISIBLE methods, and a path where NO method is visible answers the ordinary `404`
+`endpoint.not_found` with no `Allow`. A visible, granted mutation is then admitted as §19.3a states; the gate
+[`datapipelines.endpoints.mutations-enabled`](configuration.md#322-published-endpoints) off (the
+default) withholds only a FRESH request — `503 endpoint.mutations_disabled` before any reservation —
+never the replay of an admitted one or its polling.
 
 The accepted parameters are the pinned pipeline version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
@@ -2274,6 +2397,22 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
   (v2.45, #268) — the pipeline must be re-saved;
 - a value over 4 KB is `endpoint.request.value_too_large`.
 
+**The request body of a mutation route (#1038; served since #1039).** A mutation route whose pinned pipeline declares `request_body` reads the entity as one
+JSON object or array of objects through the same bounded decoder as framework execute's `request_body` fixture
+(§6.1.4), so both surfaces decode one document to the same value. In order: no entity is absent — refused with
+reason `required` when the declaration requires one; a `Content-Encoding` other than identity, a `Content-Type`
+other than `application/json`, or a charset other than UTF-8 is `415 endpoint.request.unsupported_media_type`
+(`details.reason` `content_encoding`, `media_type` or `charset`, never the header's value); a body on a `GET` or
+on a route whose pin declares none is reason `not_accepted`; a form or multipart body (`application/x-www-form-urlencoded`,
+`multipart/form-data`) is `415` even when the container has already consumed it, unless the request declares
+`Content-Length: 0` — a declared zero length sent nothing and reads as no body (#1039); more than
+[`datapipelines.endpoints.body-max-bytes`](configuration.md#322-published-endpoints) entity bytes (counted while
+reading, so a chunked body stops at the cap), more nesting than `body-max-depth`, or one oversized token is
+`413 endpoint.request.too_large` with `details.reason` and `details.limit`; malformed JSON, invalid UTF-8, a
+duplicate member, a scalar or null root, a non-object array element or a number out of range is one
+`endpoint.request.body_invalid` entry (`parameter` null, `reason` naming which) of the `400
+endpoint.request.invalid` above. No refusal echoes a supplied value.
+
 Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
 `page-max-rows`) are honoured; an unparseable value reads as absent, because the server clamps
 anyway. `Accept` must admit `application/json` (`*/*` and an absent header do), else `406`.
@@ -2289,6 +2428,92 @@ SESSION is refused here exactly as it is on the serve route — this is a machin
 session gets the same `401 auth.session.required` shape. The routes are delegated from the serve
 catch-all (the business path is variable-length, so no separate mapping can exist), and
 `EndpointAuthorizer`'s bound-walk runs before any read.
+
+### 19.3a Serving a mutation: one key, one reservation, one execution (#1039)
+
+**Every published `POST`, `PUT` and `DELETE` carries an `Idempotency-Key`** — a bodyless `DELETE` and a mutation
+route over a read-only pipeline included. Its grammar is 1–128 characters of `A–Z a–z 0–9 . _ : -`; a missing or
+malformed key is an `endpoint.request.idempotency_key_invalid` entry (`reason` `missing` or `malformed`, the value
+never echoed) of the `400 endpoint.request.invalid` above, listed with any body defect, before anything is
+looked up or run. A `GET` ignores the header and keeps every behaviour of §19.3–§19.4.
+
+**The replay scope** is the workspace, the presenting key, the method, the concrete business path and the client
+key; the **fingerprint** is the method, the concrete path, the typed path and query values and the canonical
+body (object member order immaterial, array order material, an absent body distinct from an empty one). The
+values are the ones the reservation's ORIGINAL pin binds — its declared types, with its declared defaults applied —
+so `quantity=01` and `quantity=1` on an `INTEGER` parameter are one request, an omitted optional parameter equals
+its explicit default, and a `DECIMAL` keeps its scale (`1.0` is not `1.00`). Both are
+stored only as keyed digests (Metadata DB §4.61) — never the client key, a value or the body. A reservation
+lives for [`datapipelines.idempotency.ttl-seconds`](configuration.md) (default `86400`); after that the scope is
+free and the same key is a fresh request. A new key — and a rotated API key — is a different scope: a new `POST`
+may deliberately send identical JSON twice under two keys.
+
+**Admission, in order** (published-mutation-apis §3–§4):
+
+1. the envelope — key, media type, body bounds (`400`/`413`/`415` above), before any lookup;
+2. the live reservation for the scope: when one exists the request is a **retry**. A different fingerprint is
+   `409 idempotency.key_reused_for_different_request` with no details; an identical one is answered from the
+   ORIGINAL execution by the table below, validated against the version the reservation pinned — a later release
+   never changes how a retry is judged, and nothing reruns. A retry meets the same result negotiation as a first
+   call — an `Accept` that admits no JSON is `406 endpoint.not_acceptable` (§19.6) at any state of the original
+   run, and the reservation stays — and a retry the original pin's parameter rules refuse is that pin's `400`;
+3. a fresh request only: the operator gate (`503 endpoint.mutations_disabled` while off), the route's current
+   pin (its own `503`), the pin's parameter and body rules (§19.3) and its read-only posture;
+4. one atomic reservation under the scope, with the execution id fixed before any business SQL. Two identical
+   requests racing — on one replica or on several — reserve once; the loser answers from the winner's execution;
+5. the run, with bounded diagnostics: a failure leaves only its code, never engine text or a supplied value.
+
+A reservation store that cannot be read or written, or a reservation whose state is indeterminate, is
+`503 idempotency.reservation_unavailable` before any new business SQL — the same key may be retried. That
+includes a release the store did not confirm and an execution record it could not read: only CONFIRMED state
+answers (a recorded run its row, a confirmed lost release `202`), never an assumed one. A metadata read that
+fails while the pin resolves — the current pin of a fresh request, or the original pin of a retry or takeover —
+is `503 endpoint.dependency_unavailable`, distinct from a pin confirmed absent or unservable (its own refusal,
+`endpoint.pipeline_not_released`); this request starts no SQL. A failed lookup before takeover leaves an existing
+reservation intact. During takeover, a confirmed conditional release frees a request that never started;
+an unconfirmed release retains its reservation and answers `503 idempotency.reservation_unavailable`.
+These refusals do not establish the outcome of any execution already admitted. If the admitting replica stops
+after reserving and before the execution row exists, an identical retry after
+[`mutation-start-window-seconds`](configuration.md#322-published-endpoints) (default `60`) takes the start claim
+over and starts the ORIGINAL pin under the ORIGINAL execution id; the execution row's primary key fences the
+start, so the window decides how long such a request waits, never whether it can run twice. A delivery failure
+— a client that never read its answer — never clears a reservation: the retry reads the stored outcome.
+
+**The terminal-state table** — one shaping for the first answer and every identical retry:
+
+| Execution state | Answer |
+|---|---|
+| running, or not yet recorded | `202` — `execution_id`, `status: RUNNING`, `status_url`, `result_url` |
+| `SUCCESS` with a caller result | `200` — the §19.4 payload plus `status_url`; a retry pages the stored result, it does not rerun |
+| `SUCCESS`, no caller node | `200` — `status: SUCCESS`, `status_url` and a `node_stats` summary (node id, status, row count) |
+| `SUCCESS`, result expired | `410 result.expired` with `status: SUCCESS`, the id and `status_url` |
+| `SUCCESS`, result storage unreadable | `503 result.storage_unavailable`, likewise |
+| `FAILED` | `409` with the run's bounded cause code (`pipeline.script.rejects_strict`, a pool or concurrency code, …) |
+| `ABORTED` | `409 pipeline.execution.aborted` |
+| `OUTCOME_UNKNOWN` | `409` with `status: OUTCOME_UNKNOWN`, its code and `status_url` — reconcile; never replay automatically |
+
+A failed or aborted execution keeps its reservation: a deliberate new attempt takes a new key. No copy of an
+answer is stored — a retry re-reads the execution and the result store, so result TTL (§7.4) and replay
+retention are independent; terminal status polling outlives the result.
+
+**Polling a mutation-started run.** `status_url` and `result_url` are the §19.3 paging routes under the concrete
+business path the client called. They serve only the INITIATING key, and only while it still holds the
+originating route-and-method grant — a write-only key polls its own run without any `GET` grant, and a `GET`
+grant on another route never substitutes. Another key, another route, another workspace, a revoked grant or a
+disabled route is the ordinary opaque `404`. The status projection relays no parameter values and no failure
+text; a zero-caller run's result route answers `204`. A retry is re-authorised like a new request and reveals
+no prior result: a disabled or unpublished route is the opaque `404`, and so is a revoked grant when the key holds
+no other method on the path; when it still holds another, the retry is `405 endpoint.method_not_allowed` whose
+`Allow` names only the methods the key may call there (the §19.3 method rule). Polling never answers `405` — every
+mismatch there stays the opaque `404`. Turning `mutations-enabled` off withholds fresh
+requests only: retries and polling of admitted runs keep working while writes drain.
+
+**Metrics and audit.** Every served mutation counts once on `datapipelines.endpoints.mutations{method,outcome}`
+(`outcome` one of `accepted`, `completed`, `failed`, `not_started`, `replayed`, `refused`, `disabled`,
+`key_reused`, `reservation_unavailable` — [Observability](observability.md)). An admitted run writes the serve audit
+row with outcome `started` and then one terminal row (`completed`, `failed`, `accepted` on a `202`, `not_started`);
+a retry writes `replayed`. The rows carry the endpoint, method, API version and execution id — never a body, a
+value or a key.
 
 ### 19.4 The response
 
@@ -2312,27 +2537,31 @@ is fine, and the answer is coming.
 
 ### 19.5 Managing endpoints
 
-`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=` — never by a path
+`POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=&method=` (`method`
+defaults to `GET`; #1037) — never by a path
 segment, because a `path_pattern` contains `/` and an encoded `%2F` is refused below routing on
 the pinned Tomcat (the measured reason §8 moved templates to query addressing). The `GET` listing
 answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-404-rule)): an endpoint is
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
-the endpoint that publishes it.
+the endpoint that publishes it. Each row carries its `method`.
 
-**Create (#786).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
+**Create (#786, #1037).** `POST /api/v1/endpoints` takes `path`, `pipeline`, **`pipeline_version`** (REQUIRED, an integer of
 at least 1 — the exact pin, an authored input like a pipeline node's `template_version`), `timeout_seconds` and
-`description`, and answers `201` with the entity. It writes the entity and its **v1 DRAFT** in one transaction —
+`description`, and — since #1037 — **`method`** (optional, default `GET`; one of `GET`, `POST`,
+`PUT`, `DELETE` — anything else is `400 endpoint.method_invalid`), and answers `201` with the entity.
+The conflict check runs against the same method's routes (§19.1). It writes the entity and its **v1 DRAFT** in one transaction —
 no path leaves an entity without a version — and that draft is the API's current version: on an authoring-enabled
 deployment it serves under the normal runtime checks (the entity is enabled, the caller's key is bound, the pinned
 pipeline version is eligible). Creation is an authoring operation: a deployment with authoring disabled refuses it
 with `409 endpoint.authoring_disabled`, and there is no release to perform there. A promotion receiver creates an
 absent API through its own receiver-only import (§18), never through this route.
 
-**Delete (#786).** `DELETE /api/v1/endpoints?path=` is the **guarded entity deletion** (versioning §3.2, the
+**Delete (#786, #1037).** `DELETE /api/v1/endpoints?path=&method=` is the **guarded entity deletion** (versioning §3.2, the
 parameter-set entity rule): an API is deleted — with its versions — only while every version it holds is a DRAFT.
 A RELEASED version, current or not, or a DISCARDED one refuses `409 endpoint.version.last_release` (`details`: this
 API's blocking `version` and its `status`) and nothing is removed: the entity, its current pointer, its versions and
-its key bindings all stay. Discard is per version (below); an API that was ever released keeps its history. The
+its key bindings all stay — the sibling method's entity at the same pattern is untouched by the delete
+(a `DELETE` management call never reaches the other route). Discard is per version (below); an API that was ever released keeps its history. The
 check reads the versions under the entity row lock in the transaction that deletes, after the writer guard and the
 registry key, so no release lands between the check and the delete. A legacy row (below) never serves and stays
 deletable whatever its converted version's status.
@@ -2396,28 +2625,100 @@ name** — the bindings are read with the workspace predicate in the query (2026
 neighbouring workspace's key bound at an equal node (legal: only the exact `path_pattern` is
 unique deployment-wide, path trees may overlap) never rides into the batch; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
+**Method routes travel exactly pinned (#1040; #1037 refused them).** A published `POST`, `PUT` or
+`DELETE` route over a promoted pipeline travels with its exact pipeline version, that version's content hash,
+its body mode and its grants by key name (§18.2); the receiver imports it on that exact version, as its own
+route, and binds each grant to its own route entity. The sender reads the target's
+`endpoint_capabilities` (§18.1) FRESH before building the batch: a target that does not advertise the route's
+method, exact pins, its body mode or method grants refuses the whole batch on the sender with `409
+endpoint.promotion.method_unsupported` (`details.unsupported_routes` naming each route's `method` and `path`,
+`details.target_advertises` whether the target answered capabilities at all) before anything is pushed; a
+receiver refuses an entry it cannot import exactly with the same code
+([Pipeline Contract §13.14](pipeline-contract.md#1314-published-endpoints)).
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
+
+### 19.5a Authoring a mutation route (#1040)
+
+**What an author sees before a save.** Creation is `POST /api/v1/endpoints` (or `endpoints_create`) with an
+optional `method` — absent is `GET`, the pre-method default, and anything but `GET`/`POST`/`PUT`/`DELETE` is
+`400 endpoint.method_invalid` — and an exact `pipeline_version`. Every management read (§19.5 `GET`, and the
+MCP `endpoints_list` / `endpoints_get` / `endpoints_create` answers) carries the route's `method`, its current
+version's exact `pipeline_version` and its **`request_body`**: the pinned version's body mode and the SCRIPT
+transformers that read the body, derived from the exact pin (never stored, so it cannot disagree with what the
+serve path admits):
+
+```json
+"request_body": { "mode": "required", "readers": [ { "node_id": "shape", "template": "acme/lending/shape.jsonata@2" } ] }
+```
+
+`mode` is `none` for a pipeline that declares no body (a `GET`, or a bodyless `DELETE`), `optional` or
+`required`; `request_body` is `null` while the route has no current version or its pin no longer resolves. The
+API's version page ([UI Screens §4.18b](ui-screens.md)) shows the same — method, exact pin, body mode, the
+reading transformers and the keys granted that method on the route — and its draft dialog shows the route's
+method as fixed (a route's method is its identity; a different method is a different route, created beside it)
+and each pickable pipeline version's body contract, so a draft that moves the pin shows what callers must send
+before it is saved. Release, discard, restore and switch address one route's versions: a `GET` and a `POST` at
+one path keep independent version histories.
+
+**Grants on the Keys page.** The `/api-keys` association form offers, beside the `GET` tree's nodes, one
+checkbox per published mutation ROUTE (`POST /lending/v1/applications`): ticking it is `api_key.bind` with that
+method on exactly that route; un-ticking it unbinds exactly that method. A save changes only the routes the
+form showed (a route published after the page was drawn is never unbound by a save that did not offer it), a
+`GET` node never grants a mutation route, and a hand-crafted grant value naming `GET`, an unknown method or no
+path is `400 endpoint.method_invalid` with nothing written. A write-only key holds grants and no node.
+
+**Rollout, in order.** (1) Upgrade every deployment that will hold the route — a receiver must advertise
+`endpoint_capabilities` before a sender will promote a method route to it (§18.1); (2) set
+`datapipelines.endpoints.mutations-enabled=true` where it is to be SERVED (a route may be imported, authored
+and granted while the gate is off — fresh calls answer `503 endpoint.mutations_disabled`); (3) publish and
+release the route on its exact pin; (4) mint a key and grant it the route's method; (5) call with an
+`Idempotency-Key` (§19.3a). **Recovery:** turning the gate off drains — fresh mutations refuse while retries
+and polling of admitted runs keep answering (§19.3a); un-ticking a grant refuses that method at once (`405`
+naming the methods the key still holds, `404` when it holds none); switching the route to an earlier version
+changes what fresh requests run, never how an admitted retry is judged. Status and polling are §19.3a's.
+
+**Limits** are §19.3's: the body is bounded by `body-max-bytes`, `body-max-depth` and the token bound
+(`413 endpoint.request.too_large`), counted while reading — a chunked body stops at the cap; a reservation lives
+`datapipelines.idempotency.ttl-seconds`. **Repeat semantics** are §19.3a's: one `Idempotency-Key` is one
+execution however often it is retried; a deliberate second write takes a new key, and a repeated `PUT` or
+`DELETE` under new keys runs again — idempotent at the resource only when the pipeline's own SQL is.
+
+**`DELETE` with a body ([RFC 9110 §9.3.5](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.5)).** RFC 9110
+gives content in a `DELETE` no generally defined semantics and warns that some implementations reject it. This
+product defines it per route: a `DELETE` route whose pinned pipeline declares `request_body` reads the body
+exactly as a `POST` does, and a `DELETE` route whose pin declares none refuses any body (`reason:
+not_accepted`). **Supported:** an HTTP/1.1 client calling the application's own listener directly — the
+in-repo proof sends both a `Content-Length` and a chunked body, with `java.net.http`. **Not promised:** a
+reverse proxy, load balancer, CDN or client library between the caller and the listener may drop, refuse or
+not forward a `DELETE` body; no proxy is bundled or certified, so an operator who places one in front verifies
+that it forwards `DELETE` content unchanged — or publishes the operation as a `POST` instead. A bodyless
+`DELETE` has no such dependency.
 
 ### 19.6 Status codes, complete
 
 | Code | When |
 |---|---|
-| 200 | Result inline — the first page plus the cursor |
-| 202 | The endpoint's timeout elapsed; the execution continues (R-EP3) |
-| 400 | Request validation — every defect at once in `details.errors[]` |
+| 200 | Result inline — the first page plus the cursor; for a mutation also a zero-caller `SUCCESS` summary, and every identical retry of a stored success (§19.3a) |
+| 202 | The endpoint's timeout elapsed; the execution continues (R-EP3) — for a mutation also a retry of a run still in progress |
+| 204 | The result route of a mutation-started run with no caller node (§19.3a) |
+| 400 | Request validation — every defect at once in `details.errors[]`; a mutation without a well-formed `Idempotency-Key` included (#1039) |
 | 401 | No or invalid API key; a browser session |
 | 403 | Key not bound / wrong workspace / wrong key kind |
 | 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
-| 405 | Any method but `GET`, with `Allow: GET` |
+| 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
 | 406 | An `Accept` this surface cannot satisfy |
+| 409 | A mutation's `Idempotency-Key` reused with a different request (`idempotency.key_reused_for_different_request`); a mutation run that ended `FAILED`, `ABORTED` or `OUTCOME_UNKNOWN`, with its bounded code (§19.3a); a `GET` route whose pin is not side-effect-free at publish (`endpoint.pipeline_not_readonly`) |
+| 410 | A mutation run that succeeded and whose result has expired — `result.expired` with `status: SUCCESS` (#1039) |
+| 413 | A mutation's request body over the byte, depth or token bound — `endpoint.request.too_large` (#1038) |
+| 415 | A mutation's request body with an unsupported media type, charset or content encoding — `endpoint.request.unsupported_media_type` (#1038); a form or multipart body unless it declares `Content-Length: 0` (#1039) |
 | 429 | Rate limit or concurrency limit, with `Retry-After` |
 | 500 / 502 | Pipeline failure, mapped by [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) (datasource connection failures are `502`) |
-| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version |
+| 503 | The API's current version, or the exact pipeline version it pins, is not servable under this deployment's posture, or is no longer side-effect-free. The body names no version. Since #1037 also `endpoint.mutations_disabled`: an otherwise-authorized FRESH mutation refused by the operator gate `datapipelines.endpoints.mutations-enabled` before any reservation (since #1039 a retry of an admitted request is answered regardless). Since #1039 also `idempotency.reservation_unavailable` (the reservation store unreadable or indeterminate — nothing new ran), `endpoint.dependency_unavailable` (the metadata store while the pin resolves) and `result.storage_unavailable` (a succeeded mutation whose result cannot be read) |
 
 ### 19.7 Not in v1
 
-`POST` endpoints (parameters in a body, side-effecting pipelines — the read-only rule is what
-makes `GET` safe, and a write surface needs its own ruling); anonymous or embed tokens for public
+A `PATCH` route, form or multipart bodies, vendor `+json` media types and non-UTF-8 charsets (the `POST`,
+`PUT` and `DELETE` surface is served since #1039 under §19.3a's key-and-reservation rule); anonymous or embed tokens for public
 dashboards; response caching across callers (results are per execution by design); CSV/Arrow by
 `Accept` (the cursor's `format` already serves them); custom domains.
 
@@ -2473,6 +2774,8 @@ lake family's gate: the lake showcase's endpoint pays S3 egress on every call, s
 and bound only while a budget stands behind it (`max-requests` > 0).
 
 ---
+
+**Node values stay private (#1043).** A published mutation's execution — and every child it composes — keeps no value a node computed in its ordinary history: the node statistics (`context_value` / `context_values`), the lifecycle events and the terminal Context snapshot in the execution row carry status, codes, timing, counts and the declared keys, never the values; the run's own inputs (org config, platform keys, typed parameters) stay. Polling, execution reads and the replay answer therefore never show a transformer's output. The only place such a value is kept is an administrator's capture (§26).
 
 ## 20. Schedules
 
@@ -2974,8 +3277,8 @@ ignored, as is any field the table does not name. Values are form-encoded (`+` i
 
 | Query field | Rule |
 |---|---|
-| any value | at most 200 characters and valid UTF-8, checked before any grammar; otherwise `details.reason = value_too_long` |
-| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable path ([§19.1](#19-published-endpoints)), and a datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
+| any value | at most 200 characters and valid UTF-8, checked before any grammar; an `api_endpoint` name's uppercase `POST `, `PUT ` or `DELETE ` prefix is counted separately, so its path retains the full 200-character budget (the complete name is at most 205, 204 or 207 respectively). Other fields and families retain the 200-character limit; otherwise `details.reason = value_too_long` |
+| `name` | required for `pipeline`, `template`, `parameter_set`, `visualization`, `dashboard`, `api_endpoint` and `datasource`; forbidden for `schedule`. The family's own native name grammar decides it, never a repository lookup: pipeline and template names follow [pipeline-contract §3.2](pipeline-contract.md) and [Templates §3.2](templates.md), which parameter sets, visualizations and dashboards share. An API's name is its immutable ROUTE KEY ([§19.1](#19-published-endpoints); #1037): a GET route's name is its path, a mutation route's is `METHOD path` with ONE space (`POST /shop/v1/orders`; in a query string the space may travel as `+`, which the strict decoder maps back), so GET and POST at one path are two roots with their own trees. A bare path is a GET (the pre-#1037 spelling, byte-identical to every stored link); `GET /x`, an unknown or lower-case method, or a doubled space is `name_invalid`. A datasource name is `[a-z0-9_-]{1,63}` ([Datasources §3.3](datasources.md)). Slashes stay in the value. A refused name is `name_invalid` |
 | `id` | required instead of `name` for `schedule`, in the canonical 36-character lower-case UUID form, otherwise `id_invalid`. `id` on any other family is `selector_incompatible` |
 | `version` | required for the six artifact families; forbidden for `schedule` and `datasource` (`selector_incompatible`). Decimal digits only, no sign or leading zeros, `1 ≤ n ≤ 2147483647`. An absent, non-integer, `current` or out-of-range value is `version_invalid` |
 
@@ -3083,10 +3386,87 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 ---
 
+## 26. Runtime capture of published mutations
+
+A workspace administrator's temporary, private capture of what a published `POST`, `PUT` or `DELETE` route's transformers produced (#1043; published-mutation-apis design record §6, §7). Capture is **off** for every route until an administrator opens a window, and there is no configuration switch or request header that turns it on: a request's `DP-Correlation-Id` can only *narrow* a window an administrator opened.
+
+**Who.** Every route below declares a session-only permission ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)): `execution.capture.manage` (§26.1–§26.3) and `execution.capture.read` (§26.4), held by the workspace administrator and the super admin. Every key kind and key role is refused `403 auth.role_required` before the handler — an administrator-role `mcp` key included — and the handler checks the interactive session again (`403 auth.session.required`). Current membership and role are re-read on every request, so a demoted administrator loses these routes on the next call. Writes are `POST`s under the session's CSRF protection. Every answer, refusals included, is `Cache-Control: no-store`; every refusal uses the §4.2 envelope and is catalogued in [pipeline-contract §13.27](pipeline-contract.md#1327-runtime-capture). Nothing here grants execution, datasource or ordinary history access.
+
+**What is kept.** Only the declared value-mode outputs of SCRIPT transformers (`context_key`), after their gate, invariants and strict check passed, keyed by node and output key, as the JSON text they were written to the Context with. Never a request body or header, an input envelope, a credential, a rejection reason, a table output or staging row, external SQL, or another Context value. A declared output can itself contain personal data; the administrator screen says so. The run's total stored bytes are bounded by `datapipelines.script.max-value-bytes` (default `1048576`) across all its nodes; a value that does not fit is stored as an omission marker with its reason and no preview. Captured runs keep **no** node value in their ordinary history either: a published mutation's node statistics, lifecycle events and terminal Context snapshot carry status, codes, timing, counts and declared keys, never the values (§19.3a).
+
+**When.** The decision is taken once, in the transaction that writes the mutation's reservation (§19.3a), at an admission instant read after every database wait of that write ([Metadata DB §4.61](metadata-db.md#461-published_mutation_reservations)): a window is applied when it is open at the admission instant (half-open: from `started_at` until `ended_at` or `deadline_at`), names the same route ENTITY and method, and either has no filter or its filter equals the request's effective correlation UUID. A stop and an admission are ordered by the database: whichever commits first decides. Identical retries, replays and start takeovers reuse the stored decision whatever the window does later and whatever correlation they carry; a run admitted inside a window may finish after it. A route unpublished and published again at the same path is a new entity and inherits no window. The detail expiry is fixed at admission (`admitted_at + capture-detail-retention-hours`, [Configuration §3.22](configuration.md#322-published-endpoints)) and later configuration never extends it.
+
+### 26.1 List a route's windows
+
+`GET /api/v1/endpoints/{id}/captures` → `200`
+
+```json
+{ "data": {
+  "endpoint_id": "8d6f…", "method": "POST",
+  "active": { "capture_id": "c41a…", "endpoint_id": "8d6f…", "method": "POST", "path_pattern": "/shop/v1/orders",
+              "correlation_id": null, "started_at": "2026-11-22T10:00:00Z", "deadline_at": "2026-11-22T10:15:00Z",
+              "ended_at": null, "end_reason": null, "active": true },
+  "captures": [ { "capture_id": "c41a…", "…": "…", "execution_ids": ["0f3e…"] } ] } }
+```
+
+`active` is the open window or `null`; `captures` is the ten most recent windows, newest first, each with the executions it captured (newest first, bounded). `end_reason` is `stopped`, `expired` (the deadline passed, whether or not anything recorded it) or `null`. An unknown route, or another workspace's, is `404 endpoint.not_found`.
+
+### 26.2 Open a window
+
+`POST /api/v1/endpoints/{id}/captures` with no body (any `Content-Type`), `{}`, or `{"correlation_id": "<uuid>"}` → `201` with the window (§26.1 shape). The deadline is `started_at + datapipelines.endpoints.capture-window-seconds` (default 900), stored now. Audited as `execution.capture.started` ([Auth §10.1](auth.md)).
+
+| Refusal | Answer |
+|---|---|
+| a `GET` route | `400 execution.capture.invalid`, `details.reason = method_not_capturable` |
+| a filter that is not one UUID, a non-string filter, any other body field, a body that is JSON but not one object | `400 execution.capture.invalid`, `details.reason = correlation_id_invalid` (the value is never echoed) |
+| a body that is not JSON, or nested past the request bound ([Pipeline Contract §13.21](pipeline-contract.md#1321-request-limits)) | `400 execution.capture.invalid`, `details.reason = malformed_json`, the house shape of every string-body route; the message names a bound breach and is otherwise constant, quoting none of the body |
+| unknown route, or another workspace's | `404 endpoint.not_found` |
+| a window is already open for this route and method | `409 execution.capture.already_active`, `details.capture_id` and `details.deadline_at` name it; a window past its deadline does not count — this start closes it as `expired` |
+
+### 26.3 Stop a window
+
+`POST /api/v1/endpoints/{id}/captures/{captureId}/stop` → `200` with the window. It names ONE window, so a delayed stop can never close a newer one. Idempotent: an already ended window answers its own state and writes no audit row; a stop at or after the deadline records `expired`. Unknown window on that route: `404 execution.capture.not_found`. Audited as `execution.capture.stopped`.
+
+### 26.4 Read a captured execution
+
+`GET /api/v1/executions/{executionId}/capture` → `200`
+
+```json
+{ "data": {
+  "execution_id": "0f3e…", "capture_id": "c41a…", "endpoint_id": "8d6f…", "method": "POST",
+  "admitted_at": "2026-11-22T10:01:12Z", "expires_at": "2026-11-23T10:01:12Z",
+  "execution_status": "SUCCESS", "capture_status": "complete",
+  "values_captured": 2, "values_omitted": 1, "write_failures": 0, "bytes_used": 412,
+  "values": [
+    { "node_id": "shape", "output_key": "order_total", "state": "captured", "value_json": "1250.5",
+      "value_bytes": 6, "omitted_reason": null, "recorded_at": "2026-11-22T10:01:13Z" },
+    { "node_id": "notes", "output_key": "note", "state": "omitted", "value_json": null,
+      "value_bytes": null, "omitted_reason": "byte_budget_exhausted", "recorded_at": "2026-11-22T10:01:13Z" } ] } }
+```
+
+`value_json` is the stored JSON text as a string — never re-parsed or rendered; a client displays it as text. `capture_status`: `recording` (the run has not finished), `complete` (finished and its closing summary was written with no store failure: `values` is the whole set — an empty list then means the pipeline declared no value-mode output), `incomplete` (a value write failed, or the closing summary was not written: the set may be partial). The summary is written asynchronously after the run's last value — the caller's answer never waits for it — so a run that has just finished can read `incomplete` for a moment before its summary lands; re-read to settle it. A value or summary that reaches storage after `expires_at` is never written. Readable after the window stopped, until `expires_at` — `410 execution.capture.expired` at that instant, even before the purge. Audited as `execution.capture.inspected`.
+
+| Refusal | Answer |
+|---|---|
+| an execution never captured, another workspace's, or an unknown id | `404 execution.capture.not_found` — the same answer for all three |
+| a captured execution at or after `expires_at` | `410 execution.capture.expired`, `details.expired_at` — from that instant, whether or not the retention tick has deleted the rows ([Metadata DB §8.6](metadata-db.md#86-runtime-capture-detail)) |
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v2.135 | 1043 (#1043) | **Additive.** New **§26 Runtime capture of published mutations**: `GET`/`POST /api/v1/endpoints/{id}/captures`, `POST …/captures/{captureId}/stop` and `GET /api/v1/executions/{id}/capture`, session-only (`execution.capture.manage` / `execution.capture.read`; every key refused), `Cache-Control: no-store`, the admission-time decision and its retry/replay reuse, the byte budget and omission markers, `capture_status` (`recording` / `complete` / `incomplete`) and the four `execution.capture.*` refusals. A published mutation's ordinary history keeps no node value (§19.3a's run) — status, codes, timing, counts and keys only. |
+| 2026-11-22 | v2.134 | 1040 (#1040) | **Additive.** §18.1's inventory gains `endpoint_capabilities` (methods, `exact_pin`, `request_body_modes`, `method_grants`); a receiver that predates it answers none and the sender refuses a method route before building the batch. §18.2's `endpoints` arm documents the method entry (`method`, `pipeline_version`, `pipeline_body_hash`, `request_body`, `grants`; `bindings` empty) imported on the EXACT pipeline version — absent route → v1 RELEASED, same pin → unchanged, another pin → a new RELEASED current version — and its refusals (`pipeline.import.version_conflict`, `endpoint.pipeline_version.not_found` / `.not_eligible`, `endpoint.promotion.key_missing`, `endpoint.promotion.method_unsupported`). §19.5's promotion paragraph replaces #1037's "only GET routes travel". New §19.5a: the authoring surface (`request_body` on every management read, REST and MCP; the version page and draft dialog; the Keys page's exact method grants), rollout, recovery, limits, repeat semantics and `DELETE` content under RFC 9110 §9.3.5 (supported: the application's own listener; no proxy promised). No route, permission or status added. |
+| 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
+| 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
+| 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
+| 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |
+| 2026-11-21 | v2.129 | 1038 (#1038) | **§6.1 / §6.1.4 (additive):** the execute body takes an optional `request_body` — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4), decoded by the shared bounded decoder, part of the idempotency fingerprint, never stored in parameters; refusals `400 pipeline.execution.request_body_invalid` with `details.reason`. **§19.2 / §19.3 / §19.6:** a `GET` pin of a body-requiring pipeline is `409 endpoint.request_body_incompatible`; the mutation-route body rules (400 `endpoint.request.body_invalid` entries, 413 `endpoint.request.too_large`, 415 `endpoint.request.unsupported_media_type`) are stated for the codec #1039's serve path applies. |
+| 2026-11-21 | v2.128 | 1035 r3 (#1035) | **§6.4.5:** `pipeline_completed` carries `result_unavailable: true` (absent otherwise) when the confirmed commit's caller result cannot be delivered. **§6.4.7:** that decision reads the stored result back after the confirmation; a lost result is never announced or served as an empty success. **§10.2:** `result_row_count` is written with the terminal status and kept on an unavailable result. No new code, route or permission. |
+| 2026-11-21 | v2.127 | 1035 r2 (#1035) | **§10.3 / §10.2 family settlement:** a held child's event history (durable record, replay and MCP) carries no terminal event until its root settles, then one terminal event with the root's outcome and the next `event_id`; no route or field changes. |
+| 2026-11-20 | v2.126 | 1035 (#1035) | **Commit outcomes.** §6.4.5/§6.4.7/§6.5: success events follow the root's confirmed commit; a held child streams neither. §6.4.6: `pipeline_failed` also carries `status: "OUTCOME_UNKNOWN"`. §7.6: `result.execution_failed` covers `OUTCOME_UNKNOWN`; `result.storage_unavailable` covers a confirmed SUCCESS whose result was not delivered. §10.1/§10.2: `status` gains `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; family settlement. No new code, no new route, no new permission. |
+| 2026-11-20 | v2.125 | #1037 merge follow-up F1 | **§25:** the API dependency name counts its uppercase mutation method prefix separately from the existing 200-character path limit; other fields and families keep their limit. The request schema and HTTP regression cover every supported method at the path boundary. |
+| 2026-11-19 | v2.124 | 1037 (#1037, published method identities) | **Additive.** §19's routes gain method identity: the intro admits non-GET routes at the same grammar (body/admission/idempotency arrive with #1038/#1039; the operator gate `mutations-enabled` refuses an otherwise-authorized mutation `503 endpoint.mutations_disabled`); §19.1's ambiguity rule and `UNIQUE (path_pattern, method)` are per-method, with the cross-workspace `409` redacted; §19.2's read-only pin rule is a GET rule (a mutation route may pin a writing pipeline; the pin rules themselves run for every method); §19.3 adds the non-GET request rules — session `401` first, exact method grants, opaque visibility (`Allow` = the visible methods, `404` at none); §19.5's management is addressed `?path=&method=` and create takes optional `method` (`400 endpoint.method_invalid` otherwise); §19.6's 405 and 503 rows describe the method era; §19.5's promotion paragraph states that only GET routes and GET grants travel (`409 endpoint.promotion.method_unsupported` on the sender, and on a receiver for an entry naming a non-GET `method`). |
 | 2026-11-15 | v2.123 | 987 (#987, js-rendered F3) | **Deliberate break, decided by the js-rendered charts record O-13:** §23.3's `GET /{id}/runtime/config` answers without `renderer` (its one member, `renderer.bundle`, named the chart library's bundle the page loaded); the visualization preview page's configuration loses the same object. The page loads the chart engine's files itself, from one list. No route, status, permission or other field changed. |
 | 2026-11-15 | v2.122 | 986 (#986, js-rendered F2) | **Deliberate break, decided by the js-rendered charts record O-13:** §22.2's `POST /api/v1/visualizations` and `PUT /api/v1/visualizations/{id}` answer the version without `warnings`: the server's chart library layer (its support table and the `chart.degraded.<field>` save warnings) is gone, and a save never draws the chart. No route, status, permission or other field changed. |
 | 2026-11-12 | v2.121 | #463 read-only execution at the connection — renumbered at final sync after dependency-graph | **§19.2:** one sentence — every serve runs each DQL datasource statement of the pinned version and its children in the per-lease read-only mode; the database refuses a write on the `DATABASE` dialects of the DAG Executor §8.2 table, the rule and a SELECT-only user stay the guard elsewhere. Additive. |

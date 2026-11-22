@@ -54,6 +54,14 @@ object Fixtures {
         timeoutSeconds: Int? = null,
         /** `node.settings.query_timeout_seconds` (contract §4.11, 156) — this node's own statement timeout. */
         queryTimeoutSeconds: Int? = null,
+        /**
+         * A DML node's declared operation (contract §4.4, #1034). `update` — the affected-count
+         * contract — is the default because a fixture that only needs "a write" runs any count
+         * statement through it; an insert fixture declares its key and input with `copy`.
+         */
+        operation: String = "update",
+        /** A DML node's result target (§4.4: always explicit); `discard` keeps a write-only fixture write-only. */
+        dmlOutput: NodeOutput = NodeOutput.Discard,
     ): Node =
         Node(
             id = id,
@@ -61,7 +69,13 @@ object Fixtures {
             type = type,
             source = source,
             template = template,
-            output = if (type == NodeType.DQL) output else null,
+            output =
+                when (type) {
+                    NodeType.DQL -> output
+                    NodeType.DML -> dmlOutput
+                    else -> null
+                },
+            operation = if (type == NodeType.DML) operation else null,
             dependsOn = dependsOn,
             settings =
                 if (timeoutSeconds == null && queryTimeoutSeconds == null) {
@@ -92,6 +106,7 @@ object Fixtures {
         workspaceId: UUID = UUID.randomUUID(),
         resultTtlSeconds: Long? = null,
         correlationId: UUID? = null,
+        readOnly: Boolean = false,
     ): ExecuteRequest =
         ExecuteRequest(
             pipelineId = UUID.randomUUID(),
@@ -101,6 +116,7 @@ object Fixtures {
             workspaceId = workspaceId,
             resultTtlSeconds = resultTtlSeconds,
             correlationId = correlationId,
+            readOnly = readOnly,
         )
 
     /** A template engine that returns [sql] for every reference, recording the budget it was given. */
@@ -174,10 +190,14 @@ object Fixtures {
 }
 
 /** Captures every emitted event so a test can assert on order and on exactly-once rules. */
-class RecordingEmitter : EventEmitter {
+class RecordingEmitter(
+    /** (#1035) Throws this for an event instead of recording it — a delivery that fails after the commit. */
+    private val failOn: (ExecutionEvent) -> Throwable? = { null },
+) : EventEmitter {
     val events = CopyOnWriteArrayList<ExecutionEvent>()
 
     override suspend fun emit(event: ExecutionEvent) {
+        failOn(event)?.let { throw it }
         events += event
     }
 

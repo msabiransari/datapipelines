@@ -19,7 +19,9 @@ internal object NodeTypeRules {
             when (node.type) {
                 NodeType.DQL -> checkDqlOutput(index, node, into)
 
-                NodeType.DML -> forbidOutput(index, node, Validation.DML_HAS_OUTPUT, into)
+                // §12.4 (#1034): a DML node's whole shape — operation, key, input and its
+                // result target — is [DmlRules]' verdict, applied once below.
+                NodeType.DML -> Unit
 
                 NodeType.DDL -> forbidOutput(index, node, Validation.DDL_HAS_OUTPUT, into)
 
@@ -41,6 +43,7 @@ internal object NodeTypeRules {
                 NodeType.SCRIPT -> Unit
             }
         }
+        DmlRules.check(pipeline, into)
     }
 
     /**
@@ -55,10 +58,10 @@ internal object NodeTypeRules {
     ) = checkDqlOutput(index, node, into)
 
     /**
-     * A DML/DDL node must carry no `output` block: its side effect *is* the output (§4.4,
-     * §4.5). §9.2 states the same check from the caller-node angle
-     * (`non_dql_caller_target`) and says explicitly it is the same check — so the §12.4 code
-     * is what gets emitted, and the alias never does.
+     * A DDL node must carry no `output` block: its side effect *is* the output (§4.5). §9.2
+     * states the same check from the caller-node angle (`non_dql_caller_target`) and says
+     * explicitly it is the same check — so the §12.4 code is what gets emitted, and the alias
+     * never does. (A DML node's output is [DmlRules]' since #1034.)
      */
     private fun forbidOutput(
         index: Int,
@@ -71,7 +74,7 @@ internal object NodeTypeRules {
             code,
             "nodes[$index].output",
             "${node.type.wire} node '${node.id.truncateForError()}' declares an output block " +
-                "(target '${output.target.wire}'); only DQL nodes have outputs.",
+                "(target '${output.target.wire}'); a DDL statement's side effect is its only output.",
             mapOf("node" to node.id.truncateForError(), "target" to output.target.wire),
         )
     }
@@ -107,6 +110,10 @@ internal object NodeTypeRules {
             NodeOutput.Caller, null -> {
                 // A caller target has no companion fields; a null output on a DQL node is
                 // unreachable (D1 resolves it to Caller at deserialization).
+            }
+
+            NodeOutput.Discard -> {
+                // `discard` is DML-only; [DmlRules] reports it on any other node type.
             }
         }
     }

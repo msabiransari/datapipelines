@@ -18,7 +18,7 @@ import org.junit.jupiter.api.assertAll
  */
 class ApiErrorCatalogGatewayCodesTest {
     @Test
-    fun `gateway codes are exactly the deliberate six`() {
+    fun `gateway codes are exactly the deliberate seven`() {
         ApiErrorCatalog.GATEWAY_CODES shouldContainExactly
             setOf(
                 PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
@@ -28,6 +28,11 @@ class ApiErrorCatalogGatewayCodesTest {
                 // connection's failure, not the SQL's and not this process's bug. WARN
                 // without a stack, like its connection sibling.
                 PipelineErrorCodes.Node.COMMIT_FAILED,
+                // #1033: the root's settle of the family's shared local write transaction —
+                // the customer database refused the finalize. ERROR with the stack, like node
+                // commit_failed: a deferred constraint the pipeline's writes violated can
+                // surface only at commit, so the rendered writes can still be the defect.
+                PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED,
                 // 055: the promotion target did not answer. WARN without a stack — the
                 // operator's own peer deployment being down is not a defect in this one.
                 PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
@@ -62,6 +67,10 @@ class ApiErrorCatalogGatewayCodesTest {
                 // #336: the rendered SQL's batch may be the reason the transaction cannot
                 // finalize — like query_execution_failed, possibly our bug, ERROR with stack.
                 PipelineErrorCodes.Node.COMMIT_FAILED,
+                // #1033: the same shape at the run's own settle — a deferred constraint the
+                // pipeline's writes violated can surface only at commit, so the rendered
+                // writes can be the defect. ERROR with stack.
+                PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED,
             )
     }
 }

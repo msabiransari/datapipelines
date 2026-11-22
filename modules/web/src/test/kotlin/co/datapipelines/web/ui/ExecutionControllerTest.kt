@@ -140,7 +140,9 @@ class ExecutionControllerTest {
         @Suppress("UNCHECKED_CAST")
         (model["pipelines"] as List<*>).shouldHaveSize(1)
         @Suppress("UNCHECKED_CAST")
-        (model["statuses"] as EnumEntries<*>).shouldHaveSize(4)
+        // #1035: OUTCOME_UNKNOWN is a filterable terminal status, so the history filter offers it.
+        (model["statuses"] as EnumEntries<*>).map { it.toString() } shouldBe
+            listOf("RUNNING", "SUCCESS", "FAILED", "ABORTED", "OUTCOME_UNKNOWN")
     }
 
     @Test

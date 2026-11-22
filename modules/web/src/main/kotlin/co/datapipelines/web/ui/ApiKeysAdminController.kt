@@ -4,6 +4,7 @@ import co.datapipelines.application.dashboards.DashboardKeyBindingRepository
 import co.datapipelines.application.dashboards.DashboardKeyService
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
@@ -126,8 +127,7 @@ class ApiKeysAdminController(
         model.addAttribute("keyRole", issued.record.role?.label)
         model.addAttribute("keyBindings", bindingPaths)
         model.addAttribute("keyExpires", expiresAt?.let { RelativeTime.absolute(it) })
-        model.addAttribute("keys", rows(principal))
-        RoleModel.stamp(model, principal)
+        fillRows(model, principal)
         // The create response refreshes the whole table out-of-band: this flag is what puts
         // hx-swap-oob on the keysTable fragment root for THIS render only.
         model.addAttribute("oob", true)
@@ -149,8 +149,7 @@ class ApiKeysAdminController(
     ): String {
         val principal = requirePrincipal()
         apiKeyService.revokeAs(principal, keyId)
-        model.addAttribute("keys", rows(principal))
-        RoleModel.stamp(model, principal)
+        fillRows(model, principal)
         return "partials/api-keys-rows"
     }
 
@@ -160,12 +159,22 @@ class ApiKeysAdminController(
      * because the form's answer is the whole set. The selection is validated against the
      * workspace's published paths' literal prefixes, the same list [ApiKeyForm.bindingNodes]
      * rendered: a hand-crafted path fails normalization there, not here.
+     *
+     * #1040 — the same form carries the key's METHOD grants: `grantsOffered` names every
+     * `METHOD /pattern` route the form rendered ([ApiKeyForm.methodRoutes]) and `grants` the ones
+     * checked. The delta is computed over the OFFERED routes only, so a grant on a route the form
+     * did not show (published after the page rendered, or a post from a pre-#1040 form that offers
+     * none) is never removed by an unrelated save — the #1037 guarantee kept. Each grant is bound
+     * and unbound with its method on exactly that route; a GET grant stays a node of the tree.
      */
     @PostMapping("/partials/api-keys/{keyId}/bindings")
     @RequiredScope(Permission.API_KEY_BIND)
+    @Suppress("LongParameterList") // the form's two sets, the offered routes and the key
     fun associate(
         @PathVariable keyId: String,
         @RequestParam("bindings", required = false) selected: List<String>?,
+        @RequestParam("grants", required = false) grants: List<String>?,
+        @RequestParam("grantsOffered", required = false) offered: List<String>?,
         model: Model,
     ): String {
         val principal = requirePrincipal()
@@ -176,12 +185,68 @@ class ApiKeysAdminController(
                 .flatMap { it.split(',') }
                 .mapNotNull { it.trim().takeIf { path -> path.isNotEmpty() } }
                 .toSet()
-        val current = bindings.findByKey(key.id).map { it.pathPrefix }.toSet()
+        // #1037: the GET node set is the GET grants only. A mutation grant is scoped to one
+        // route ENTITY (method + pattern); folding it into this set-delta would strip it on an
+        // unrelated save or re-bind it as a GET node grant. #1040 manages it below, by route.
+        val offeredRoutes = offered.orEmpty().map(ApiKeyForm::parseGrant).toSet()
+        val wantedGrants =
+            grants
+                .orEmpty()
+                .map(ApiKeyForm::parseGrant)
+                .filter { it in offeredRoutes }
+                .toSet()
+        val current =
+            bindings
+                .findByKey(key.id)
+                .filter { it.method == EndpointMethod.GET }
+                .map { it.pathPrefix }
+                .toSet()
         wanted.filter { it !in current }.forEach { endpointKeys.bind(principal, key.id, it) }
         current.filter { it !in wanted }.forEach { endpointKeys.unbind(principal, key.id, it) }
-        model.addAttribute("keys", rows(principal))
-        RoleModel.stamp(model, principal)
+        val currentGrants =
+            bindings
+                .findByKey(key.id)
+                .filter { it.method.isMutation }
+                .map { it.method to it.pathPrefix }
+                .filter { it in offeredRoutes }
+                .toSet()
+        (wantedGrants - currentGrants).forEach { (method, path) -> endpointKeys.bind(principal, key.id, path, method) }
+        (currentGrants - wantedGrants).forEach { (method, path) -> endpointKeys.unbind(principal, key.id, path, method) }
+        fillRows(model, principal)
         return "partials/api-keys-rows"
+    }
+
+    /**
+     * The model a redrawn key table needs (the rows AND the pickers its association forms render), so a form in a
+     * redrawn row offers the same choices as the page's — before #1040 a redraw rendered the forms with empty pickers
+     * until a reload.
+     */
+    private fun fillRows(
+        model: Model,
+        principal: AuthenticatedPrincipal,
+    ) {
+        model.addAttribute("keys", rows(principal))
+        fillPickers(model, principal)
+        RoleModel.stamp(model, principal)
+    }
+
+    /** The association pickers' choices — shared by the page and every redraw of its rows. */
+    private fun fillPickers(
+        model: Model,
+        principal: AuthenticatedPrincipal,
+    ) {
+        val published = publishing.list(principal)
+        // The association picker offers the LITERAL prefixes of this workspace's published
+        // paths — see ApiKeyForm for why a {variable} node is never one of them.
+        model.addAttribute("bindingNodes", ApiKeyForm.bindingNodes(published.map { it.pathPattern }))
+        // #1040 — the method-grant picker offers each published mutation ROUTE, never a node.
+        model.addAttribute("methodRoutes", ApiKeyForm.methodRoutes(published.map { it.method to it.pathPattern }))
+        // L5 — the dashboard binding picker offers the FOLDERS of this workspace's dashboard
+        // names (the root first). Validated server-side by DashboardKeyService either way.
+        model.addAttribute(
+            "dashboardFolders",
+            ApiKeyForm.dashboardFolders(dashboards.currentVersions(principal.requireWorkspace().id).map { it.name }),
+        )
     }
 
     /**
@@ -209,8 +274,7 @@ class ApiKeysAdminController(
         val current = dashboardBindings.findByKey(key.id).map { it.namePrefix }.toSet()
         wanted.filter { it !in current }.forEach { dashboardKeys.bind(principal, key.id, it) }
         current.filter { it !in wanted }.forEach { dashboardKeys.unbind(principal, key.id, it) }
-        model.addAttribute("keys", rows(principal))
-        RoleModel.stamp(model, principal)
+        fillRows(model, principal)
         return "partials/api-keys-rows"
     }
 
@@ -223,18 +287,7 @@ class ApiKeysAdminController(
         model.addAttribute("kindChoices", kindChoices(principal))
         model.addAttribute("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         model.addAttribute("expiryCustomWire", ApiKeyForm.CUSTOM)
-        // The association picker offers the LITERAL prefixes of this workspace's published
-        // paths — see ApiKeyForm for why a {variable} node is never one of them.
-        model.addAttribute(
-            "bindingNodes",
-            ApiKeyForm.bindingNodes(publishing.list(principal).map { it.pathPattern }),
-        )
-        // L5 — the dashboard binding picker offers the FOLDERS of this workspace's dashboard
-        // names (the root first). Validated server-side by DashboardKeyService either way.
-        model.addAttribute(
-            "dashboardFolders",
-            ApiKeyForm.dashboardFolders(dashboards.currentVersions(principal.requireWorkspace().id).map { it.name }),
-        )
+        fillPickers(model, principal)
         RoleModel.stamp(model, principal)
     }
 

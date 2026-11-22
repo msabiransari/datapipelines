@@ -64,13 +64,22 @@ class EndpointPinValidator(
     fun eligible(status: PipelineVersionStatus): Boolean =
         PipelineVersionStatus.eligibleForPointer(status, draftsEligible = authoring.developmentPosture)
 
-    /** Checks [body]'s pin for an API at [parsed] in [workspaceId]; refuses with the catalogued code. */
+    /**
+     * Checks [body]'s pin for an API at [parsed] in [workspaceId]; refuses with the catalogued code.
+     *
+     * [method] is the ENTITY's method (#1037): the §4.2 read-only rule is a GET rule — a GET route serves an
+     * anonymous, side-effect-free read, while a mutation route exists to admit a writing pipeline (published-mutation-
+     * apis §3.1) — so the check runs for GET only, and every other pin check (existence, exactness, admission,
+     * declared variables) runs for every method. Defaults to GET: the pre-#1037 callers, and every surface that
+     * addresses a route by path alone.
+     */
     @Suppress("ThrowsCount") // each precondition is its own refusal, and each names itself
     fun check(
         workspaceId: UUID,
         parsed: EndpointPath.Parsed,
         body: EndpointVersionBody,
         admission: Admission,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Resolved {
         val name = body.pipelineName
         val record =
@@ -91,9 +100,25 @@ class EndpointPinValidator(
         if (!admitted) throw notEligible(body, detail.status)
         val executable =
             pipelines.findExecutable(workspaceId, ReadLens.Everything, record, body.pipelineVersion) ?: throw versionNotFound(body)
-        requireReadOnly(executable, workspaceId, name)
+        if (method == EndpointMethod.GET) requireReadOnly(executable, workspaceId, name)
+        requireBodyDeliverable(method, executable, name)
         requireDeclaredVariables(parsed, executable, name)
         return Resolved(record, detail.status, executable)
+    }
+
+    /**
+     * The request-body contract of [pipelineName]@[pipelineVersion] in [workspaceId] (#1040) — what the authoring
+     * surfaces show beside the exact pin before a save; null when the pipeline or that exact version is gone. A read,
+     * never a check: refusals stay [check]'s.
+     */
+    fun bodyContract(
+        workspaceId: UUID,
+        pipelineName: String,
+        pipelineVersion: Int,
+    ): EndpointBodyContract? {
+        val record = pipelineRepository.findByName(workspaceId, pipelineName) ?: return null
+        val executable = pipelines.findExecutable(workspaceId, ReadLens.Everything, record, pipelineVersion) ?: return null
+        return EndpointBodyContract.of(executable.pipeline)
     }
 
     /** §4.2 — the rule that makes serving over GET defensible, re-checked on every serve too. */
@@ -111,6 +136,27 @@ class EndpointPinValidator(
                 "'$pipelineName' v${version.version} cannot be served as a GET endpoint: ${first.message} " +
                     "A published endpoint serves GET, which must be side-effect-free.",
             details = mapOf("pipeline" to pipelineName, "node_id" to first.details["node_id"], "via" to first.details["via"]),
+        )
+    }
+
+    /**
+     * #1038 (published-mutation-apis §3.3, "at publish, verify that the pinned pipeline admits this input") — a GET
+     * carries no body, so a GET route cannot serve a pipeline whose `request_body` is required: every call would be
+     * refused. An OPTIONAL body is fine on GET (the transformer sees it absent), and every mutation method may carry
+     * one. Whether each reader's template admits a body input is the pipeline's own save-time rule (§12.13).
+     */
+    private fun requireBodyDeliverable(
+        method: EndpointMethod,
+        version: PipelineService.ExecutablePipeline,
+        pipelineName: String,
+    ) {
+        if (method != EndpointMethod.GET || version.pipeline.requestBody?.required != true) return
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Endpoint.REQUEST_BODY_INCOMPATIBLE,
+            message =
+                "'$pipelineName' v${version.version} requires a request body, which a GET route cannot deliver. " +
+                    "Publish it under POST, PUT or DELETE, or make its request_body optional.",
+            details = mapOf("pipeline" to pipelineName, "method" to method.name),
         )
     }
 

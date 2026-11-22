@@ -1,6 +1,7 @@
 package co.datapipelines.web.dependencies
 
 import co.datapipelines.application.endpoints.EndpointPath
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.datasources.DatasourceNameGrammar
@@ -21,7 +22,10 @@ enum class SelectorShape(
     val keyField: RequestField,
     val versioned: Boolean,
 ) {
-    /** `name` + `version` — pipeline, template, parameter_set, visualization, dashboard, api_endpoint (the path). */
+    /**
+     * `name` + `version` — pipeline, template, parameter_set, visualization, dashboard, api_endpoint (the route key:
+     * path, or `METHOD path`).
+     */
     NAME_AT_VERSION(RequestField.NAME, versioned = true),
 
     /** `name` alone — datasource. */
@@ -121,8 +125,18 @@ class DependencyFamilyTransport(
         /** templates.md §3.2. */
         val TEMPLATE_NAME = NativeKey { value -> value.takeIf(TemplateNameGrammar::matches) }
 
-        /** rest-api.md §19.1 — the stored spelling (the one `/api` prefix stripped) is the family's lookup key. */
-        val API_PATH = NativeKey { value -> EndpointPath.parse(value).getOrNull()?.pattern }
+        /**
+         * rest-api.md §19.1 — the family's lookup key is the ROUTE key ([EndpointRouteKey]): the stored path spelling
+         * (the one `/api` prefix stripped) for GET, `METHOD path` for a mutation method (#1037). A bare path is GET, so
+         * every path-only request keeps its meaning; `GET path` and an unknown method word are refused like any
+         * malformed name.
+         */
+        val API_ROUTE =
+            NativeKey { value ->
+                EndpointRouteKey.parse(value)?.let { route ->
+                    EndpointPath.parse(route.path).getOrNull()?.let { EndpointRouteKey.of(route.method, it.pattern) }
+                }
+            }
 
         /** The canonical 36-character lower-case UUID form, and nothing that merely parses as one. */
         val SCHEDULE_ID = NativeKey { value -> value.takeIf { runCatching { UUID.fromString(it).toString() == it }.getOrDefault(false) } }
@@ -158,7 +172,7 @@ class DependencyFamilyTransport(
                         lenses.visualization,
                     ),
                     versioned(FamilyKey.DASHBOARD, NativeKeys.PIPELINE_NAME, PipelineErrorCodes.Dashboard.NOT_FOUND, lenses.dashboard),
-                    versioned(FamilyKey.API_ENDPOINT, NativeKeys.API_PATH, PipelineErrorCodes.Endpoint.NOT_FOUND, lenses.apiEndpoint),
+                    versioned(FamilyKey.API_ENDPOINT, NativeKeys.API_ROUTE, PipelineErrorCodes.Endpoint.NOT_FOUND, lenses.apiEndpoint),
                     FamilyTransportRow(
                         FamilyKey.SCHEDULE,
                         SelectorShape.ID,

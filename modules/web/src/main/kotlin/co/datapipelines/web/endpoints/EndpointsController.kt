@@ -2,6 +2,7 @@ package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
@@ -33,6 +34,8 @@ import org.springframework.web.bind.annotation.RestController
 /**
  * §19.5 create body. The pipeline is named, not id'd — the name is the portable identity — and pinned at the exact
  * `pipeline_version` the request names (#786, owner ruling 2026-11-08 (4): an authored input like `template_version`).
+ * `method` names the route's HTTP method (#1037, published-mutation-apis §3.1): one of GET, POST, PUT, DELETE,
+ * absent meaning GET — the pre-method era's body creates the pre-method era's route, byte for byte.
  */
 data class CreateEndpointRequest(
     @field:JsonProperty("path") @get:JsonProperty("path") @param:JsonProperty("path")
@@ -45,12 +48,16 @@ data class CreateEndpointRequest(
     val timeoutSeconds: Int? = null,
     @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")
     val description: String? = null,
+    @field:JsonProperty("method") @get:JsonProperty("method") @param:JsonProperty("method")
+    val method: String? = null,
 )
 
 /**
  * §19.5 binding body — a key by NAME, so the same request shape works on any deployment,
  * or (179, D17) by ID, which is what the `/api-keys` page's association UI sends: a name is
- * owner-scoped and ambiguous deployment-wide, an id is neither.
+ * owner-scoped and ambiguous deployment-wide, an id is neither. `method` (#1037) names which
+ * route at the prefix the grant opens: absent meaning GET — the ancestor walk — a mutation
+ * method meaning an exact grant for that route entity.
  */
 data class BindEndpointKeyRequest(
     @field:JsonProperty("path_prefix") @get:JsonProperty("path_prefix") @param:JsonProperty("path_prefix")
@@ -59,6 +66,8 @@ data class BindEndpointKeyRequest(
     val apiKeyName: String? = null,
     @field:JsonProperty("api_key_id") @get:JsonProperty("api_key_id") @param:JsonProperty("api_key_id")
     val apiKeyId: String? = null,
+    @field:JsonProperty("method") @get:JsonProperty("method") @param:JsonProperty("method")
+    val method: String? = null,
 )
 
 /**
@@ -109,6 +118,7 @@ class EndpointsController(
                     pipelineVersion = body.pipelineVersion,
                     timeoutSeconds = body.timeoutSeconds,
                     description = body.description.orEmpty(),
+                    method = methodOf(body.method, "the create body"),
                 ).toResponse(),
         )
     }
@@ -121,11 +131,16 @@ class EndpointsController(
      * once V41 has run, and its only offered verb is the DELETE below. A single read (`?path=`)
      * resolves valid rows only: a legacy path is not an endpoint the API can describe in the
      * valid shape, and the listing is where its flag lives.
+     *
+     * #1037: a route is a method+path pair. The listing returns every method's rows (each carries
+     * its `method`); a single read resolves `?path=` plus `?method=`, absent meaning GET — the
+     * path-only shape the pre-method era had, answered for the route it always addressed.
      */
     @GetMapping
     @RequiredScope(Permission.ENDPOINT_READ)
     fun list(
         @RequestParam(required = false) path: String?,
+        @RequestParam(required = false) method: String? = null,
     ): ApiResponse<Any> {
         val principal = currentPrincipal()
         return if (path == null) {
@@ -134,7 +149,7 @@ class EndpointsController(
                     publishing.listLegacy(principal).map { it.toLegacyResponse() }
             ApiResponse.of(rows)
         } else {
-            val endpoint = publishing.get(principal, path) ?: throw notFound(path)
+            val endpoint = publishing.get(principal, path, methodOf(method, "the ?method= parameter")) ?: throw notFound(path)
             ApiResponse.of(endpoint.toResponse())
         }
     }
@@ -144,7 +159,8 @@ class EndpointsController(
      * This is also the FIX for a legacy row (#274) — the one verb the tree offers it.
      * Unpublish is BY the full stored path, so a legacy row stored past
      * `EndpointPath.MAX_LENGTH`, whose echo is cut (#286), is deleted only by that path,
-     * and this verb refuses nothing by length (#304).
+     * and this verb refuses nothing by length (#304). `?method=` (#1037) names the route,
+     * absent meaning GET; unpublishing the GET never touches a sibling method's route.
      */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -152,8 +168,9 @@ class EndpointsController(
     @Transactional("metadataTransactionManager")
     fun delete(
         @RequestParam path: String,
+        @RequestParam(required = false) method: String? = null,
     ) {
-        if (!publishing.unpublish(currentPrincipal(), path)) throw notFound(path)
+        if (!publishing.unpublish(currentPrincipal(), path, methodOf(method, "the ?method= parameter"))) throw notFound(path)
     }
 
     /**
@@ -175,11 +192,11 @@ class EndpointsController(
         val body = StrictRequestBodies.bind<BindEndpointKeyRequest>(tree)
         val principal = currentPrincipal()
         val key = resolveKey(body.apiKeyId, body.apiKeyName)
-        endpointKeys.bind(principal, key.id, body.pathPrefix)
+        endpointKeys.bind(principal, key.id, body.pathPrefix, methodOf(body.method, "the binding body"))
         return ApiResponse.of(mapOf("path_prefix" to body.pathPrefix, "api_key_name" to key.name, "api_key_id" to key.id))
     }
 
-    /** §19.5 — unbind. Both addressing forms, exactly as [bind]. */
+    /** §19.5 — unbind. Both addressing forms, exactly as [bind]; `?method=` names the grant, absent meaning GET. */
     @DeleteMapping("/bindings")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(Permission.API_KEY_BIND)
@@ -188,9 +205,10 @@ class EndpointsController(
         @RequestParam pathPrefix: String,
         @RequestParam(required = false) apiKeyName: String?,
         @RequestParam(required = false) apiKeyId: String?,
+        @RequestParam(required = false) method: String? = null,
     ) {
         val key = resolveKey(apiKeyId, apiKeyName)
-        if (!endpointKeys.unbind(currentPrincipal(), key.id, pathPrefix)) {
+        if (!endpointKeys.unbind(currentPrincipal(), key.id, pathPrefix, methodOf(method, "the ?method= parameter"))) {
             throw notFound(pathPrefix)
         }
     }
@@ -263,25 +281,53 @@ class EndpointsController(
         )
 
     /**
+     * A `method` parameter as an [EndpointMethod] (#1037): absent meaning GET — the pre-method era's request creates
+     * the pre-method era's route — and anything the surface does not publish (PATCH, a typo, any unknown verb)
+     * refused as the caller's request, `details` naming where it came from.
+     */
+    private fun methodOf(
+        value: String?,
+        origin: String,
+    ): EndpointMethod =
+        value?.let { raw ->
+            EndpointMethod.of(raw.trim().uppercase())
+                ?: throw ApiException(
+                    PipelineErrorCodes.Endpoint.METHOD_INVALID,
+                    "A published route answers GET, POST, PUT or DELETE — $origin names '$raw'.",
+                    mapOf("method" to raw),
+                )
+        } ?: EndpointMethod.GET
+
+    /**
      * The outbound shape. The pipeline travels by NAME, so a reader gets the portable identity;
      * `url` is the full served URL (R-EP5: the stored pattern plus the `/api` root). Since #786 the
      * pipeline, its exact `pipeline_version`, the timeout and the description are the CURRENT API
      * version's body (null while the API has no current version); `id` addresses the version routes.
+     * `method` (#1037) is the route's HTTP method — the identity half that makes a GET and a POST
+     * at one pattern two routes, each with its own bindings and its own `Allow` answer. The
+     * `bindings` list stays the GET grants (the ancestor walk's nodes); a mutation route's grants
+     * name it exactly, and the key surfaces show them. `request_body` (#1040) is the current version's EXACT pin's body
+     * contract — the mode a caller must send and the transformers that read it — null with no current version or a pin
+     * that no longer resolves; the MCP tools answer the same spelling ([co.datapipelines.application.endpoints.EndpointBodyContract.wire]).
      */
     private fun PublishedEndpoint.toResponse(): Map<String, Any?> =
         mapOf(
             "id" to id.toString(),
             "path" to pathPattern,
+            "method" to method.name,
             "pipeline" to current?.body?.pipelineName,
             "pipeline_version" to current?.body?.pipelineVersion,
             "current_version" to current?.version,
             "timeout_seconds" to current?.body?.timeoutSeconds,
             "description" to current?.body?.description,
+            "request_body" to publishing.bodyContract(this)?.wire(),
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
             // #191 — this endpoint's workspace's bindings only: a foreign row is inert at serve
             // time and its key id is nobody else's to list. Both predicates in the query (#199).
+            // #1037 — GET grants only: a mutation grant names the route entity, listed by the key
+            // surfaces; a GET node grant never authorised a mutation route and must not imply it did.
             "bindings" to bindings.findByPrefixes(listOf(pathPattern), workspaceId).map { it.apiKeyId },
             "created_at" to createdAt.toString(),
             "updated_at" to updatedAt.toString(),

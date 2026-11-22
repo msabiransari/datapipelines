@@ -7,6 +7,7 @@ import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
+import co.datapipelines.events.SseEventType
 import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
@@ -14,6 +15,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorMetrics
+import co.datapipelines.executor.SettledChild
 import co.datapipelines.persistence.FailureShape
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -142,8 +144,8 @@ class WebEventEmitter(
     private val context: ExecutionContext,
     private val stream: ExecutionStream?,
     private val streams: ExecutionStreamRegistry,
-    eventLog: SseEventLog,
-    eventRepository: ExecutionEventRepository,
+    private val eventLog: SseEventLog,
+    private val eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
     private val persistenceDispatcher: CoroutineDispatcher,
     /**
@@ -252,6 +254,16 @@ class WebEventEmitter(
                 }
             }
             currentCoroutineContext().ensureActive()
+        }
+        if (event.isProvisional()) {
+            // #1035 R2: a child's provisional completion is NOT a history event on any surface. It claims SUCCESS for
+            // writes no one has made durable yet; the row keeps its stats pending and the family's root settlement
+            // publishes the child's terminal event with the root's final outcome ([publishSettledChildren]). No
+            // event id is spent, so the settlement event continues the child's sequence without a gap.
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) { completeExecutionRow(event) }
+            currentCoroutineContext().ensureActive()
+            return
         }
         val target = stream ?: streams.find(event.executionId)
         // The counter lives on the emitter, not on the stream: `event_id` is monotonic **per
@@ -376,7 +388,7 @@ class WebEventEmitter(
                     // /executions/{id}`, the detail page and MCP `executions_get` all read what
                     // the live stream showed, `user_message`/`doc_url`/`correlation_id` included.
                     val errorJson = SseJson.mapper.writeValueAsString(projection.errorPayload(event.error))
-                    Triple(ExecutionStatus.FAILED, event.failedNodeId, errorJson)
+                    Triple(event.status, event.failedNodeId, errorJson)
                 }
 
                 is ExecutionAborted -> {
@@ -387,41 +399,77 @@ class WebEventEmitter(
                     return
                 }
             }
-        val nodeStats =
-            when (event) {
-                is PipelineCompleted -> event.nodeStats
-                is PipelineFailed -> event.nodeStats
-                is ExecutionAborted -> event.nodeStats
-            }
         // 072 §0.5: the row's `parameters_json` becomes the FULLY RESOLVED Context the nodes saw —
         // org config, platform keys, parameters, inputs and every calculator output. SseJson's
         // mapper, not ExecutorJson's: the Context holds java.time values, and the one that cannot
         // serialize them is exactly how execution_started went missing from the durable record
         // once before (T36). A serialization failure leaves the insert-time value in place rather
         // than losing the terminal UPDATE with it.
-        val contextJson =
-            when (event) {
-                is PipelineCompleted -> event.contextSnapshot
-                is PipelineFailed -> event.contextSnapshot
-                is ExecutionAborted -> event.contextSnapshot
-            }.takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
+        val contextJson = contextSnapshotOf(event).takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
         // Everything that can throw — the stats serialization, the aborted duration's row read — runs
         // where the UPDATE runs (inside the bound's runCatching, or deferred after the late insert
         // has landed), so it can never escape emit.
-        val update = {
-            executionRepository.complete(
-                executionId = event.executionId,
-                status = status,
-                completedAt = event.timestamp,
-                durationMs = durationMsOf(event),
-                nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
-                failedNodeId = failedNodeId,
-                errorJson = errorJson,
-                contextJson = contextJson,
-            )
-        }
-        writeTerminalRow(event.executionId, update)
+        writeTerminalRow(event.executionId, terminalUpdate(event, status, failedNodeId, errorJson, contextJson))
     }
+
+    private fun nodeStatsOf(event: ExecutionEvent) =
+        when (event) {
+            is PipelineCompleted -> event.nodeStats
+            is PipelineFailed -> event.nodeStats
+            is ExecutionAborted -> event.nodeStats
+            else -> emptyList()
+        }
+
+    private fun contextSnapshotOf(event: ExecutionEvent) =
+        when (event) {
+            is PipelineCompleted -> event.contextSnapshot
+            is PipelineFailed -> event.contextSnapshot
+            is ExecutionAborted -> event.contextSnapshot
+            else -> emptyMap()
+        }
+
+    /** The terminal write of [completeExecutionRow], deferred so everything that can throw runs where the UPDATE runs. */
+    private fun terminalUpdate(
+        event: ExecutionEvent,
+        status: ExecutionStatus,
+        failedNodeId: String?,
+        errorJson: String?,
+        contextJson: String?,
+    ): () -> Boolean =
+        if (event.isProvisional()) {
+            // #1035: a child of an enrolled family — stats and Context are kept, the row stays RUNNING
+            // (pending) until the root's terminal write settles the whole family at once.
+            {
+                executionRepository.completeProvisionally(
+                    event.executionId,
+                    SseJson.mapper.writeValueAsString(nodeStatsOf(event)),
+                    contextJson,
+                )
+            }
+        } else {
+            {
+                val updated =
+                    executionRepository.complete(
+                        executionId = event.executionId,
+                        status = status,
+                        completedAt = event.timestamp,
+                        durationMs = durationMsOf(event),
+                        nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStatsOf(event)),
+                        failedNodeId = failedNodeId,
+                        errorJson = errorJson,
+                        contextJson = contextJson,
+                        resultRowCount = (event as? PipelineCompleted)?.resultRowCount,
+                        resultSizeBytes = (event as? PipelineCompleted)?.resultSizeBytes,
+                        resultUnavailable = (event as? PipelineCompleted)?.resultUnavailable == true,
+                    )
+                // The root's terminal write is the family's one settlement moment; the sweep repeats it for a
+                // root whose instance died before this line.
+                if (updated && event.settlesFamilyOnWrite()) {
+                    publishSettledChildren(event, executionRepository.settleFamiliesDetailed(event.executionId))
+                }
+                updated
+            }
+        }
 
     /**
      * The terminal UPDATE's dispatch: bounded, as #311 made it — or, behind a RUNNING insert that outlived
@@ -654,6 +702,100 @@ class WebEventEmitter(
                 FailureShape.sqlState(it),
             )
         }.getOrNull() ?: 0
+
+    /**
+     * (#1035 R2) The terminal history of every child the root's settlement just decided: the SAME outcome the
+     * rows now carry — `pipeline_completed` after a SUCCESS root, `pipeline_failed` (status FAILED or
+     * OUTCOME_UNKNOWN, the root's error) after a failed one, `execution_aborted` (the root's reason) after an
+     * abort. Written to both stores with the child's next event id; a failure is one WARN and costs that
+     * child's history entry only, never the settlement. Runs where the settlement UPDATE runs (a pool thread).
+     */
+    private fun publishSettledChildren(
+        root: ExecutionEvent,
+        settled: List<SettledChild>,
+    ) {
+        settled.forEach { child ->
+            runCatching {
+                val (name, type, payload) = settledChildEvent(root, child)
+                val eventId = eventRepository.lastEventId(child.executionId) + 1
+                eventRepository.append(child.executionId, eventId, type, child.completedAt, SseJson.mapper.writeValueAsString(payload))
+                eventLog.append(child.executionId, LoggedSseEvent(eventId, name, payload))
+            }.onFailure {
+                log.warn(
+                    "terminal history of settled child {} (root {}) not written: error={} sql_state={}",
+                    child.executionId,
+                    root.executionId,
+                    FailureShape.cause(it),
+                    FailureShape.sqlState(it),
+                )
+            }
+        }
+    }
+
+    private fun settledChildEvent(
+        root: ExecutionEvent,
+        child: SettledChild,
+    ): Triple<String, SseEventType, Map<String, Any?>> {
+        val stamped = child.correlationId ?: context.correlationId
+        val nodeStats: List<Any?> = child.nodeStatsJson?.let { SseJson.mapper.readValue(it, List::class.java) } ?: emptyList<Any?>()
+        val common =
+            mapOf<String, Any?>(
+                "execution_id" to child.executionId,
+                "pipeline_id" to child.pipelineId,
+                "status" to child.status.name,
+                "node_stats" to nodeStats,
+                "correlation_id" to stamped,
+            )
+        return when (root) {
+            is PipelineCompleted -> {
+                Triple(
+                    SseEventType.PIPELINE_COMPLETED.wire,
+                    SseEventType.PIPELINE_COMPLETED,
+                    common +
+                        mapOf(
+                            "pipeline_version" to child.pipelineVersion,
+                            "started_at" to child.startedAt,
+                            "completed_at" to child.completedAt,
+                            "duration_ms" to child.durationMs,
+                        ),
+                )
+            }
+
+            is ExecutionAborted -> {
+                Triple(
+                    SseEventType.EXECUTION_ABORTED.wire,
+                    SseEventType.EXECUTION_ABORTED,
+                    common + mapOf("aborted_at" to child.completedAt, "reason" to root.reason.wire),
+                )
+            }
+
+            else -> {
+                Triple(
+                    SseEventType.PIPELINE_FAILED.wire,
+                    SseEventType.PIPELINE_FAILED,
+                    common +
+                        mapOf(
+                            "pipeline_version" to child.pipelineVersion,
+                            "started_at" to child.startedAt,
+                            "failed_at" to child.completedAt,
+                            "duration_ms" to child.durationMs,
+                            "failed_node_id" to child.failedNodeId,
+                            "error" to child.errorJson?.let { SseJson.mapper.readValue(it, Map::class.java) },
+                        ),
+                )
+            }
+        }
+    }
+
+    private fun ExecutionEvent.settlesFamilyOnWrite(): Boolean =
+        when (this) {
+            is PipelineCompleted -> settlesFamily
+            is PipelineFailed -> settlesFamily
+            is ExecutionAborted -> settlesFamily
+            else -> false
+        }
+
+    private fun ExecutionEvent.isProvisional(): Boolean = this is PipelineCompleted && provisional
 
     private fun ExecutionEvent.completesTheRow(): Boolean = this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted
 

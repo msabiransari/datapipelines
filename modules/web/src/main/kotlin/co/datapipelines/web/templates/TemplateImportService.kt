@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.release.GuardedTransaction
 import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ReleaseMutationGuard
 import co.datapipelines.templates.CitableFacts
+import co.datapipelines.templates.ExactJsonText
 import co.datapipelines.templates.ImplementsIds
 import co.datapipelines.templates.ScriptBlocks
 import co.datapipelines.templates.Template
@@ -136,8 +137,11 @@ class TemplateImportService(
                     "The import request requires a 'templates' array.",
                     mapOf(ApiErrors.REASON to "templates_missing"),
                 )
-        return array.map { entry ->
-            val outcome = deserializer.fromTree(entry)
+        // Each entry's fixtures are bound from its exact text (#1038): the tree has already lost a
+        // repeated member and the input names a stored body fixture was judged on.
+        val exact = ExactJsonText.arrayEntries(body, "templates")?.takeIf { it.size == array.size() }
+        return array.mapIndexed { index, entry ->
+            val outcome = deserializer.fromTree(entry, exactJson = exact?.get(index))
             when (outcome) {
                 is TemplateDeserializationOutcome.Parsed -> outcome.draft to preservedOf(entry as? ObjectNode)
                 is TemplateDeserializationOutcome.Rejected -> throw TemplateValidationException(outcome.result)
@@ -214,7 +218,7 @@ class TemplateImportService(
                 body = draft.body,
                 contractJson = ScriptBlocks.writeContract(draft.contract),
                 invariantsJson = ScriptBlocks.writeInvariants(draft.invariants),
-                testsJson = ScriptBlocks.writeTests(draft.tests),
+                testsJson = ScriptBlocks.writeTests(draft.tests, draft.contract),
             )
         val declared = preserved.bodyHash
         if (declared == null || declared != recomputed) {

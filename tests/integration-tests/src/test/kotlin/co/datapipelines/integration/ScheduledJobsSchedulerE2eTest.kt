@@ -387,8 +387,8 @@ class ScheduledJobsSchedulerE2eTest {
     private fun sweepWaiting(connection: Connection): Boolean =
         connection
             .prepareStatement(
-                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' " +
-                    "AND query LIKE 'UPDATE pipeline_executions%' AND query LIKE '%SET status = ''ABORTED''%'",
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' " +
+                    "AND query LIKE 'UPDATE pipeline_executions%' AND query LIKE '%SET status = CASE WHEN commit_confirmed_at%'",
             ).use { statement ->
                 statement.executeQuery().use { rows ->
                     rows.next()

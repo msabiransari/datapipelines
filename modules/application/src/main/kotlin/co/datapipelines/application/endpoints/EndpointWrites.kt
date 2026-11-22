@@ -50,14 +50,15 @@ internal class EndpointWrites(
     }
 
     /**
-     * Creates the entity at [parsed] and its version 1 with [status], pointed at by `current_version`, inside the
-     * caller's transaction AFTER the workspace guard. Takes the registry key first because path absence and overlap
-     * matter (record §15.1 class 3), then the entity insert (with its overlap check) and the version row.
+     * Creates the entity at [parsed] for [method] and its version 1 with [status], pointed at by `current_version`,
+     * inside the caller's transaction AFTER the workspace guard. Takes the registry key first because path absence and
+     * overlap matter (record §15.1 class 3), then the entity insert (with its overlap check) and the version row.
      */
     @Suppress("LongParameterList") // the entity's columns, the v1 body and the actor — one creation step
     fun createWithFirstVersion(
         workspaceId: UUID,
         parsed: EndpointPath.Parsed,
+        method: EndpointMethod,
         pipelineId: UUID,
         body: EndpointVersionBody,
         status: PipelineVersionStatus,
@@ -75,6 +76,7 @@ internal class EndpointWrites(
                     createdBy = actor,
                     createdAt = now,
                     updatedAt = now,
+                    method = method,
                 ),
                 LegacyEndpointColumns(pipelineId, body.timeoutSeconds, body.description),
             )
@@ -82,6 +84,26 @@ internal class EndpointWrites(
         versions.setCurrent(entity.id, FIRST_VERSION)
         invalidateAfterCommit()
         return entity.copy(current = CurrentVersion(FIRST_VERSION, status, body))
+    }
+
+    /**
+     * Appends a RELEASED version with [body] to the existing entity [endpointId] at `max(existing) + 1` and points the
+     * entity at it — the receiver's exact-pin import of a mutation route whose pin moved on the sender (#1040). Inside
+     * the caller's transaction, after the registry guard, under the entity's row lock; the registry is invalidated after
+     * the owning transaction commits. Numbers are the receiver's own: an API version's number is local, its pin is not.
+     */
+    fun appendReleasedCurrent(
+        endpointId: UUID,
+        body: EndpointVersionBody,
+        actor: UUID,
+    ): Int {
+        writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
+        versions.lockEntity(endpointId)
+        val next = (versions.list(endpointId).maxOfOrNull { it.version } ?: 0) + 1
+        versions.insert(endpointId, next, PipelineVersionStatus.RELEASED, body, actor)
+        versions.setCurrent(endpointId, next)
+        invalidateAfterCommit()
+        return next
     }
 
     companion object {
@@ -101,6 +123,7 @@ internal class EndpointWrites(
         }
 
         /** Parses and reserves [pathPattern] (§4.1, R-EP5), refusing with the catalogued path codes. */
+        @Suppress("ThrowsCount") // grammar, reserved category and reserved polling suffix are each their own refusal
         fun parsePath(pathPattern: String): EndpointPath.Parsed {
             val parsed =
                 EndpointPath.parse(pathPattern).getOrElse {
@@ -119,6 +142,19 @@ internal class EndpointWrites(
                         "The category '$segment' is reserved: v<number> is the product's own API namespace and 'api' " +
                             "re-opens the stripped prefix. Pick your own namespace — a business domain, a team, a product line.",
                     details = mapOf("path_pattern" to parsed.pattern, "segment" to segment),
+                )
+            }
+            // The result-paging suffixes are reserved the same way (published-mutation-apis §3.1): the serve
+            // handler recognises `…/executions/{id}[/result]` before the registry, so a pattern that could match
+            // one is silently shadowed on exactly those URLs — refused at publish instead, naming the suffix.
+            EndpointPath.reservedExecutionSuffix(parsed)?.let { suffix ->
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Endpoint.PATH_RESERVED,
+                    message =
+                        "This path could match the reserved polling suffix '$suffix' of an endpoint's executions: the " +
+                            "serve path answers those URLs itself, so a route beneath them would be unreachable. " +
+                            "Publish the resource at a path that cannot collide.",
+                    details = mapOf("path_pattern" to parsed.pattern, "segment" to suffix),
                 )
             }
             return parsed

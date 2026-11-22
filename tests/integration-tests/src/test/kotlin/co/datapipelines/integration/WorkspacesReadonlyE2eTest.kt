@@ -268,6 +268,8 @@ class WorkspacesReadonlyE2eTest {
             "type" to "DML",
             "source" to datasource,
             "template" to mapOf("id" to templateId, "version" to 1),
+            "operation" to "update",
+            "output" to mapOf("target" to "discard"),
             "depends_on" to emptyList<String>(),
         )
 

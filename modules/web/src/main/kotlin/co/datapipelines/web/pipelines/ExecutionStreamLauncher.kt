@@ -32,6 +32,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.body.StructuredBody
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.sse.ExecutionContext
@@ -67,6 +68,8 @@ data class ExecuteLaunch(
     val idempotencyKey: String?,
     val lakeAppendGrant: co.datapipelines.pipeline.LakeAppendGrant? = null,
     val lakeExecutionMetadata: co.datapipelines.pipeline.LakeExecutionMetadata? = null,
+    /** The decoded `request_body` fixture (#1038) — never part of [parametersJson]. */
+    val requestBody: StructuredBody = StructuredBody.Absent,
 ) {
     /** The surface-free half this launch carries into `application` (056/D6). */
     internal fun toLaunch(): ExecutionLaunch =
@@ -78,6 +81,7 @@ data class ExecuteLaunch(
             parameters = parameters,
             parametersJson = parametersJson,
             idempotencyKey = idempotencyKey,
+            requestBody = requestBody,
         )
 }
 
@@ -171,6 +175,12 @@ class ExecutionStreamLauncher(
      */
     private val scriptSupport: co.datapipelines.executor.ScriptSupport? = null,
     private val lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
+    /**
+     * (write-transactions §3.1) The write-set planner handed to each per-run executor — this
+     * launcher serves INTERACTIVE roots, the runs a person or key starts. Null only in
+     * module-slice wiring, where no run enrolls a local write transaction.
+     */
+    private val localWritePlanner: co.datapipelines.executor.LocalWritePlanner? = null,
     /**
      * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
      * null in module-slice wiring and unit tests, where the emitter's direct default applies.
@@ -363,6 +373,7 @@ class ExecutionStreamLauncher(
                         lakeAppendGrant = request.lakeAppendGrant,
                         lakeExecutionMetadata = request.lakeExecutionMetadata,
                         executionId = executionId,
+                        requestBody = request.requestBody,
                     ),
                 )
             recordResultColumns(result, emitter)
@@ -459,6 +470,7 @@ class ExecutionStreamLauncher(
             subPipelineRunner = subPipelineRunner,
             scripts = scriptSupport,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     private companion object {

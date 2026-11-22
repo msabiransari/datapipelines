@@ -46,8 +46,8 @@ private object NodeOutputSerializer : JsonSerializer<NodeOutput>() {
                 value.rejects?.let { gen.writeStringField(REJECTS, it) }
             }
 
-            NodeOutput.Caller -> {
-                // The caller target carries no fields beyond the discriminator (§4.7).
+            NodeOutput.Caller, NodeOutput.Discard -> {
+                // The caller and discard targets carry no fields beyond the discriminator (§4.7).
             }
 
             is NodeOutput.Datasource -> {
@@ -85,6 +85,10 @@ private object NodeOutputDeserializer : JsonDeserializer<NodeOutput>() {
                     // guessing wrong toward REPLACE would TRUNCATE a table (§4.7).
                     mode = WriteMode.fromWireOrNull(node.path(MODE).asTextOrNull()) ?: WriteMode.APPEND,
                 )
+            }
+
+            OutputTarget.DISCARD -> {
+                NodeOutput.Discard
             }
 
             // `caller`, and (unreachably) an absent/unknown target the pre-scan already rejected.

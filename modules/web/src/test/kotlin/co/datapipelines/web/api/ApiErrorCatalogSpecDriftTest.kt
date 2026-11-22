@@ -408,8 +408,40 @@ class ApiErrorCatalogSpecDriftTest {
          * `NEVER_RETURNED_LIVE` entry.
          * 519 → 520 with #994: §13.5 gains `pipeline.staging.result_incomplete` (500, the staging family default; no
          * `ApiErrorCatalog` row), TEMPORARY, landed in the SAME commit as its constants.
+         *
+         * 520 → 522 with #1033 (recounted with [STATUS_ROW_REGEX]): §13.3 gains
+         * `pipeline.execution.local_write_refused` (400, an explicit catalog row against the
+         * family's 500 default) and `pipeline.execution.local_write_commit_failed` (502, an
+         * explicit catalog row beside node commit_failed), landed in the SAME commit as their
+         * constants, the §4.1 meter row and the gateway-partition classification.
+         *
+         * 522 → 525 with #1037: §13.14 gains `endpoint.method_invalid` (400, an explicit catalog
+         * row), `endpoint.mutations_disabled` (503, explicit) and
+         * `endpoint.promotion.method_unsupported` (409, the promotion family default), landed in
+         * the SAME commit as their constants and `PipelineErrorCodesSpecDriftTest`'s
+         * `KNOWN_TWO_SEGMENT_CODES` additions.
+         *
+         * 525 → 528 with #1034: §13.4 gains `pipeline.node.dml_key_correlation_failed`,
+         * `pipeline.node.dml_affected_rows_mismatch` and `pipeline.node.dml_insert_unqualified`,
+         * all 500 through the `pipeline.node.` family default (no explicit catalog row), landed
+         * in the SAME commit as their constants.
+         *
+         * 528 → 533 with #1038: §13.3 gains `pipeline.execution.request_body_invalid` (400) and
+         * §13.14 gains `endpoint.request_body_incompatible` (409), `endpoint.request.body_invalid`
+         * (400), `endpoint.request.too_large` (413) and `endpoint.request.unsupported_media_type`
+         * (415), each an explicit catalog row landed in the SAME commit as its constant.
+         *
+         * 533 → 536 with #1039: §13 gains `idempotency.reservation_unavailable` (503, explicit
+         * catalog row), `endpoint.dependency_unavailable` (503, explicit catalog row) and
+         * `endpoint.request.idempotency_key_invalid` (400 through the `endpoint.request.` family
+         * default), landed in the SAME commit as their constants.
+         *
+         * 536 → 540 with #1043: §13.27 gains `execution.capture.already_active` (409),
+         * `execution.capture.not_found` (404), `execution.capture.expired` (410) and
+         * `execution.capture.invalid` (400), each an explicit catalog row landed in the SAME commit
+         * as its constant.
          */
-        const val SECTION_13_ROW_COUNT = 520
+        const val SECTION_13_ROW_COUNT = 540
 
         /**
          * §12's distinct validation codes.
@@ -459,7 +491,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `default_invalid`, 400 through the family default (which is why the brief's
          * `SECTION_13_ROW_COUNT` does not move: a §12 row carries no HTTP column), landed in
          * the SAME commit as its constant. Re-derived from the document's own parse.
+         *
+         * 85 → 91 with #1034: §12.4's DML shape rules (`dml_output_required`,
+         * `dml_operation_required`, `dml_operation_invalid`, `dml_key_invalid`,
+         * `dml_input_invalid`, `dml_field_forbidden`) — all 400 through the family default,
+         * landed in the SAME commit as their constants.
          */
-        const val SECTION_12_CODE_COUNT = 85
+        const val SECTION_12_CODE_COUNT = 91
     }
 }

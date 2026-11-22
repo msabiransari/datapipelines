@@ -108,8 +108,15 @@ class ExecutionDetailController(
     ): String =
         when {
             record.status != ExecutionStatus.SUCCESS -> "not-applicable"
+
+            // #1035: the commit is confirmed but the caller result was never delivered — neither "no caller result"
+            // nor "expired", and never "available" even while the stored key still exists.
+            record.resultUnavailable -> "unavailable"
+
             record.resultRowCount == null || record.resultRowCount == 0L -> "no-caller-result"
+
             resultView != null -> "available"
+
             else -> "expired"
         }
 }

@@ -121,6 +121,9 @@ class PromotionReceiveService(
         // must already exist on this deployment, checked ONCE for the whole batch BEFORE anything
         // is pushed, so the target is left byte-unchanged rather than failing mid-batch. Keys are
         // environment-local — a promotion must never mint one.
+        // #1037/#1040: a mutation entry must carry an exact pin, hash and known body mode, with no GET node
+        // bindings. Refuse an incompatible entry here, before the key check and before any batch write.
+        endpointPromotion.refuseIfMethodUnsupported(batch.endpoints)
         endpointPromotion.refuseIfKeysMissing(batch.endpoints, workspace.id, batch.workspace)
 
         // 140 §10.5 — the receiver's release-check gate, BEFORE the import transaction: a

@@ -525,6 +525,13 @@ class PipelineJobExecutor(
             ExecutionStatus.ABORTED -> {
                 abortedOutcome(record)
             }
+
+            // #1035: the commit was attempted and its acknowledgement lost — the writes may or may not be
+            // durable. State `unknown`, which blocks (scheduler.md §5.2): never `failed`, which would let a
+            // retry replay a possibly-committed write.
+            ExecutionStatus.OUTCOME_UNKNOWN -> {
+                ExecutionOutcome.Finished(RunState.UNKNOWN, COMMIT_OUTCOME_UNKNOWN, record.startedAt, record.completedAt)
+            }
         }
 
     private fun abortedOutcome(record: ExecutionRecord): ExecutionOutcome.Finished {
@@ -612,7 +619,7 @@ class PipelineJobExecutor(
             pipeline.parameters,
             pipeline.calculatorOutputs(),
             pipeline.calculatorOutputGroups(),
-            pipeline.scriptOutputKeys(),
+            pipeline.callerScriptKeys(),
         ).bindOrThrow(parameters)
     }
 
@@ -885,6 +892,9 @@ class PipelineJobExecutor(
          * scheduler.md §5's `unknown` reasons; the trail's WARN names the evidence kind.
          */
         const val OUTCOME_UNREADABLE = "outcome_unreadable"
+
+        /** #1035 — the family's shared commit was attempted and not acknowledged (execution status `OUTCOME_UNKNOWN`). Blocks. */
+        const val COMMIT_OUTCOME_UNKNOWN = "outcome_unknown"
         const val VERSION_LATEST_REFUSED = "version_latest_refused"
 
         private const val EXECUTION_ABORTED_EVENT = "execution_aborted"

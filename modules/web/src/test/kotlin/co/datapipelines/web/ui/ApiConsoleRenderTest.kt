@@ -144,6 +144,7 @@ class ApiConsoleRenderTest {
 
     private fun endpoint(
         url: String = "/api/nyc/v1/mobility/briefing",
+        method: String = "GET",
         displayName: String = "Mobility briefing",
         path: String? = "nyc/mobility/briefing",
         served: Int? = 3,
@@ -153,6 +154,7 @@ class ApiConsoleRenderTest {
         enabled: Boolean = true,
     ) = ApiConsoleController.EndpointRow(
         java.util.UUID.nameUUIDFromBytes(url.toByteArray()),
+        method,
         url,
         listOf(false),
         displayName,
@@ -201,6 +203,26 @@ class ApiConsoleRenderTest {
         html shouldContain ">ci<"
         html shouldContain ">nightly<"
         html shouldContain "30 s"
+    }
+
+    @Test
+    fun `a mutation row renders its own method - one pattern, two routes, two rows`() {
+        // #1037: method is half a route's identity. A POST at the same pattern as a GET is a
+        // second row carrying its own method tag — the tag is a per-row fact now, not the
+        // hard-coded GET it was before the method era.
+        val html =
+            render {
+                setVariable(
+                    "endpoints",
+                    listOf(
+                        endpoint(),
+                        endpoint(url = "/api/nyc/v1/mobility/briefing", method = "POST", boundKeyNames = listOf("payments")),
+                    ),
+                )
+            }
+
+        html shouldContain ">GET<"
+        html shouldContain ">POST<"
     }
 
     @Test

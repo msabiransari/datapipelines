@@ -56,6 +56,11 @@ class EndpointLifecycleDialogController(
         val page = pages.page(principal, id, version) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         model.addAttribute("page", page)
         RoleModel.stamp(model, principal)
+        // #1043: the runtime capture card — a mutation route, a session principal holding the session-only permission.
+        model.addAttribute(
+            "canManageCapture",
+            page.method != "GET" && principal.workspace?.permits(Permission.EXECUTION_CAPTURE_MANAGE) == true,
+        )
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         return "api/endpoint"
     }

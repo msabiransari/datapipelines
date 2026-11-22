@@ -50,7 +50,7 @@ class FlywayMigrationIntegrationTest {
     fun `every shipped migration is recorded as applied and successful`() {
         val rows =
             query(
-                "SELECT version || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
+                "SELECT COALESCE(version, 'R') || '|' || description || '|' || success FROM flyway_schema_history ORDER BY installed_rank",
             ) { it.getString(1) }
 
         rows shouldContainExactly
@@ -204,6 +204,24 @@ class FlywayMigrationIntegrationTest {
                 "63|lake maintenance plan|true",
                 // #964 (V64) — the lake storage breakdown: the latest six-row inventory per table (metadata-db §4.60).
                 "64|lake storage inventory|true",
+                // #1037 (V65) — method identity for published endpoints, exact mutation grants for bindings (§4.13/§4.14).
+                "65|published endpoint methods|true",
+                // #1035 (V66) — execution commit outcomes: OUTCOME_UNKNOWN status, the commit attempt/confirmation stamps,
+                // the family settlement flag and the result-unavailable flag (metadata-db §4.6).
+                "66|execution commit outcomes|true",
+                // #1039 (V67) — the durable Idempotency-Key reservation and the origin of every published mutation run
+                // (metadata-db §4.61).
+                "67|published mutation reservations|true",
+                // #1043 (V68) — runtime capture: administrator windows, the reservation's admission-time capture
+                // decision, a captured run's private values and its closing summary (metadata-db §4.61–§4.64).
+                "68|execution capture|true",
+                // #1035 — the repeatable downgrade barrier of V66 (repeatables run in description order, so it precedes
+                // #1037's): a binary that does not resolve it refuses to start on V66 metadata (metadata-db §7.5;
+                // ExecutionCommitOutcomeDowngradeBarrierIntegrationTest).
+                "R|execution commit outcome downgrade barrier|true",
+                // #1037 — the repeatable downgrade barrier (version column NULL, shown as R): a binary that does not resolve it
+                // refuses to start on V65 metadata (metadata-db §7.4; PublishedMethodDowngradeBarrierIntegrationTest).
+                "R|published endpoint method downgrade barrier|true",
             )
     }
 
@@ -1074,6 +1092,139 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #1037 (V65) — method identity for published routes and exact mutation grants, read from the SHIPPED
+     * database: the closed method list on both tables, the bindings' shape rule (a GET row has no entity, a
+     * mutation row must), the per-method path unique that replaced V11's path-only one, the widened binding
+     * PK and the grant's entity pointer with its cascade. Behaviour is `PublishedMethodIdentityIntegrationTest`'s;
+     * this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V65 gives published endpoints method identity and bindings exact mutation grants`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN " +
+                "('published_endpoints'::regclass, 'endpoint_key_bindings'::regclass) AND conname IN " +
+                "('chk_published_endpoints_method', 'chk_endpoint_key_bindings_method', 'chk_endpoint_key_bindings_shape', " +
+                "'pk_endpoint_key_bindings', 'uq_published_endpoints_path_method', 'endpoint_key_bindings_endpoint_id_fkey') " +
+                "ORDER BY conname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_endpoint_key_bindings_method|CHECK ((method = ANY (ARRAY['GET'::text, 'POST'::text, 'PUT'::text, " +
+                    "'DELETE'::text])))",
+                "chk_endpoint_key_bindings_shape|CHECK ((((method = 'GET'::text) AND (endpoint_id IS NULL)) OR " +
+                    "((method <> 'GET'::text) AND (endpoint_id IS NOT NULL))))",
+                "chk_published_endpoints_method|CHECK ((method = ANY (ARRAY['GET'::text, 'POST'::text, 'PUT'::text, " +
+                    "'DELETE'::text])))",
+                "endpoint_key_bindings_endpoint_id_fkey|FOREIGN KEY (endpoint_id) REFERENCES published_endpoints(id) ON DELETE CASCADE",
+                "pk_endpoint_key_bindings|PRIMARY KEY (path_prefix, api_key_id, method)",
+                "uq_published_endpoints_path_method|UNIQUE (path_pattern, method)",
+            )
+        // The backfill IS the default: every pre-V65 row is GET, and DEFAULT 'GET' keeps the
+        // application's GET-only writes (the ones that never name a method) on GET rows.
+        query(
+            "SELECT table_name || '|' || column_default FROM information_schema.columns" +
+                " WHERE table_schema = 'public' AND column_name = 'method'" +
+                " AND table_name IN ('published_endpoints', 'endpoint_key_bindings') ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "endpoint_key_bindings|'GET'::text",
+                "published_endpoints|'GET'::text",
+            )
+        // V11's deployment-wide path unique is GONE — a URL is one meaning per METHOD now.
+        query(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'published_endpoints_path_pattern_key'",
+        ) { it.getString(1) } shouldBe emptyList()
+    }
+
+    /**
+     * #1035 (V66) — the commit boundary, read from the SHIPPED database: the four columns with their types, nullability
+     * and defaults (the flags default FALSE so every pre-V66 row reads "nothing pending, result delivered"), the status
+     * CHECK that admits `OUTCOME_UNKNOWN`, and the partial index the family settlement rides. Behaviour is
+     * `PipelineCommitOutcomeIntegrationTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V66 adds the commit boundary columns the OUTCOME_UNKNOWN status and the settlement index`() {
+        query(
+            "SELECT column_name || '|' || data_type || '|' || is_nullable || '|' || COALESCE(column_default, '-') " +
+                "FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'pipeline_executions' " +
+                "AND column_name IN ('commit_attempted_at', 'commit_confirmed_at', 'settlement_pending', 'result_unavailable') " +
+                "ORDER BY column_name COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "commit_attempted_at|timestamp with time zone|YES|-",
+                "commit_confirmed_at|timestamp with time zone|YES|-",
+                "result_unavailable|boolean|NO|false",
+                "settlement_pending|boolean|NO|false",
+            )
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint " +
+                "WHERE conrelid = 'pipeline_executions'::regclass AND conname = 'chk_status'",
+        ) {
+            it.getString(1)
+        } shouldContainExactly
+            listOf(
+                "CHECK ((status = ANY (ARRAY['RUNNING'::text, 'SUCCESS'::text, 'FAILED'::text, 'ABORTED'::text, " +
+                    "'OUTCOME_UNKNOWN'::text])))",
+            )
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_executions_settlement_pending'",
+        ) {
+            it.getString(1)
+        } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_executions_settlement_pending ON public.pipeline_executions USING btree (root_execution_id) " +
+                    "WHERE settlement_pending",
+            )
+    }
+
+    /**
+     * #1043 (V68) — runtime capture, read from the SHIPPED database: every foreign key with its delete rule (a window
+     * and its private rows go with their workspace; values and summaries go with their reservation; a window has NO
+     * key to the route, so a republished route matches no older window), the capture decision's both-or-neither CHECK,
+     * and the partial indexes that make "one open window per route entity and method" a database fact. Behaviour is
+     * `PublishedMutationCaptureIntegrationTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V68 creates the capture tables with their cascades, the decision pairing and the one-open-window index`() {
+        query(
+            "SELECT conrelid::regclass::text || '|' || pg_get_constraintdef(oid) FROM pg_constraint " +
+                "WHERE contype = 'f' AND conrelid IN ('execution_capture_sessions'::regclass, " +
+                "'execution_capture_values'::regclass, 'execution_capture_runs'::regclass, " +
+                "'published_mutation_reservations'::regclass) " +
+                "ORDER BY conrelid::regclass::text || '|' || pg_get_constraintdef(oid) COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "execution_capture_runs|FOREIGN KEY (execution_id) REFERENCES published_mutation_reservations(execution_id) " +
+                    "ON DELETE CASCADE",
+                "execution_capture_runs|FOREIGN KEY (session_id) REFERENCES execution_capture_sessions(id)",
+                "execution_capture_runs|FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE",
+                "execution_capture_sessions|FOREIGN KEY (started_by) REFERENCES users(id)",
+                "execution_capture_sessions|FOREIGN KEY (stopped_by) REFERENCES users(id)",
+                "execution_capture_sessions|FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE",
+                "execution_capture_values|FOREIGN KEY (execution_id) REFERENCES published_mutation_reservations(execution_id) " +
+                    "ON DELETE CASCADE",
+                "execution_capture_values|FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE",
+                "published_mutation_reservations|FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
+                "published_mutation_reservations|FOREIGN KEY (capture_session_id) REFERENCES execution_capture_sessions(id)",
+                "published_mutation_reservations|FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE",
+            )
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint " +
+                "WHERE conname = 'chk_published_mutation_reservations_capture'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("CHECK (((capture_session_id IS NULL) = (capture_expires_at IS NULL)))")
+        query(
+            "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname IN " +
+                "('uq_execution_capture_sessions_open', 'idx_published_mutation_reservations_capture') ORDER BY indexname COLLATE \"C\"",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_published_mutation_reservations_capture ON public.published_mutation_reservations " +
+                    "USING btree (capture_session_id) WHERE (capture_session_id IS NOT NULL)",
+                "CREATE UNIQUE INDEX uq_execution_capture_sessions_open ON public.execution_capture_sessions " +
+                    "USING btree (workspace_id, endpoint_id, method) WHERE (stopped_at IS NULL)",
+            )
+    }
+
+    /**
      * #798 (V54) — managed lake table definitions, read from the SHIPPED database: the closed lists the
      * `lake.definitions` enums mirror (table status, apply state, version status, origin), the pointer/state pairing,
      * the one-DRAFT index and every column. Behaviour is `LakeDefinitionRepositoryIntegrationTest`'s; this pins
@@ -1757,8 +1908,8 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (56 after #956)
-    fun `creates exactly the fifty-eight tables of metadata-db §4`() {
+    @Suppress("LongMethod") // the inventory IS the assertion: one line per table of metadata-db §4 (64 after #1043)
+    fun `creates exactly the sixty-four tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -1780,6 +1931,10 @@ class FlywayMigrationIntegrationTest {
                 // L5 (#367, V45) — the `dashboard` key's folder bindings (§4.36).
                 "dashboard_key_bindings",
                 "execution_events",
+                // #1043 (V68) — runtime capture: windows, private values, closing summaries (metadata-db §4.62–§4.64).
+                "execution_capture_runs",
+                "execution_capture_sessions",
+                "execution_capture_values",
                 // #785 (V53) — Iceberg's JdbcCatalog tables, owned by Flyway (metadata-db §4.43–§4.44).
                 "iceberg_namespace_properties",
                 "iceberg_tables",
@@ -1845,6 +2000,8 @@ class FlywayMigrationIntegrationTest {
                 // #786 (V58) — one row per API version, the exact pipeline pin (metadata-db §4.13a).
                 "published_endpoint_versions",
                 "published_endpoints",
+                // #1039 (V67) — one row per admitted published mutation: its reservation and origin (metadata-db §4.61).
+                "published_mutation_reservations",
                 // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
                 "template_implements",
                 "template_versions",
@@ -1905,10 +2062,23 @@ class FlywayMigrationIntegrationTest {
                 "datasources.uq_datasources_incarnation",
                 "dashboard_key_bindings.dashboard_key_bindings_pkey",
                 "dashboard_key_bindings.idx_dashboard_key_bindings_key",
-                "endpoint_key_bindings.endpoint_key_bindings_pkey",
+                "endpoint_key_bindings.pk_endpoint_key_bindings",
                 "endpoint_key_bindings.idx_endpoint_key_bindings_key",
+                // #1037 (V65) — the mutation grant's entity lookup, partial on endpoint_id IS NOT NULL.
+                "endpoint_key_bindings.idx_endpoint_key_bindings_endpoint",
+                // #1035 (V66) — the family settlement's lookup, partial on settlement_pending.
+                "pipeline_executions.idx_executions_settlement_pending",
                 "execution_events.execution_events_pkey",
                 "execution_events.uq_events_execution_event",
+                // #1043 (V68) — the one open window per route entity and method, a route's history, the two PKs and the
+                // purge's two expiry scans (metadata-db §5).
+                "execution_capture_runs.execution_capture_runs_pkey",
+                "execution_capture_runs.idx_execution_capture_runs_expires",
+                "execution_capture_sessions.execution_capture_sessions_pkey",
+                "execution_capture_sessions.idx_execution_capture_sessions_endpoint",
+                "execution_capture_sessions.uq_execution_capture_sessions_open",
+                "execution_capture_values.execution_capture_values_pkey",
+                "execution_capture_values.idx_execution_capture_values_expires",
                 // #785 (V53) — the two catalog tables' library PKs; the control row's PK; a lease per (kind, name) and
                 // release by operation; the revision log's per-table walk, per-operation lookup, one current row.
                 "iceberg_namespace_properties.iceberg_namespace_properties_pkey",
@@ -2025,8 +2195,15 @@ class FlywayMigrationIntegrationTest {
                 "published_endpoint_versions.uq_published_endpoint_versions_one_draft",
                 "published_endpoints.idx_published_endpoints_pipeline",
                 "published_endpoints.idx_published_endpoints_workspace",
-                "published_endpoints.published_endpoints_path_pattern_key",
+                // #1037 (V65) — one meaning per URL PER METHOD; replaced V11's published_endpoints_path_pattern_key.
+                "published_endpoints.uq_published_endpoints_path_method",
                 "published_endpoints.published_endpoints_pkey",
+                // #1039 (V67) — the PK (the execution id), the live scope digest's UNIQUE and the credential cascade's lookup.
+                "published_mutation_reservations.idx_published_mutation_reservations_key",
+                "published_mutation_reservations.published_mutation_reservations_pkey",
+                "published_mutation_reservations.uq_published_mutation_reservations_scope",
+                // #1043 (V68) — a window's captured runs, partial on capture_session_id IS NOT NULL.
+                "published_mutation_reservations.idx_published_mutation_reservations_capture",
                 // #9 (V38) — db-scheduler's own three indexes (its DDL, verbatim) and its PK.
                 "scheduled_tasks.execution_time_idx",
                 "scheduled_tasks.last_heartbeat_idx",
@@ -2146,6 +2323,18 @@ class FlywayMigrationIntegrationTest {
                 // #874 (V59) — the generation counter starts at 1 and only ever advances.
                 "chk_datasources_generation",
                 "chk_dialect",
+                // #1037 (V65) — the closed method list on the bindings table, and its shape rule: a GET row
+                // has no entity, a mutation row must (metadata-db §4.14).
+                "chk_endpoint_key_bindings_method",
+                "chk_endpoint_key_bindings_shape",
+                // #1043 (V68) — a captured run's non-negative counts; a window's end (open xor ended inside its own
+                // span with a closed reason), method list and positive span; a value is captured xor omitted with a
+                // closed reason (metadata-db §4.62–§4.64). `capture` < `executions` (byte order).
+                "chk_execution_capture_runs_counts",
+                "chk_execution_capture_sessions_end",
+                "chk_execution_capture_sessions_method",
+                "chk_execution_capture_sessions_window",
+                "chk_execution_capture_values_state",
                 // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
                 "chk_executions_executed_by_key_kind",
                 // #798 (V54) — the semantics projection's floors and tags shape (§4.51), then the namespace's name grammar,
@@ -2279,6 +2468,14 @@ class FlywayMigrationIntegrationTest {
                 "chk_published_endpoint_versions_status",
                 "chk_published_endpoint_versions_version",
                 "chk_published_endpoints_current_version",
+                // #1037 (V65) — the closed method list on the route table (metadata-db §4.13).
+                "chk_published_endpoints_method",
+                // #1039 (V67) — a reservation is live (both digests) xor retired (neither), and its closed method list
+                // (metadata-db §4.61); `live` < `method`.
+                // #1043 (V68) — the capture decision is both columns or neither (metadata-db §4.61); `capture` < `live`.
+                "chk_published_mutation_reservations_capture",
+                "chk_published_mutation_reservations_live",
+                "chk_published_mutation_reservations_method",
                 // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
                 // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
                 "chk_schedule_notification_deliveries_accepted",

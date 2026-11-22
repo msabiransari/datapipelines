@@ -16,6 +16,7 @@ import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.IdempotencyStore
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.executor.JdbcWritebackRunner
+import co.datapipelines.executor.LocalWritePlanner
 import co.datapipelines.executor.PipelineExecutor
 import co.datapipelines.executor.RedisCancellationFlags
 import co.datapipelines.executor.RedisIdempotencyStore
@@ -176,7 +177,40 @@ class EngineConfiguration {
     fun idempotencyStore(redis: StringRedisTemplate): IdempotencyStore = RedisIdempotencyStore(redis)
 
     @Bean
-    fun writebackRunner(registry: DatasourceRegistry): WritebackRunner = JdbcWritebackRunner(registry)
+    fun writebackRunner(
+        registry: DatasourceRegistry,
+        result: ResultConfig,
+    ): WritebackRunner =
+        // (write-transactions §5) The same-registration drain's byte ceiling is the configured
+        // result budget (`datapipelines.result.max-size-bytes`), not a private constant: a source
+        // too large to retain under the operator's own limit refuses the write before anything
+        // is written. Wired here — the one assembly point — so the drain and the result store
+        // cap mean the same number for the same rows.
+        JdbcWritebackRunner(registry, drainMaxBytes = result.maxSizeBytes)
+
+    /**
+     * (write-transactions §3.1) The run-admission write-set planner: a ROOT execution of a
+     * writable run walks its pinned graph — children resolved through the same repository
+     * [co.datapipelines.pipeline.PipelineResolver] composition validation uses — and enrolls one
+     * local write transaction when every eligible write targets a single registration. The
+     * depth bound is the executor's own `max-composition-depth`, the same limit
+     * [co.datapipelines.web.pipelines.SubPipelineExecutionRunner] enforces at runtime, so the
+     * walk admits exactly the shapes the family can actually run.
+     */
+    @Bean
+    fun localWritePlanner(
+        pipelineResolver: co.datapipelines.pipeline.PipelineResolver,
+        datasourceRegistry: DatasourceRegistry,
+        config: ExecutorConfig,
+        executionRepository: co.datapipelines.executor.ExecutionRepository,
+    ): LocalWritePlanner =
+        LocalWritePlanner(
+            pipelineResolver,
+            datasourceRegistry,
+            config.maxCompositionDepth,
+            co.datapipelines.executor.CommitLedger
+                .over(executionRepository),
+        )
 
     /**
      * **Carry-forward #3 — the absolute `result_url` builder.**
@@ -230,6 +264,7 @@ class EngineConfiguration {
         subPipelineRunner: SubPipelineRunner,
         progress: ExecutionProgress,
         scriptSupport: co.datapipelines.executor.ScriptSupport,
+        localWritePlanner: LocalWritePlanner,
     ): PipelineExecutor =
         pipelineExecutor(
             // The shared bean is a bean-of-record (mcp-server's @ConditionalOnBean); no
@@ -261,6 +296,7 @@ class EngineConfiguration {
             progress = progress,
             scripts = scriptSupport,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     /**

@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.templates.FixtureInputs
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateValidationFailure
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -112,6 +113,30 @@ class ScriptFaceModelTest {
     }
 
     @Test
+    fun `a body fixture in the tests pane binds from the pane's own text - exact decimals and repeated members kept`() {
+        val tests =
+            """[ { "name": "exact", "input": { "inputs": { "order": { "price": $LONG_FRACTION } } },""" +
+                """ "expect": { "output": [] } },""" +
+                """ { "name": "repeated", "input": { "inputs": { "order": { "a": 1 }, "order": { "a": 2 } } },""" +
+                """ "expect": { "output": [] } } ]"""
+        val draft =
+            ScriptFace.bind(identity, ScriptFixtures.skeletonPanes.copy(tests = tests)).shouldBeInstanceOf<ScriptFace.Bound.Draft>().draft
+        val cases = draft.tests.orEmpty().associateBy { it.name }
+
+        val exact =
+            cases
+                .getValue("exact")
+                .input.inputs
+                .shouldBeInstanceOf<FixtureInputs>()
+        exact.exactText("order") shouldBe """{"price":$LONG_FRACTION}"""
+        cases
+            .getValue("repeated")
+            .input.inputs
+            .shouldBeInstanceOf<FixtureInputs>()
+            .isRepeated("order") shouldBe true
+    }
+
+    @Test
     fun `a pane that is not JSON, or is empty, is refused naming the pane - nothing else is bound`() {
         val bound =
             ScriptFace.bind(
@@ -170,5 +195,10 @@ class ScriptFaceModelTest {
         val refusal = FaceRefusal(pane = "tests", code = "template.test_failed", message = "Test case 'x' failed.", detail = "case: x")
         refusal.line shouldBe "[tests] template.test_failed — Test case 'x' failed. (case: x)"
         FaceRefusal(pane = null, code = "c", message = "m", detail = null).line shouldBe "c — m"
+    }
+
+    private companion object {
+        /** More digits than a double holds (#1038): the pane's text, not a parsed tree, must reach the runner. */
+        const val LONG_FRACTION = "0.123456789012345678901234567890"
     }
 }

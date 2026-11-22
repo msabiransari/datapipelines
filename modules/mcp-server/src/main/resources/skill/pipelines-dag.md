@@ -155,3 +155,14 @@ purpose: Multi-node judgment — shaping the DAG, tempdb staging, indexes, the t
   table or an open transaction from one node is not visible to the next, and must not be
   relied on. Hand data forward with `output: tempdb` tables and read them with
   `source: "tempdb"`.
+- **One registration, one transaction; two destinations, no transaction.** A run whose durable
+  writes — DML nodes on a registered datasource, `output.target: "datasource"` write-backs — all
+  name ONE registration on PostgreSQL, MySQL, SQL Server or Oracle is planned onto a single local
+  transaction automatically: the root commits once after every node succeeded, any failure rolls
+  back everything, and a re-run starts clean. The plan refuses, before any business write, a write
+  set that also names a second durable destination or an external DDL node
+  (`pipeline.execution.local_write_refused`) — split the run or move the other destination out.
+  A refused or lost final commit reports `pipeline.execution.local_write_commit_failed` with an
+  unknown transaction outcome: the database may hold the commit, so check the target table before
+  re-running — never assume the rollback. H2, SQLite, DuckDB and lake targets are never enrolled;
+  they keep per-node commits.

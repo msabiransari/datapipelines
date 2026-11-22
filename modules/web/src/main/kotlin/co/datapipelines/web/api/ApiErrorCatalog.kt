@@ -219,6 +219,8 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Import.CONTEXT_KEY_MISSING to HttpStatus.CONFLICT,
             PipelineErrorCodes.Execution.NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Execution.PARAMETER_REQUIRED to HttpStatus.BAD_REQUEST,
+            // §13.3 / #1038 — the structured request body refused (reason in details, never a value).
+            PipelineErrorCodes.Execution.REQUEST_BODY_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE to HttpStatus.BAD_REQUEST,
             // §13.3 / #194 — a value breaking a declared constraint, precision or scale: 400 like
             // its invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
@@ -238,6 +240,16 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.CONCURRENCY_LIMIT to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Execution.NOT_RUNNING to HttpStatus.CONFLICT,
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE to HttpStatus.BAD_GATEWAY,
+            // §13.3 / #1033 — the write-set plan's refusal of a run whose durable writes cannot
+            // share one local transaction: deterministic and author-side (one durable
+            // destination, or one registration for the aliased server), so 400 against the
+            // family's 500 default — the run ends FAILED before the first business write.
+            PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED to HttpStatus.BAD_REQUEST,
+            // §13.3 / #1033 — the root's settle of the family's shared local write transaction
+            // was refused after the last node succeeded: the party behind us refused the
+            // finalize, 502 like node commit_failed (and ERROR with the stack, not WARN —
+            // the rendered writes can be the defect).
+            PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED to HttpStatus.BAD_GATEWAY,
             // §13.4 (#336) — the streamed read's finalizing commit was refused: the source
@@ -324,6 +336,8 @@ object ApiErrorCatalog {
             // client back-off written against `rate_limit.*` needs no change to honour it.
             PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
+            // #1039 — the published mutation's durable reservation could not be read or written: nothing ran (503).
+            PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
             // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
             // so each code owns a row rather than being absorbed by the default (025 A2).
@@ -482,6 +496,30 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.KEY_NOT_BOUND to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING to HttpStatus.CONFLICT,
+            // #1037 §13.14 — the method era. A publish naming a method the surface does not
+            // publish is the caller's request (400, the family default, stated here because §13
+            // states it); the mutations gate is a withhold, not the caller's fault (503); a
+            // promotion covering a non-GET route or grant is a batch state conflict like its
+            // key_missing sibling (409).
+            PipelineErrorCodes.Endpoint.METHOD_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Endpoint.MUTATIONS_DISABLED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED to HttpStatus.CONFLICT,
+            // #1038 §13.14 — the structured request body. A GET pin of a body-requiring pipeline is a state conflict
+            // like its read-only sibling (409); the transport refusals carry their own HTTP meanings (413, 415); the
+            // per-defect body code takes the request family's 400.
+            PipelineErrorCodes.Endpoint.REQUEST_BODY_INCOMPATIBLE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.EndpointRequest.TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.EndpointRequest.UNSUPPORTED_MEDIA_TYPE to HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            // #1039 §13.14 — a dependency a published mutation needs before admission was down: a withhold, not the
+            // caller's fault (503). The Idempotency-Key entry takes the request family's 400.
+            PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
+            // #1043 §13.27 — runtime capture: one active window per route and method (409), a window or a captured
+            // detail absent in the selected workspace (404), a captured detail past its expiry (410, gone for good), and a
+            // refused start (400: a GET route or a malformed correlation filter).
+            PipelineErrorCodes.ExecutionCapture.ALREADY_ACTIVE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.ExecutionCapture.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.ExecutionCapture.EXPIRED to HttpStatus.GONE,
+            PipelineErrorCodes.ExecutionCapture.INVALID to HttpStatus.BAD_REQUEST,
             // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
             // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that
@@ -752,6 +790,12 @@ object ApiErrorCatalog {
 
     private val AUTHORED_USER_MESSAGES: Map<String, String> =
         mapOf(
+            PipelineErrorCodes.ExecutionCapture.ALREADY_ACTIVE to
+                "A capture is already active for this API method. Stop it before opening another.",
+            PipelineErrorCodes.ExecutionCapture.NOT_FOUND to "No captured details exist for that capture or execution.",
+            PipelineErrorCodes.ExecutionCapture.EXPIRED to "The captured details of this execution have expired and were removed.",
+            PipelineErrorCodes.ExecutionCapture.INVALID to
+                "Capture applies to POST, PUT and DELETE APIs, and a correlation filter must be one UUID.",
             PipelineErrorCodes.Lake.CAPACITY_BUSY to "Delivery capacity is busy. Retry when an ingestion slot and scratch are available.",
             PipelineErrorCodes.Lake.APPEND_GRANT_MISSING to "The execution has no checked authority to append to the lake.",
             PipelineErrorCodes.Lake.APPEND_OUTCOME_UNKNOWN to

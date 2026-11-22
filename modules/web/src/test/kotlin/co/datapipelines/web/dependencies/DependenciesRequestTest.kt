@@ -81,6 +81,52 @@ class DependenciesRequestTest {
             Parsed.Refused(RequestField.NAME, RefusalReason.SELECTOR_INCOMPATIBLE)
     }
 
+    /**
+     * #1037 — the API family's lookup key is the ROUTE key: a bare path is GET (every legacy request keeps its meaning),
+     * a mutation method rides in front of the path, and `+` or `%20` is the one space (the pane's URLSearchParams spelling).
+     * `GET /path` is not a second spelling of GET, and an unknown or lower-case method word is a malformed name.
+     */
+    @Test
+    fun `an API root names a route - a bare path is GET and a mutation method precedes the path`() {
+        fun key(query: String) = parse(FamilyKey.API_ENDPOINT, query).shouldBeInstanceOf<Parsed.Accepted>().request.lookupKey
+        key("name=${enc("/nyc/v1/trips")}&version=1") shouldBe "/nyc/v1/trips"
+        key("name=${enc("POST /nyc/v1/trips")}&version=1") shouldBe "POST /nyc/v1/trips"
+        key("name=POST+/nyc/v1/trips&version=2") shouldBe "POST /nyc/v1/trips"
+        key("name=${enc("DELETE /api/nyc/v1/trips")}&version=1") shouldBe "DELETE /nyc/v1/trips"
+        for (bad in listOf("GET /nyc/v1/trips", "post /nyc/v1/trips", "PATCH /nyc/v1/trips", "POST  /nyc/v1/trips", "POST /two/segments")) {
+            withClue(bad) {
+                refused(FamilyKey.API_ENDPOINT, "name=${enc(bad)}&version=1") shouldBe
+                    Parsed.Refused(RequestField.NAME, RefusalReason.NAME_INVALID)
+            }
+        }
+    }
+
+    @Test
+    fun `an API method prefix does not consume its valid 200 character path budget`() {
+        val path = "/mix/v1/" + "a".repeat(64) + "/" + "b".repeat(64) + "/" + "c".repeat(62)
+        path.length shouldBe 200
+        for (prefix in listOf("", "POST ", "PUT ", "DELETE ")) {
+            val name = prefix + path
+            parse(FamilyKey.API_ENDPOINT, "name=${enc(name)}&version=1")
+                .shouldBeInstanceOf<Parsed.Accepted>()
+                .request.lookupKey shouldBe name
+            refused(FamilyKey.API_ENDPOINT, "name=${enc(name + "x")}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        for (name in listOf("POST $path", "PUT $path", "DELETE $path")) {
+            refused(FamilyKey.PIPELINE, "name=${enc(name)}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        for (prefix in listOf("GET ", "PATCH ", "post ")) {
+            refused(FamilyKey.API_ENDPOINT, "name=${enc(prefix + path)}&version=1") shouldBe
+                Parsed.Refused(RequestField.NAME, RefusalReason.VALUE_TOO_LONG)
+        }
+        refused(FamilyKey.API_ENDPOINT, "name=${enc(path)}&version=${"1".repeat(201)}") shouldBe
+            Parsed.Refused(RequestField.VERSION, RefusalReason.VALUE_TOO_LONG)
+        refused(FamilyKey.API_ENDPOINT, "id=${enc("POST $path")}&version=1") shouldBe
+            Parsed.Refused(RequestField.ID, RefusalReason.VALUE_TOO_LONG)
+    }
+
     @Test
     fun `a version missing on an artifact family is version_invalid - absent where required`() {
         for (family in listOf(

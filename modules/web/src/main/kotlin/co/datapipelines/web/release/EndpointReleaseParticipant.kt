@@ -1,6 +1,7 @@
 package co.datapipelines.web.release
 
 import co.datapipelines.application.endpoints.EndpointReleaseSteps
+import co.datapipelines.application.endpoints.EndpointRouteKey
 import co.datapipelines.application.endpoints.PublishedEndpointVersion
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -61,10 +62,13 @@ class EndpointReleaseParticipant(
         flip: ReleaseFlip,
     ): Pair<String, Map<String, Any?>> {
         val released = flip.result as PublishedEndpointVersion
+        // The node's pin key is the route key (the bare path for GET): the audit names path and method separately.
+        val route = checkNotNull(EndpointRouteKey.parse(flip.node.identity.entityId)) { "an API release node carries a route key" }
         return AUDIT_RELEASED to
             mapOf(
                 "endpoint_id" to entityId.toString(),
-                "path_pattern" to flip.node.identity.entityId,
+                "path_pattern" to route.path,
+                "method" to route.method.name,
                 "version" to released.version,
                 "pipeline" to released.body.pipelineName,
                 "pipeline_version" to released.body.pipelineVersion,

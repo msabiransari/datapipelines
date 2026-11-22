@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.43 (revised — see Change Log)
+**Status:** v1.52 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-21
 
 ---
 
@@ -1162,7 +1162,7 @@ Construction rules (these are the shapes §5.2 actually throws):
 
 **The table applies only to raw driver and unknown exceptions.** A collaborator that raises a `DatapipelinesException` has already chosen its catalog code — the template engine's `template_not_found` vs `template_render_failed` split, staging's `value_overflow` / `memory_limit_exceeded` / `invalid_column_name`, the result store's `too_large` / `storage_unavailable`. That code always wins; re-deriving one from the exception's Java type would silently overwrite a precise code with a coarser one. What the mapper adds in that case is only the structured detail (`node_id`, `phase`).
 
-**SCRIPT failures are carried codes by construction (7c).** The §13.18 family ([Pipeline Contract §13.18](pipeline-contract.md#1318-script)) — `pipeline.script.input_contract_violation` / `input_too_large` / `evaluation_failed` / `timeout` (504; the engine's own bound, with `pipeline.node.timeout` the outer backstop) / `resource_limit` / `pool_exhausted` (503) / `row_shape_mismatch` / `value_type_mismatch` / `precision_lost` / `value_too_large` / `invariant_failed` / `invariants_too_large` / `rejects_strict` — is raised by the script pool, the type gate and the script runner as `DatapipelinesException`s, so each reaches the node failure record with its own code and detail (batch and row number on the gate refusals, the invariant's name and message, the reject count and first ten reasons on `rejects_strict`), and nothing in this table re-maps it.
+**SCRIPT failures are carried codes by construction (7c).** The §13.18 family ([Pipeline Contract §13.18](pipeline-contract.md#1318-script)) — `pipeline.script.input_contract_violation` / `input_too_large` / `evaluation_failed` / `timeout` (504; the engine's own bound, with `pipeline.node.timeout` the outer backstop) / `resource_limit` / `pool_exhausted` (503) / `row_shape_mismatch` / `value_type_mismatch` / `precision_lost` / `value_too_large` / `invariant_failed` / `invariants_too_large` / `rejects_strict` — is raised by the script pool, the type gate and the script runner as `DatapipelinesException`s, so each reaches the node failure record with its own code and detail (batch and row number on the gate refusals, the invariant's name and message, the reject count and first ten reasons on `rejects_strict`), and nothing in this table re-maps it. **Exception — an execution that carries a structured request body (#1038):** the executor bounds every failure it records, on that execution and on every child it starts, to the code, the node context and a fixed set of metadata keys (`node`, `node_id`, `phase`, `rule`, `reason`, `rejected`, `batch`, `row`, `rows`, `max_input_rows`, `sql_state`, `vendor_code`, `execution_id`): the message is the code, and the invariant's name and message, the reject reasons, engine and driver text, rendered SQL and the exception chain never reach `node_failed`, `pipeline_failed`, `error_json`, `node_stats_json`, the stream, a replay or the logs, and a script `console` line keeps its level but not its text (`BoundedFailure`).
 
 For anything else, the **phase** the node was in is what disambiguates: a `SQLException` is the same class whether it surfaced acquiring a connection (`datasource_connection_failed`), executing (`query_execution_failed`), staging (`staging_failed`) or writing back (`writeback_failed`), so the phase is carried explicitly rather than guessed from the message. Reflected driver text is bounded at 2000 characters before it is copied into `MappedError` — H2, MSSQL and Oracle append the whole failing statement to `SQLException.message`, and that string otherwise propagates into `node_stats_json`, both SSE payloads, the Postgres `error_json`, and every log line that prints it.
 
@@ -1550,7 +1550,7 @@ The executor exports Micrometer metrics. **[Observability §4.1](observability.m
 
 | Metric | Type | Tags |
 |---|---|---|
-| `datapipelines.executions.total` | counter | `status` (success/failed/aborted), `pipeline_id` |
+| `datapipelines.executions.total` | counter | `status` (success/failed/aborted/outcome_unknown), `pipeline_id` |
 | `datapipelines.executions.duration` | timer | `pipeline_id` |
 | `datapipelines.executions.concurrent` | gauge | (none) — bound to the live execution-slot count by the execution-slot bean, once per instance |
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) |
@@ -1582,6 +1582,10 @@ nowhere:
 > **Each node is atomic on its own database; the pipeline as a whole is not, and a node that fails
 > does not undo the committed work of the nodes before it.**
 
+Since #1033 (2026-11-18) there is one deliberate exception, stated in §16.4: when a run's durable
+writes all name a single registration, they share one local transaction and the run settles as a
+whole. Everything else in this section — and every multi-destination run — is unchanged.
+
 ### 16.1 One transaction, one database
 
 There is exactly **one** Spring transaction manager in this application — `metadataTransactionManager`,
@@ -1597,7 +1601,7 @@ and every mechanism in the table below already exists in the code.
 |---|---|---|
 | metadata ↔ metadata, multi-statement | `@Transactional("metadataTransactionManager")` on the service method | the service layer (`PipelineService` and its siblings) |
 | customer DB, within one node | per-connection `autoCommit=false` + commit/rollback, savepoint for `REPLACE` | `WritebackRunner` (§6.4.3) |
-| customer DB ↔ customer DB, across nodes | **none — each node is atomic, the pipeline is not** | §16.2 below |
+| customer DB ↔ customer DB, across nodes | **one local transaction when the run's durable writes name ONE registration** (#1033, §16.4); otherwise **none — each node is atomic, the pipeline is not** | §16.2, §16.4 |
 | metadata ↔ customer DB (status vs. work) | the terminal status write runs in `NonCancellable`; the stale sweeper reconciles what a dead instance left | §5.1, §8.3 |
 | metadata ↔ Redis (idempotency) | claim-before-work via `SET NX` | §11 |
 | sender ↔ receiver (promotion) | the receiver applies a batch in ONE metadata transaction; the sender stores nothing and re-derives from inventory; `body_hash` makes a retry a no-op | `PromotionReceiveService` |
@@ -1619,7 +1623,9 @@ Two rules make this mechanical rather than remembered:
 A pipeline is a DAG of nodes, each running against whatever database its `source` names. A node
 that writes back (`output.target: "datasource"`, §6.4.3) commits on ITS OWN connection when it
 finishes. If a later node then fails, that commit stands: there is no transaction spanning the two,
-by the design above, and there cannot be one when the two nodes write to different databases.
+by the design above, and there cannot be one when the two nodes write to different databases. When
+they name the same registration, there now is one — §16.4 — and the run is planned onto it
+automatically.
 
 So a failed execution can leave a target table populated by the nodes that ran before the failure.
 That is not a defect and there is no rollback coming. Design for it the way any at-least-once
@@ -1633,7 +1639,8 @@ pipeline is designed:
 
 The parts that ARE atomic: each node's own write-back against its own database (§6.4.3); each
 metadata service method that carries `@Transactional` (§16.1); the tempdb, which is per-execution
-and discarded whole (§9).
+and discarded whole (§9); and, since #1033, a single-registration run's local write transaction
+(§16.4).
 
 ### 16.3 Why not "just" wrap the pipeline
 
@@ -1651,12 +1658,356 @@ Every alternative was considered and rejected in the same ruling:
 The honest position is the one stated: node-level atomicity, an explicit consistency model, and a
 document a customer can read before they need it.
 
+### 16.4 The single-registration local write transaction (#1033)
+
+**Ratified by the design record `pipeline-write-transactions.md`; implemented in #1033 (v1.105 of the
+[pipeline contract](pipeline-contract.md)).** This is the one exception §16 above now carries: a run
+whose durable writes all name ONE datasource registration executes inside ONE local transaction on
+that registration, committed or rolled back by the root as a whole. Everything it does not cover
+keeps §16.2's model exactly — no XA appeared, and §16.3's rejections all stand.
+
+**Planning — every run, automatic.** A root executor — and only a root; children inherit a
+transaction, they never plan one — walks the pinned graph and its children after
+`execution_started` and before the first business write. The durable writes it counts: DML nodes
+whose source is a registered datasource, DQL/PIPELINE nodes with `output.target: "datasource"`
+(§6.4.3), and DDL nodes against an external database (external DDL, counted separately). The
+execution-private tempdb is never a durable target. Registrations are unique **by name** — two
+names for the same server are two destinations. Eligible engines are the transactional JDBC
+dialects: PostgreSQL, MySQL, SQL Server, Oracle — each further subject to the engine
+qualification of [§16.6](#166-engine-qualification-1036), which refuses Oracle today. H2, SQLite,
+DuckDB and LAKE are excluded from the feature and keep node-level atomicity.
+
+**Ordinary and refused plans.** A plan with no participating writer — pure reads, staging, excluded
+engines only — is an ordinary run: nothing changes, §16.2 governs. A plan whose participating
+writers name one eligible registration PLUS a second durable destination (eligible, excluded, or
+external DDL), or an external DDL node, or a pinned child whose plan cannot be read, is refused
+BEFORE any business write: the run ends FAILED with `pipeline.execution.local_write_refused`
+(400), its details naming the `reason` (`second_durable_destination`, `external_ddl`,
+`unknown_child_writes`, and since #1036 `unqualified_transactional_target` /
+`unqualified_write_operation`, §16.6) and the counted destinations. A read from another datasource is allowed —
+only writes are counted.
+
+**The lease.** The first access to the participating registration — read or write — leases ONE
+connection from its ordinary pool, `autoCommit=false`, and holds it for the rest of the run.
+A plan without an eligible writer never enrolls; an enrolled plan leases lazily on first access.
+A pool-wait timeout fails the run before any business write. The
+isolation level is whatever the customer's database supplies on that connection; the product adds
+no setting and overrides nothing. Every enrolled write — node DML, write-back rows, and the
+engine-generated `REPLACE`, which clears rows with a transactional DELETE inside the transaction
+and never an implicit-commit TRUNCATE — runs on that connection as a **participant**: statements
+report finished, but committed evidence is withheld and the rows are invisible to other
+connections until the root settles. Children run on the same lease through their execute request;
+the planner is wired only into root executor factories, so no second transaction can open
+mid-family. Independent reads on other registrations use ordinary leases; metadata writes stay
+separate (§16.1's rule 2 is unchanged).
+
+**Settle.** The root commits ONCE, after every required node — children included — has succeeded
+and the caller result is materialized; terminal success (`data_ready` included) is emitted after
+the commit. Every other terminal path — a failing node, the execution deadline, an explicit abort,
+a structural abort, a setup failure — rolls the lease back, and with it every enrolled write. A
+commit that is refused or loses its acknowledgement ends the run **`OUTCOME_UNKNOWN`** with
+`pipeline.execution.local_write_commit_failed` (502): the database may have committed, the engine
+never re-runs business SQL to settle the question, and the operator checks the target before any
+deliberate re-run ([§16.5](#165-the-commit-boundary-and-outcome_unknown-1035)).
+
+**Telemetry.** One counter, `datapipelines.executions.local_write_transactions` (tags `outcome`
+`started`/`committed`/`rolled_back`/`unknown`, and `dialect`), catalogued in
+[observability §4.1](observability.md): at most one `started` per run (the first enlist) and at
+most one terminal outcome. An `unknown` is alertable on its own.
+
+**DML results inside the transaction (#1034).** A DML node declares its operation
+([pipeline contract §4.4](pipeline-contract.md#44-json-structure-dml-node)). An `insert` executes
+once per input row on the participant connection and reads each row's key back from the driver; a
+missing, extra or rewritten key fails the node, and the root's rollback removes every row the
+family wrote. Its result rows (each input row plus `id`, or one `affected_rows` row) are staged or
+materialized under the ordinary staging and result limits BEFORE the commit — so a dependent
+line-item node can read a staged order `id` — and stay unpublished until the settle
+([§16.5](#165-the-commit-boundary-and-outcome_unknown-1035) owns what publishes after it). Off the transaction — tempdb, H2, DuckDB, and any run with no enrolled
+writer — a multi-row insert runs in its own node-local transaction, so an uncorrelated set still
+leaves no row behind.
+
+**DML admission over the pinned family (#1034).** The write-set walk above is also DML run
+admission: for the root and every pinned child it reaches (same workspace-scoped resolution, same
+depth bound and shared-child rule), `LocalWritePlanner.plan` applies the DML shape rules and the
+CURRENT insert qualification ([pipeline contract §4.4](pipeline-contract.md#44-json-structure-dml-node))
+before the verdict is read. A refusal throws the catalogued code, which ends the run as a §5.1
+setup failure (`pipeline_failed`, no failed node) before any lease, staging allocation or
+`node_started` — so an operation-less or unqualified node in a child can no longer surface only
+when that child starts, after an excluded parent writer (which never enrolls) has already
+committed. The refusal names the child (`details.child`, `details.via`). Excluded engines are not
+enrolled to achieve this, and nothing is rolled back after a late detection: there is none. Each
+execution's own body re-check and the insert node's live qualification check remain as backstops.
+
+### 16.5 The commit boundary and `OUTCOME_UNKNOWN` (#1035)
+
+**Ratified by the design record `pipeline-write-transactions.md` §3.5/§4; implemented in #1035.** A
+family that shares one transaction publishes nothing until its ONE commit settles it, and an
+execution whose commit may have happened is never labelled as if it had not.
+
+**Nothing is exposed before the commit.** Until the root's commit is confirmed, no surface shows
+the family's result: the root holds its caller result (the result is stored under the ordinary key
+but no `data_ready`, result URL or `committed` evidence is emitted), and every successful CHILD of
+the family ends *provisionally* — its execution row stays `RUNNING` with `settlement_pending`, its
+completion is recorded on NO history surface (not streamed, not in the durable `execution_events`
+record, not in the Redis replay log, and it spends no event id), and no child `data_ready` is ever
+emitted for a held child. A second connection, a direct child cursor, history, the replay, the MCP
+and the scheduler all see `RUNNING`, no terminal event and no rows until the settle. At the root's
+terminal write the settlement publishes each child's ONE terminal event with the root's final
+outcome — `pipeline_completed` after `SUCCESS`, `pipeline_failed` (payload `status` `FAILED` or
+`OUTCOME_UNKNOWN`, the root's error) after a failed root, `execution_aborted` (the root's reason)
+after an abort — so a child's history never claims a success its root did not reach. A family the
+stale sweep settles (the instance died) gets its status only: the dead instance's history is not
+invented. A zero-caller run still returns its
+execution statistics at the settle; only result rows are held.
+
+**The durable commit boundary.** Immediately BEFORE the customer commit is called, the root stamps
+`commit_attempted_at` on its own row (an autocommit statement on the metadata database — no
+metadata transaction is ever held across customer I/O); after the driver confirms, it stamps
+`commit_confirmed_at`. If the attempt stamp cannot be made durable the commit is not called: the run
+ends FAILED with `pipeline.execution.local_write_refused` (`reason: commit_evidence_unavailable`)
+and rolls back — an unrecorded commit attempt is the one thing the sweeper could mislabel.
+
+**The terminal funnel.** Every terminal path first reads the boundary:
+
+| Boundary at the terminal | Status | What publishes |
+|---|---|---|
+| Never attempted (a failing node, the deadline, an explicit or structural abort, a setup failure, a cancellation) | `FAILED` / `ABORTED` as before — the lease is rolled back | nothing; every provisional child inherits the root's status |
+| Attempted, confirmation lost or the commit refused | **`OUTCOME_UNKNOWN`** (`pipeline_failed` event, payload `status: "OUTCOME_UNKNOWN"`, code `pipeline.execution.local_write_commit_failed`) | nothing: no `data_ready`, no success payload; every provisional child inherits `OUTCOME_UNKNOWN` |
+| Confirmed | `SUCCESS` | the held result (`data_ready`) and terminal success; a delivery failure here sets `result_unavailable` and changes nothing else — the status stays `SUCCESS`, and the business SQL is never re-run. Before the terminal event the executor builds the announcement and reads the stored result back: a result lost since it was prepared (or a store or URL failure) is recorded on the terminal row itself (`result_unavailable`, with the prepared result's counts) and never announced (#1035 r3). A surviving header does not make a result readable: the store's `describe` and `page` answer absent when the header counts rows but the rows list is gone, so a rows-only loss is reported unavailable exactly like a loss of both keys (#1035 r4); a result that counts no rows has no list and stays a readable empty result. Availability is decided by the rows the read actually returned, not by an earlier existence check: a page range the header counts rows in that comes back empty or short — the list expired or was removed between the check and the row read — is absent too, while a page at or beyond the end stays a valid empty page (#1035 r5) |
+| Attempted, then the instance died | settled by the stale sweep ([metadata-db §8.3](metadata-db.md#83-stale-execution-sweep)): confirmed → `SUCCESS` + `result_unavailable`; attempted → `OUTCOME_UNKNOWN`; neither → `ABORTED` `instance_lost` — one decision per execution made at write time by a single statement, so evidence that arrives while the sweep runs is never overtaken; each `OUTCOME_UNKNOWN` the sweep finds is alerted individually (ERROR `execution.outcome_unknown`, meter `datapipelines.executions.outcome_unknown_swept`) | nothing from the dead instance |
+
+A commit that was attempted is never rolled back by the funnel: a cancellation or deadline arriving
+inside the window does not interrupt the settle (the settle runs non-cancellable), and an
+ancestor's cancellation still writes the terminal row before it propagates.
+
+**Visible on every surface.** `OUTCOME_UNKNOWN` is a terminal status like `FAILED`: history and
+the execution record ([REST §10](rest-api.md#10-execution-history)), the SSE stream (the existing
+`pipeline_failed` event, its payload's `status` saying which), the MCP tools, the scheduler (run
+state `unknown`, which blocks a retry exactly as an unreadable outcome does) and the result cursor
+(`410 result.execution_failed`, `details.status: OUTCOME_UNKNOWN`). A replayed request with its
+original `Idempotency-Key` inside the reservation TTL returns the same execution, unknown included.
+The engine never replays writes to settle the uncertainty; the operator looks up the execution id
+and checks the target before any deliberate new run.
+
+**The execution budget bounds the commit.** The driver's `commit()` runs on a dedicated daemon
+thread and the root waits for its answer for at most the execution's REMAINING budget (the existing
+execution deadline — no new setting; a run without a deadline waits for the driver). When the budget
+ends first the run is `OUTCOME_UNKNOWN` — the attempt stamp is already durable, so it is never
+`FAILED`, `ABORTED` or `SUCCESS` — the execution slot and the executor thread are released, nothing
+is announced, and the customer session is aborted. The abandoned commit is never confirmed: if the
+driver answers later, its thread returns the connection and the recorded outcome stands (a late
+success still lands in the customer database, which is exactly what `OUTCOME_UNKNOWN` says may
+happen — the operator checks the target). A commit entered with the budget already spent is
+abandoned at once.
+
+**Rolling back.** The schema half is [metadata-db §7.5](metadata-db.md#75-rolling-back-v66-execution-commit-outcomes-1035):
+a repeatable downgrade barrier makes a binary older than V66 refuse to start, and the documented
+rollback block refuses while any unknown outcome or unsettled commit attempt exists. Drain first,
+preserve unknown outcomes and their readability, then revert the executor.
+
+### 16.6 Engine qualification (#1036)
+
+**Ratified by the design record `pipeline-write-transactions.md` §3.2/§5/§7; implemented in #1036.**
+§16.4's eligibility says which engines the transaction COVERS; qualification says which of them —
+and which operations on them — real-driver evidence has proven keep the contract. Run admission
+reads both, before the first business statement, so a covered but unproven combination is
+REFUSED, never run as independent commits that silently downgrade the guarantee:
+
+- An `Enroll` plan whose registration's engine has no qualified `transaction` row is refused with
+  `pipeline.execution.local_write_refused`, `reason: unqualified_transactional_target`
+  (`details.registration`, `dialect`, `qualification`, `qualification_reason`). Oracle today.
+- An `Enroll` plan with an enrolled write whose operation is not qualified on the engine is refused
+  with `reason: unqualified_write_operation` (`details.writes`: each write's `node_id`,
+  `registration`, `via`, `operation` and `qualification`). Today the only unqualified operations
+  on a qualified engine are the MySQL and SQL Server inserts, which DML admission
+  ([pipeline contract §4.4](pipeline-contract.md#44-json-structure-dml-node)) refuses first with
+  `dml_insert_unqualified`; this rule is the planner's own backstop.
+- An insert whose declared key type was not measured on its engine is refused by DML admission
+  with `dml_insert_unqualified` BEFORE any business statement, even where the engine returns keys
+  for other types: the message reads "not qualified to return `<TYPE>` keys" and `details.key_type`
+  names the type (PostgreSQL today: every type the contract admits is measured, so this is the
+  rule a future key type meets, not a refusal a customer sees now). The node's own backstop reads
+  the same decision before its input is read.
+- At the first lease, a registration repointed since planning to an engine the transaction does
+  not cover OR has not qualified is refused with `reason: registration_ineligible` and no lease.
+
+The table below is `LocalWriteQualification.ROWS` (modules/datasources, beside the dialect
+capabilities), row for row — `LocalWriteQualificationSpecDriftTest` fails on any difference. The
+runtime reads the default storage only (the MyISAM row is a recorded limitation, not a check the
+executor makes per table), and an insert is qualified only when BOTH key modes are, because which
+one a run takes is decided per input row. Since #1036 round 2 an insert row also names the
+**key type** it was measured with (`INTEGER`, `BIGINTEGER` or `STRING`, the contract's declared
+canonical key types): a qualified row covers its own type only, a refused or unavailable engine's
+row covers every type (`any`), and a type no row covers is refused — never admitted under another
+type's evidence. `-` marks a row that has no key.
+
+| Engine | Driver | Server | Storage | Operation | Key mode | Key type | Status | Reason |
+|---|---|---|---|---|---|---|---|---|
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `transaction` | `none` | `-` | `qualified` | qualified: uncommitted rows hidden from a second connection, commit and rollback observed, statement timeout and lost commit acknowledgement end without a replay |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `update` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `delete` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `writeback_append` | `none` | `-` | `qualified` | qualified: appended rows committed with the family and rolled back with it |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `writeback_replace` | `none` | `-` | `qualified` | qualified: cleared with a transactional DELETE; old rows survive a later failure |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `generated` | `INTEGER` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `supplied` | `INTEGER` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `generated` | `BIGINTEGER` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `supplied` | `BIGINTEGER` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `generated` | `STRING` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `POSTGRES` | org.postgresql:postgresql 42.7.13 | PostgreSQL 16 (postgres:16-alpine) | heap table | `insert` | `supplied` | `STRING` | `qualified` | qualified: the driver returns the declared column under its own label, correlated per row, for the key type of the row |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `transaction` | `none` | `-` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `insert` | `generated` | `any` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `insert` | `supplied` | `any` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `update` | `none` | `-` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `delete` | `none` | `-` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `writeback_append` | `none` | `-` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `ORACLE` | com.oracle.database.jdbc:ojdbc11 23.7.0.25.01 | Oracle Database (no environment) | heap table | `writeback_replace` | `none` | `-` | `unavailable` | unavailable: no project-approved licensed Oracle test environment; qualification is unfinished |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `transaction` | `none` | `-` | `qualified` | qualified: uncommitted rows hidden from a second connection, commit and rollback observed, statement timeout and lost commit acknowledgement end without a replay |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `update` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `delete` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `writeback_append` | `none` | `-` | `qualified` | qualified: appended rows committed with the family and rolled back with it |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `writeback_replace` | `none` | `-` | `qualified` | qualified: cleared with a transactional DELETE; old rows survive a later failure |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `insert` | `generated` | `any` | `refused` | refused: the driver labels the key GENERATED_KEYS (SCOPE_IDENTITY()), not the declared column |
+| `MSSQL` | com.microsoft.sqlserver:mssql-jdbc 12.10.2.jre11 | SQL Server 2022 16.0.4275 (pinned digest) | rowstore table | `insert` | `supplied` | `any` | `refused` | refused: the driver labels the key GENERATED_KEYS, not the declared column, and returns a NULL key for a supplied key on a column without IDENTITY |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `transaction` | `none` | `-` | `qualified` | qualified: uncommitted rows hidden from a second connection, commit and rollback observed, statement timeout and lost commit acknowledgement end without a replay |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `update` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `delete` | `none` | `-` | `qualified` | qualified: affected_rows observed for zero and several matches, rolled back with the family |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `writeback_append` | `none` | `-` | `qualified` | qualified: appended rows committed with the family and rolled back with it |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `writeback_replace` | `none` | `-` | `qualified` | qualified: cleared with a transactional DELETE; old rows survive a later failure |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `insert` | `generated` | `any` | `refused` | refused: the driver labels the key GENERATED_KEY (the session's LAST_INSERT_ID), not the declared column |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | InnoDB | `insert` | `supplied` | `any` | `refused` | refused: the driver labels the key GENERATED_KEY, not the declared column, and returns no key row for a supplied key on a column without AUTO_INCREMENT |
+| `MYSQL` | com.mysql:mysql-connector-j 9.7.0 | MySQL 8.4 (mysql:8.4) | MyISAM | `transaction` | `none` | `-` | `refused` | refused: a non-transactional table keeps its rows after the rollback; transactional tables (InnoDB) are a prerequisite |
+
+**What the evidence observed (2026-11-21, `LocalTransactionDialectQualificationTest`, modules/dag,
+25 cases on real servers with the pinned drivers, every effect read from a SECOND connection).**
+Servers PostgreSQL 16.15, MySQL 8.4.11 (InnoDB) and SQL Server 16.00.4275; drivers pgjdbc 42.7.13,
+Connector/J 9.7.0 and mssql-jdbc 12.10.2.0. The connection's own isolation was recorded, not set:
+`READ_COMMITTED` on PostgreSQL and SQL Server, `REPEATABLE_READ` on MySQL. On all three: rows the
+family wrote were invisible to the second connection until the single commit (on SQL Server the
+second reader BLOCKS on the writer's locks — error 1222 under a short `LOCK_TIMEOUT` — rather
+than seeing them); UPDATE/DELETE `affected_rows` matched zero and several rows; a failing node
+rolled back every enrolled write, and a `replace` write-back's old rows survived the rollback; a
+statement blocked on another session's row lock ended at the node's query timeout
+(`pipeline.node.query_timeout`) and rolled back; a connection cut before the commit reached the
+server ended `OUTCOME_UNKNOWN` (`commit_refused`) with the server rolling back; and a commit whose
+acknowledgement was dropped ended `OUTCOME_UNKNOWN` (`commit_unanswered_within_budget`) with the
+rows landed exactly once and nothing replayed. The driver key probe ran `DmlKeys.read` against each
+engine: Connector/J labels the returned key `GENERATED_KEY` and mssql-jdbc `GENERATED_KEYS`, never
+the declared column, so the strict per-row key correlation refuses both key modes there.
+
+**Measured key types (#1036 round 2).** Every key type the contract admits
+(`DmlKey.SUPPORTED_TYPES`: `INTEGER`, `BIGINTEGER`, `STRING`) and what pinned-driver evidence stands
+behind it, per engine. Each admitted type is linked to a suite that runs a real insert on a real
+server with the pinned driver, in both key modes, and reads the stored rows back on an independent
+connection:
+
+| Engine | Key type | Generated | Supplied | Evidence (real server, pinned driver) |
+|---|---|---|---|---|
+| `POSTGRES` | `INTEGER` | measured | measured | `LocalTransactionDialectQualificationTest`, the driver key probe and the enrolled insert (modules/dag): `DmlKeys.read` against pgjdbc returns the declared column for a generated and a supplied key, and the enrolled run commits both rows with the supplied id read back from a second connection |
+| `POSTGRES` | `BIGINTEGER` | measured | measured | `DmlOperationResultsIntegrationTest` (tests/integration-tests): physical column `order_id`, empty input, correlation beyond 2^53, canonical JSON output |
+| `POSTGRES` | `STRING` | measured | measured | `DmlKeyTypeQualificationIntegrationTest` (tests/integration-tests): `text`, `varchar(40)` and `uuid` key columns, one generated and one supplied row per run, input-order output with every id a JSON string, the payload-to-key read back on the test's own connection equal to the product's output, the empty staged input, and a later node's failure rolling the generated and the supplied key back |
+| `MYSQL` | any | refused | refused | the driver labels the key `GENERATED_KEY`, not the declared column (`LocalTransactionDialectQualificationTest` key probe) |
+| `MSSQL` | any | refused | refused | the driver labels the key `GENERATED_KEYS`, not the declared column (same probe) |
+| `ORACLE` | any | unavailable | unavailable | no project-approved licensed test environment |
+
+The `STRING` measurement is as wide as its fixtures and no wider. Measured physical column types are
+`text`, `varchar(n)` and `uuid`; a `char(n)` column (blank-padded by the server, so a returned key can
+differ from the one supplied) was **not** measured, and a key the server returns changed — for
+example an upper-case UUID that `uuid` stores and returns in lower case — fails the node as
+`pipeline.node.dml_key_correlation_failed` (`key_rewritten`), keeps no row (asserted by the same suite)
+and never puts the key value in the diagnostic. `LocalWriteQualificationSpecDriftTest`
+holds this document's table to the runtime matrix, but a drift test proves only that the two agree: the
+measurements are the suites above, and removing a type's rows turns each of them red (the type is
+refused before any business statement).
+
+**Changing a row** is a code change with evidence: a new engine version, driver pin or operation
+is QUALIFIED only after `LocalTransactionDialectQualificationTest` covers it against a real server
+— never by editing the status. Oracle stays `unavailable` until a project-approved licensed test
+environment exists; its runs are refused, not enrolled and not run as independent commits.
+
+### 16.7 Operating the transaction (#1036)
+
+**Configuration.** There is no opt-in and no flag: on deployment, every run of every version —
+including versions saved long before the upgrade, schedules and published APIs — is planned by
+§16.4 and admitted by §16.6. The isolation level is the customer database's. The one setting that
+matters is the existing `datapipelines.executor.execution-timeout-seconds` (default `600`,
+[configuration](configuration.md)), which bounds the whole run AND the commit wait (§16.5); keep
+it.
+
+**Before upgrading: the offline compatibility report.** It runs the SAME planner run admission
+uses over every version the upgraded executor may run, and prints which it will enroll and which
+it will refuse, and why — without starting the application and without touching a customer
+database:
+
+```
+SPRING_DATASOURCE_URL=jdbc:postgresql://<metadata-host>:5432/<db> \
+SPRING_DATASOURCE_USERNAME=<role> SPRING_DATASOURCE_PASSWORD=<password> \
+  ./scripts/local-write-compatibility-report.sh [path/to/datapipelines-app.jar]
+```
+
+(the script runs `java -Dloader.main=co.datapipelines.application.compatibility.LocalWriteCompatibilityCli
+-jar datapipelines-app.jar`; `DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH` is honoured, and
+`DATAPIPELINES_REPORT_JAVA_OPTS` carries extra JVM options such as `-Djava.io.tmpdir=<dir>`, split on whitespace).
+
+- **What it inspects:** for every workspace, each pipeline's CURRENT version, every version a live
+  pipeline schedule pins (payload schema 2), and every version a published API's current version
+  pins (a `POST`/`PUT`/`DELETE` API may write). Pinned children are walked by the planner exactly
+  as at run time. A version reached from several places is one line naming every source.
+- **Which schema it reads:** the report runs BEFORE the upgrade, against the metadata store the
+  previous release still owns, so it works on that schema and on the current one. A store without
+  `published_endpoints.method` (before V65, #1037) is read through a read-only projection that
+  labels every route `GET` — the label V65's own backfill gives every existing row — so a legacy
+  route's pin is reported as `endpoint:GET:<path>`, none dropped and none reinterpreted; a store
+  with the column is read as stored. It never applies a migration and never boots the application.
+- **What it reads:** the metadata store only, through ONE session that is read-only on the client
+  and on the server (`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, so the server refuses
+  a write with SQLSTATE `25006`); a `SELECT`-only role is enough and recommended. Registrations
+  are resolved from metadata by name and engine; no credential is decrypted, no pool is built and
+  no customer connection is opened — any such call is refused and fails the report.
+- **What it prints (stdout):** one line per version —
+  `workspace=<w> pipeline=<name> version=<n> source=<current|schedule:<name>|endpoint:<METHOD>:<path>> verdict=<unchanged|enrolled|refused|unreadable> [reason=<reason>] [details={…}]`
+  — then `SUMMARY versions=<n> unchanged=… enrolled=… refused=… unreadable=…`. Details are
+  identifiers only (registration names, node ids, the trail through children); no SQL, row, URL,
+  host, user or password is printed. Library logging goes to stderr.
+- **Exit:** `0` report produced; `1` it could not be (stderr names the exception class only, never
+  the URL); `2` usage (no jar, no `SPRING_DATASOURCE_URL`).
+- **Acting on it:** a `refused` version will be refused at its first run after the upgrade, with
+  the same reason. Fix it first (one durable destination per run; DDL out of a writing run; an
+  Oracle writer moved or accepted as refused), or accept the refusal knowingly. An `unreadable`
+  line (a pin the store does not hold, a schema-1 schedule payload, a body that does not parse)
+  was not inspected — check it by hand.
+
+**Unknown outcomes.** Each execution records its outcome; `OUTCOME_UNKNOWN` is alertable on its own
+(`datapipelines.executions.local_write_transactions{outcome="unknown"}`, and the stale sweep's
+`execution.outcome_unknown` ERROR and `datapipelines.executions.outcome_unknown_swept`, §16.5). The
+engine never re-runs business SQL to settle one. To investigate: look up the execution by its id
+([REST §10](rest-api.md#10-execution-history), or the MCP execution tools) for its status, error
+and timing; on the metadata database its `pipeline_executions` row shows `commit_attempted_at`
+(the commit was called) and `commit_confirmed_at` (the driver confirmed it — absent on an unknown
+outcome). Then check the target database for the run's writes BEFORE any deliberate new run;
+re-run only once you know the first did not land, or make the re-run safe to repeat.
+
+**Rolling back the executor.** Stop admitting runs (pause schedules, disable mutating APIs, stop
+interactive traffic), let in-flight runs drain or abort them explicitly, preserve every unknown
+outcome and its record (never rewrite one to `FAILED`), then revert the executor — the schema half
+is [metadata-db §7.5](metadata-db.md#75-rolling-back-v66-execution-commit-outcomes-1035), whose
+barrier refuses while an unknown outcome or unsettled commit attempt exists. A run admitted after a
+downgrade runs as independent commits again (§16.2).
+
 ---
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-21 | v1.52 | 1036 r2 (#1036) | **§16.6 (R2):** the matrix carries the measured key type per insert row (`LocalWriteQualification.insertStatus`/`qualifiedKeyTypes`), DML admission and the node backstop refuse an unmeasured key type with `dml_insert_unqualified` (`details.key_type`) before any business statement, and the new "Measured key types" table links every admitted type to its real-driver evidence — PostgreSQL `STRING` (`text`, `varchar`, `uuid`) added by `DmlKeyTypeQualificationIntegrationTest`; `char(n)` and an upper-case UUID are stated limits. **§16.7 (R1):** the offline report reads a pre-V65 store (legacy routes reported as `GET`) as well as the current schema, held by `LocalWriteCompatibilityPackagedIntegrationTest` (packaged command, V64 then current schema). The wrapper script also honours `DATAPIPELINES_REPORT_JAVA_OPTS` for extra JVM options. |
+| 2026-11-21 | v1.51 | 1036 (#1036) | **§16.6 Engine qualification:** the runtime qualification matrix (engine, pinned driver, server, storage, operation, key mode, status, reason — `LocalWriteQualification.ROWS`, held to this table by `LocalWriteQualificationSpecDriftTest`) and the admission rules that read it: `unqualified_transactional_target` (Oracle, unavailable), `unqualified_write_operation`, and the enlist re-check; what the real-server evidence observed on PostgreSQL, MySQL and SQL Server; MySQL/SQL Server inserts and non-transactional MySQL storage stay refused. **§16.7 Operating the transaction:** no opt-in, the execution timeout, the offline compatibility report (`scripts/local-write-compatibility-report.sh`: current, schedule-pinned and API-pinned versions through the same planner, read-only, no customer connection), investigating an unknown outcome, and draining before an executor rollback. §16.4 points at both. |
+| 2026-11-21 | v1.50 | 1035 r5 (#1035) | **§16.5** the confirmed row: the Redis store judges a result by the rows its read returned — a range the header counts rows in that reads back empty or short (rows lost between the existence check and the row read) is absent, so the read-back reports `result_unavailable` and withholds `data_ready`; pages beyond the end and zero-row results are unchanged. |
+| 2026-11-21 | v1.49 | 1035 r4 (#1035) | **§16.5** the confirmed row: a stored result whose header survives but whose rows list is gone is lost, not an empty result — the Redis store's `describe` and `page` answer absent for it, so the read-back reports `result_unavailable` and withholds `data_ready`; a genuine zero-row result is unchanged. |
+| 2026-11-21 | v1.48 | 1035 r3 (#1035) | **§16.5** the confirmed row: the held result is read back from the store after the confirmation, before the terminal event; a lost result is `SUCCESS` with `result_unavailable` on the terminal row (with the prepared counts) and no `data_ready`. Every caller run's terminal row now carries its result counts. |
+| 2026-11-21 | v1.47 | 1035 r2 (#1035) | **§16.5** corrected after the review: a held child's completion reaches no history surface until the root settles, and the settlement publishes its terminal event with the root's outcome (R2); the hung commit is bounded by the execution budget and ends `OUTCOME_UNKNOWN` instead of "Not bounded" (R3); the stale sweep decides in one statement and alerts per unknown (R1/R4). |
+| 2026-11-20 | v1.46 | 1035 (#1035) | **§16.5 The commit boundary and `OUTCOME_UNKNOWN`:** nothing is exposed before the root's commit (held result, provisional children, no child `data_ready`); the durable `commit_attempted_at`/`commit_confirmed_at` boundary stamped around the customer commit; the terminal funnel (never attempted → rollback statuses, attempted → `OUTCOME_UNKNOWN`, confirmed → `SUCCESS` with `result_unavailable` kept separate from the status); the stale sweep's three-way label; the surfaces that show it; the unbounded hung commit stated. §16.4's "FAILED, outcome unknown" and "#1035 owns" prose corrected. |
+| 2026-11-20 | v1.45 | 1034 (#1034) | §16.4 gains **DML results inside the transaction**: an insert's per-row execution and key correlation on the participant connection, its result staged/materialized before the commit and unpublished until the settle, and the node-local transaction a multi-row insert takes off the family transaction; and **DML admission over the pinned family**: the write-set walk applies the DML shape rules and the current insert qualification to the root and every reachable pinned child before any business write, the refusal naming the child, with the per-execution and per-node checks kept as backstops. |
+| 2026-11-18 | v1.44 | 1033 (#1033) | §16 gains the exception the blockquote now carries and **§16.4: the single-registration local write transaction** — automatic root-only planning of the durable write set (DML-with-datasource source, DQL/PIPELINE `output.target: "datasource"`, external DDL counted separately; registrations unique by name; POSTGRES/MYSQL/MSSQL/ORACLE eligible), refusal with `pipeline.execution.local_write_refused` before any business write, the lazy one-connection lease with participant writes withholding committed evidence, root-only single commit after result materialization (terminal success after it), rollback on every other terminal path, the unknown-outcome honesty on a refused/lost commit ack (`pipeline.execution.local_write_commit_failed`, no re-run), and the §4.1 meter `datapipelines.executions.local_write_transactions`. The §16.1 seam table row and §16.2's atomic-parts paragraph carry the pointer; §16.3's rejections stand. |
 | 2026-11-12 | v1.43 | #905 review F1 | §10.1 shutdown and crash: the result-history write deferred behind an unconfirmed insert is also an in-memory continuation that can remain pending after the execution finishes and be lost on process exit. |
 | 2026-11-12 | v1.42 | #905 result columns survive write ordering | §10.1 "lifecycle writes are bounded too" paragraph: the result-history write (`recordResult`) is ordered behind an unconfirmed RUNNING insert like the terminal UPDATE, and the terminal UPDATE keeps recorded result columns (writes them only when given values); a result write matching no row is one WARN. |
 | 2026-11-12 | v1.41 | #821 invariants count a table caller output | §6.3.4 invariants paragraph: the recorded gap is closed — a `table` caller output's gated rows count with its inputs toward `max-input-rows` (refused as `pipeline.script.invariants_too_large`), a tempdb output's gated rows are not counted twice, and nothing changes when no invariant is declared (record §5.4: rows + rejects + table inputs). |

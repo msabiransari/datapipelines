@@ -93,6 +93,7 @@ waived-for-cost co.datapipelines.config.DriverVersionSpecDriftTest  measured 271
 # the migrations under modules/app. The merge gate and CI run them; follow-up issue named in #995.
 waived-for-cost co.datapipelines.ApplicationSmokeTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.application.checks.PipelineCheckRunRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.compatibility.LocalWriteCompatibilityCliIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.datasources.LakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.datasources.ManagedLakeTableRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.dependencies.ApiAndScheduleConsumersIntegrationTest  starts a container or context: PostgreSQLContainer
@@ -109,10 +110,13 @@ waived-for-cost co.datapipelines.application.dependencies.datasource.DatasourceD
 waived-for-cost co.datapipelines.application.dependencies.prerequisites.ReleasePrerequisitesPostgresTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.dependencies.schedule.ScheduleDependencyProviderPostgresTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointPersistenceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportExactIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointPromotionImportIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionBodyHashIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionConversionIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.EndpointVersionLifecycleIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.ExecutionCaptureIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.application.endpoints.PublishedMutationReservationIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.endpoints.RetirePreRep5RowsMigrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.lake.LakeReferenceIndexRepositoryIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.application.mcp.McpToolLearningsIntegrationTest  starts a container or context: PostgreSQLContainer
@@ -142,9 +146,12 @@ waived-for-cost co.datapipelines.datasources.DatasourceIdentityIntegrationTest  
 waived-for-cost co.datapipelines.executor.BoundedJdbcPostgresIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionEventRetentionTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ExecutionRepositoriesIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.LocalTransactionDialectQualificationTest  starts a container or context: MSSQLServerContainer,MySQLContainer,PostgreSQLContainer
+waived-for-cost co.datapipelines.executor.LocalWriteTransactionIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ParameterBindingIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.PostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.executor.ReadOnlyPostgresSourceIntegrationTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.integration.CommitInstanceLossIntegrationTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DatasourceIncarnationE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DependenciesGoldenE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
 waived-for-cost co.datapipelines.integration.DependenciesUnmetParameterNamesE2eTest  starts a container or context: GenericContainer, PostgreSQLContainer
@@ -322,6 +329,7 @@ waived-for-cost co.datapipelines.web.release.MetadataWriterGuardOrderIntegration
 waived-for-cost co.datapipelines.web.release.ReleaseStatementBoundSourcesIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.release.ReleaseStatementCeilingWiringTest  starts a container or context: ApplicationContextRunner
 waived-for-cost co.datapipelines.web.release.TemplateProviderParityPostgresTest  starts a container or context: PostgreSQLContainer
+waived-for-cost co.datapipelines.web.templates.TemplateImportBodyFixtureIntegrationTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.FamilyInventoryE2eTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.FamilyRecentE2eTest  starts a container or context: PostgreSQLContainer
 waived-for-cost co.datapipelines.web.ui.OverviewDashboardsE2eTest  starts a container or context: PostgreSQLContainer

@@ -77,7 +77,7 @@
             <!-- The chip shows prose; the ENUM rides on data-status — the history table's
                  own rule (a copy change must never be a machine reader's problem). -->
             <span class="app-chip" th:attr="data-status=${r.status.name()}"
-                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.toLowerCase(r.status.name()))}">Success</span></span>
+                  th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(r.status.name()),'_',' '))}">Success</span></span>
             <span th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">2026-09-18 10:24</span>
           </span>
         </a>

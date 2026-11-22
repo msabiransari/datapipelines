@@ -109,6 +109,30 @@ class ExecutionResultToolTest {
             PipelineErrorCodes.Result.EXECUTION_FAILED
     }
 
+    /** #1035: the commit may or may not have landed — the tool says so by status, with no page, and never as a plain failure. */
+    @Test
+    fun `an outcome-unknown execution is a failed read that names the status and returns no rows`() {
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
+            McpFixtures.executionRecord(status = ExecutionStatus.OUTCOME_UNKNOWN, resultRowCount = null)
+
+        val refused = shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }
+
+        refused.code shouldBe PipelineErrorCodes.Result.EXECUTION_FAILED
+        refused.details["status"] shouldBe "OUTCOME_UNKNOWN"
+    }
+
+    /** #1035: a confirmed commit whose result was never delivered is a storage failure carrying the delivery reason. */
+    @Test
+    fun `a successful execution whose result was never delivered is storage-unavailable with the delivery reason`() {
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
+            McpFixtures.executionRecord(status = ExecutionStatus.SUCCESS, resultUnavailable = true)
+
+        val refused = shouldThrow<DatapipelinesException> { tool.call(args(), ctx) }
+
+        refused.code shouldBe PipelineErrorCodes.Result.STORAGE_UNAVAILABLE
+        refused.details["reason"] shouldBe "result_delivery_failed"
+    }
+
     @Test
     fun `an expired result is unrecoverable and says so`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns McpFixtures.executionRecord()

@@ -69,8 +69,10 @@ class EndpointPublishService(
     }
 
     /**
-     * Creates the API at [pathPattern] with its version 1 DRAFT pinned to [pipelineName] at exactly [pipelineVersion]
-     * (R3: the pinned version must be eligible under this deployment's posture — `endpoint.pipeline_version.not_eligible`).
+     * Creates the API route [method] `pathPattern` with its version 1 DRAFT pinned to [pipelineName] at exactly
+     * [pipelineVersion] (R3: the pinned version must be eligible under this deployment's posture —
+     * `endpoint.pipeline_version.not_eligible`). The method is half of the route's identity (#1037), as immutable as
+     * the path, and defaults to GET — the route every pre-#1037 surface already addresses.
      */
     @Suppress("LongParameterList") // the authored creation inputs, each its own field of the request
     fun create(
@@ -80,6 +82,7 @@ class EndpointPublishService(
         pipelineVersion: Int,
         timeoutSeconds: Int?,
         description: String,
+        method: EndpointMethod = EndpointMethod.GET,
     ): PublishedEndpoint {
         EndpointWrites.requireAuthoring(authoring)
         val workspaceId = principal.requireWorkspace().id
@@ -89,8 +92,16 @@ class EndpointPublishService(
             writes.inTransaction {
                 // #841: workspace guard → the pin's checks under it → registry key → overlap check + inserts.
                 writes.writeGuard.workspaces(listOf(workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.ELIGIBLE)
-                writes.createWithFirstVersion(workspaceId, parsed, resolved.record.id, body, PipelineVersionStatus.DRAFT, principal.userId)
+                val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.ELIGIBLE, method)
+                writes.createWithFirstVersion(
+                    workspaceId,
+                    parsed,
+                    method,
+                    resolved.record.id,
+                    body,
+                    PipelineVersionStatus.DRAFT,
+                    principal.userId,
+                )
             }
         audit.log(
             event = AUDIT_DRAFT_SAVED,
@@ -100,6 +111,7 @@ class EndpointPublishService(
                 mapOf(
                     "endpoint_id" to endpoint.id.toString(),
                     "path_pattern" to endpoint.pathPattern,
+                    "method" to method.name,
                     "version" to EndpointWrites.FIRST_VERSION,
                     "pipeline" to body.pipelineName,
                     "pipeline_version" to body.pipelineVersion,
@@ -111,23 +123,26 @@ class EndpointPublishService(
     }
 
     /**
-     * Deletes the API at a path, every version with it — the guarded entity deletion (#786 R1, versioning §3.2): an API
-     * is deleted only while every version it holds is a DRAFT; any other version (a RELEASED one, current or not, or a
-     * DISCARDED one) refuses `endpoint.version.last_release` (409) and nothing is deleted — the parameter-set entity
-     * purge's rule. The check reads the versions under the entity row lock, inside the transaction that deletes, after
-     * the workspace guard and the registry key, so no release can land between the check and the delete.
+     * Deletes the API at a path and method, every version with it — the guarded entity deletion (#786 R1, versioning
+     * §3.2): an API is deleted only while every version it holds is a DRAFT; any other version (a RELEASED one,
+     * current or not, or a DISCARDED one) refuses `endpoint.version.last_release` (409) and nothing is deleted — the
+     * parameter-set entity purge's rule. The check reads the versions under the entity row lock, inside the
+     * transaction that deletes, after the workspace guard and the registry key, so no release can land between the
+     * check and the delete.
      *
-     * Returns false when nothing exists there. Reads the ROW (valid or legacy): a legacy row is never served, and
-     * deleting it IS the fix for it (#274), so a legacy row stays deletable whatever its converted version's status.
+     * Path-addressed reads resolve GET when no method is supplied — the pre-#1037 contract of every caller. Returns
+     * false when nothing exists there. Reads the ROW (valid or legacy): a legacy row is never served, and deleting it
+     * IS the fix for it (#274), so a legacy row stays deletable whatever its converted version's status.
      */
     fun unpublish(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Boolean {
         val workspaceId = principal.requireWorkspace().id
         // Normalised like a creation (R-EP5): the stored form never carries the `/api` prefix.
         val stored = EndpointPath.normalize(pathPattern)
-        val existing = endpoints.findRowByPath(stored) ?: return false
+        val existing = endpoints.findRowByPath(stored, method) ?: return false
         // Another workspace's API is invisible rather than forbidden — the not-found discipline of every scoped read.
         if (existing.workspaceId != workspaceId && !principal.isSuperAdmin) return false
 
@@ -137,9 +152,9 @@ class EndpointPublishService(
             writes.inTransaction {
                 writes.writeGuard.workspaces(listOf(existing.workspaceId), PipelineErrorCodes.Endpoint.WRITE_BUSY)
                 writes.writeGuard.endpointRegistry(PipelineErrorCodes.Endpoint.WRITE_BUSY)
-                val row = endpoints.findRowByPath(stored)?.takeIf { it.id == existing.id }
+                val row = endpoints.findRowByPath(stored, method)?.takeIf { it.id == existing.id }
                 if (row is EndpointRow.Valid) refuseUnlessDraftOnly(row.endpoint)
-                val deleted = row?.let { endpoints.deleteByPath(stored) } ?: false
+                val deleted = row?.let { endpoints.deleteByPath(stored, method) } ?: false
                 if (deleted) writes.invalidateAfterCommit()
                 deleted
             }
@@ -148,7 +163,7 @@ class EndpointPublishService(
                 event = AUDIT_UNPUBLISHED,
                 userId = principal.userId,
                 keyId = principal.keyId,
-                details = mapOf("endpoint_id" to existing.id.toString(), "path_pattern" to stored),
+                details = mapOf("endpoint_id" to existing.id.toString(), "path_pattern" to stored, "method" to method.name),
             )
         }
         return removed
@@ -190,17 +205,31 @@ class EndpointPublishService(
         return legacy.filter { row -> row.pipelineName?.let(lensed::admits) ?: false }
     }
 
-    /** One API by path, or null when absent, in another workspace, or serving a pipeline the lens hides. */
+    /**
+     * One API by path, or null when absent, in another workspace, or serving a pipeline the lens hides. Resolves GET
+     * when no method is supplied — the pre-#1037 contract of every path-addressed caller.
+     */
     fun get(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
-    ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findByPath(EndpointPath.normalize(pathPattern)))
+        method: EndpointMethod = EndpointMethod.GET,
+    ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findByPath(EndpointPath.normalize(pathPattern), method))
 
     /** One API by id, under the same visibility as [get]. */
     fun getById(
         principal: AuthenticatedPrincipal,
         id: java.util.UUID,
     ): PublishedEndpoint? = visibleOrNull(principal, endpoints.findById(id))
+
+    /**
+     * The request-body contract of [endpoint]'s CURRENT version's exact pin (#1040) — the mode and the reading
+     * transformers the authoring surfaces show; null when the API has no current version or its pin no longer resolves.
+     * [endpoint] is one this service already answered under the caller's visibility ([list], [get], [create]).
+     */
+    fun bodyContract(endpoint: PublishedEndpoint): EndpointBodyContract? {
+        val body = endpoint.current?.body ?: return null
+        return pins.bodyContract(endpoint.workspaceId, body.pipelineName, body.pipelineVersion)
+    }
 
     private fun visibleOrNull(
         principal: AuthenticatedPrincipal,

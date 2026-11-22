@@ -67,17 +67,20 @@ class PipelinesExecuteNodeToolTest {
         nodeType: NodeType = NodeType.DQL,
         source: String = "sample-trips",
         sql: String = "SELECT * FROM trips WHERE d = :start_date",
+        shape: (Node) -> Node = { it },
     ) = NodeSqlResolution.Rendered(
         version = draft,
         node =
-            Node(
-                id = "fetch",
-                description = "",
-                type = nodeType,
-                source = source,
-                template = TemplateRef("test/fetch.sql", 1),
-                output = null,
-                dependsOn = emptyList(),
+            shape(
+                Node(
+                    id = "fetch",
+                    description = "",
+                    type = nodeType,
+                    source = source,
+                    template = TemplateRef("test/fetch.sql", 1),
+                    output = null,
+                    dependsOn = emptyList(),
+                ),
             ),
         templateId = "test/fetch.sql",
         templateVersion = 1,
@@ -124,7 +127,7 @@ class PipelinesExecuteNodeToolTest {
 
     @Test
     fun `a DML node executes for real and reports affected rows`() {
-        resolverReturns(rendered(nodeType = NodeType.DML, sql = "DELETE FROM trips WHERE d = :start_date"))
+        resolverReturns(rendered(nodeType = NodeType.DML, sql = "DELETE FROM trips WHERE d = :start_date", shape = DELETE_SHAPE))
         every { datasources.getVisible("sample-trips", McpFixtures.WORKSPACE_ID) } returns datasource
         every { runner.executeUpdate(datasource, "SELECT * FROM trips WHERE d = ?", any()) } returns 3L
 
@@ -133,6 +136,65 @@ class PipelinesExecuteNodeToolTest {
 
         payload["affected_rows"] shouldBe 3L
         payload["node_type"] shouldBe "DML"
+    }
+
+    @Test
+    fun `a DML insert reading a staged table is the standalone refusal, before the datasource and any SQL (#1034)`() {
+        resolverReturns(rendered(nodeType = NodeType.DML, sql = "INSERT INTO trips (city) VALUES (:city)", shape = STAGED_INSERT))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
+            { thrown.details["reason"] shouldBe "staged_input" },
+            { (thrown.message ?: "") shouldContain "pipelines_execute" },
+        )
+        verify(exactly = 0) { runner.executeUpdate(any(), any(), any()) }
+        verify(exactly = 0) { datasources.getVisible(any(), any()) }
+    }
+
+    /**
+     * #1034 "Roles": the single-node tool's ORIGINAL role gate (`pipeline.execute_node` — author,
+     * workspace admin, super admin), exercised through the real dispatcher on a node of the NEW
+     * schema — a scalar-input DML insert. A viewer's or promoter's key is refused before the tool
+     * runs (no datasource read, no statement); an author's key runs it and keeps the debugger's
+     * single-node contract: the statement executes once and reports its affected rows.
+     */
+    @Test
+    fun `the role gate admits an author and refuses a viewer and a promoter for a new-schema DML insert`() {
+        resolverReturns(rendered(nodeType = NodeType.DML, sql = "INSERT INTO trips (city) VALUES (:start_date)", shape = SCALAR_INSERT))
+        every { datasources.getVisible("sample-trips", McpFixtures.WORKSPACE_ID) } returns datasource
+        every { runner.executeUpdate(datasource, "SELECT * FROM trips WHERE d = ?", any()) } returns 1L
+        val dispatcher = McpToolDispatcher(listOf(tool), mockk<co.datapipelines.auth.AuditEventSink>(relaxed = true))
+        val request =
+            McpFixtures.request("pipelines_execute_node", mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch"))
+
+        fun callAs(role: co.datapipelines.auth.WorkspaceRole) =
+            dispatcher.call(
+                request,
+                McpFixtures.ctx(workspace = co.datapipelines.auth.WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", role)),
+            )
+
+        listOf(co.datapipelines.auth.WorkspaceRole.VIEWER, co.datapipelines.auth.WorkspaceRole.PROMOTER).forEach { role ->
+            val refused = callAs(role)
+            val error = McpFixtures.payloadOf(refused)["error"]
+            assertAll(
+                { refused.isError() shouldBe true },
+                { error["code"].asText() shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST },
+                { error["details"]["required"].asText() shouldBe "pipeline.execute_node" },
+            )
+        }
+        verify(exactly = 0) { datasources.getVisible(any(), any()) }
+        verify(exactly = 0) { runner.executeUpdate(any(), any(), any()) }
+
+        val admitted = callAs(co.datapipelines.auth.WorkspaceRole.AUTHOR)
+
+        admitted.isError() shouldBe false
+        McpFixtures.payloadOf(admitted)["affected_rows"].asLong() shouldBe 1L
+        verify(exactly = 1) { runner.executeUpdate(datasource, "SELECT * FROM trips WHERE d = ?", any()) }
     }
 
     @Test
@@ -287,3 +349,19 @@ class PipelinesExecuteNodeToolTest {
 
 @Suppress("UNCHECKED_CAST")
 private fun payloadOf(call: Any?): Map<String, Any?> = call as Map<String, Any?>
+
+/** The #1034 DML node shapes the tool sees: a delete, a scalar-input insert and a staged-input insert. */
+private val DELETE_SHAPE: (Node) -> Node = { it.copy(operation = "delete", output = co.datapipelines.pipeline.NodeOutput.Discard) }
+
+private val SCALAR_INSERT: (Node) -> Node = {
+    it.copy(
+        operation = "insert",
+        key = co.datapipelines.pipeline.DmlKey("trip_id", "BIGINTEGER"),
+        input = co.datapipelines.pipeline.DmlInput(parameters = listOf("start_date")),
+        output = co.datapipelines.pipeline.NodeOutput.Caller,
+    )
+}
+
+private val STAGED_INSERT: (Node) -> Node = {
+    SCALAR_INSERT(it).copy(input = co.datapipelines.pipeline.DmlInput(table = "stg_trips"))
+}

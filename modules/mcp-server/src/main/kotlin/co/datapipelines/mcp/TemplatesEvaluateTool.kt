@@ -14,6 +14,9 @@ private const val EVALUATE_INPUT_DESC =
         "`inputs` holds every input, tables as arrays. Optional `now` (ISO-8601) pins the clock: without it the " +
         "\$now()/\$millis() builtins refuse."
 
+/** The lead of the `input` bind refusal. */
+private const val INPUT_BIND_LEAD = "The 'input' object does not bind ({ rows, inputs, meta?, now? })"
+
 /** §6.2.43 — the `now` description. */
 private const val EVALUATE_NOW_DESC =
     "Optional ISO-8601 instant the \$now()/\$millis() builtins return for this evaluation. Absent, a body that " +
@@ -69,17 +72,23 @@ class TemplatesEvaluateTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
+        val supplied = args.requiredObject("input")
         val input =
             try {
-                ScriptBlocks.mapper.convertValue(args.requiredObject("input"), ScriptTestInput::class.java)
+                // #1038: from the transport's exact text when it kept one, so a `body` input reaches the runner
+                // with its exact decimals and repeated members; the parsed map is the fallback.
+                args.exactText("input")?.let { ScriptBlocks.mapper.readValue(it, ScriptTestInput::class.java) }
+                    ?: ScriptBlocks.mapper.convertValue(supplied, ScriptTestInput::class.java)
+            } catch (
+                err: JsonMappingException,
+            ) {
+                throw McpArguments.invalidParams(safeTemplateBindMessage(err, INPUT_BIND_LEAD))
             } catch (
                 err: IllegalArgumentException,
             ) {
                 // convertValue wraps caller-shape failures; unrelated faults keep the internal-error path.
                 val mapping = err.cause as? JsonMappingException ?: throw err
-                throw McpArguments.invalidParams(
-                    safeTemplateBindMessage(mapping, "The 'input' object does not bind ({ rows, inputs, meta?, now? })"),
-                )
+                throw McpArguments.invalidParams(safeTemplateBindMessage(mapping, INPUT_BIND_LEAD))
             }
         val now =
             args.string("now")?.let { raw ->

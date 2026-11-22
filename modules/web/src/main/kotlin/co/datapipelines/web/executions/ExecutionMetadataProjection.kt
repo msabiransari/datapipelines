@@ -73,6 +73,9 @@ class ExecutionMetadataProjection(
             put("triggered_via", triggeredVia.name)
             put("result_row_count", resultRowCount)
             put("result_size_bytes", resultSizeBytes)
+            // #1035: SUCCESS whose commit is confirmed but whose caller result was never delivered.
+            // A separate flag, never a status: a transport failure does not change an outcome.
+            put("result_unavailable", resultUnavailable)
             // The composition lineage V3 added (metadata-db §4.6). The history UI renders it and
             // the repository has always selected it; only this projection dropped it, so an API
             // client could see a child execution but never learn it was one (T1). Null parents mark
@@ -81,7 +84,8 @@ class ExecutionMetadataProjection(
             put("parent_execution_id", parentExecutionId?.toString())
             put("parent_node_id", parentNodeId)
             put("root_execution_id", rootExecutionId?.toString())
-            if (includeResult && status == ExecutionStatus.SUCCESS && resultRowCount != null) {
+            val resultFetchable = status == ExecutionStatus.SUCCESS && !resultUnavailable && resultRowCount != null
+            if (includeResult && resultFetchable) {
                 // Present only while the result is actually fetchable (§10.2).
                 resultStore.describe(resultStore.keyFor(executionId))?.let { view ->
                     put("result_url", resultUrls.urlFor(executionId))

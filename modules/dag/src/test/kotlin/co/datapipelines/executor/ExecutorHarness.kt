@@ -34,8 +34,12 @@ class ExecutorHarness(
     /** The SCRIPT-node collaborators (7c, #7) — wired by tests that exercise a SCRIPT node. */
     scripts: ScriptSupport? = null,
     lakeAppendPort: co.datapipelines.pipeline.LakeAppendPort? = null,
+    /** The preflight write-set planner (#1033) — null keeps the executor on the pre-feature gate-off. */
+    localWritePlanner: LocalWritePlanner? = null,
+    /** (#1035) Makes the emitter throw for the events it names — result delivery failing after the commit. */
+    emitterFailsOn: (co.datapipelines.events.ExecutionEvent) -> Throwable? = { null },
 ) : Closeable {
-    val emitter = RecordingEmitter()
+    val emitter = RecordingEmitter(emitterFailsOn)
     val flags = InMemoryCancellationFlags()
     val slots =
         executionSlots ?: ExecutionSlots(config.maxConcurrentExecutionsPerUser, config.maxConcurrentExecutionsPerInstance)
@@ -49,7 +53,7 @@ class ExecutorHarness(
             templateEngine = templateEngine,
             datasourceRegistry = registry,
             stagingFactory = stagingFactory,
-            writebackRunner = JdbcWritebackRunner(registry),
+            writebackRunner = JdbcWritebackRunner(registry, drainMaxBytes = config.result.maxSizeBytes),
             resultStore = resultStore,
             eventEmitter = emitter,
             cancellationRegistry = cancellations,
@@ -66,6 +70,7 @@ class ExecutorHarness(
             calculatorKinds = calculatorKinds,
             scripts = scripts,
             lakeAppendPort = lakeAppendPort,
+            localWritePlanner = localWritePlanner,
         )
 
     override fun close() {

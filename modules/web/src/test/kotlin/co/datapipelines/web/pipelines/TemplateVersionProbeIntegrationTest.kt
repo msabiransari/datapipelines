@@ -275,7 +275,7 @@ class TemplateVersionProbeIntegrationTest {
                 body = draft.body,
                 contractJson = ScriptBlocks.writeContract(draft.contract),
                 invariantsJson = ScriptBlocks.writeInvariants(draft.invariants),
-                testsJson = ScriptBlocks.writeTests(draft.tests),
+                testsJson = ScriptBlocks.writeTests(draft.tests, draft.contract),
             ),
         )
         val body = TemplateJson.objectMapper().createObjectNode().also { it.putArray("templates").add(entry) }

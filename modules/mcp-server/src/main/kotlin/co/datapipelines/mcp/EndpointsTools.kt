@@ -1,5 +1,7 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.endpoints.EndpointBodyContract
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
@@ -43,22 +45,46 @@ object EndpointsTools {
         )
 
     /**
-     * The wire shape of one endpoint, unchanged by #786 (no get/list field is added — record §24): `pipeline`,
-     * `timeout_seconds` and `description` are the API's CURRENT version's, the pipeline by NAME — the portable identity
-     * (pipeline-contract §11.1) — so an agent reading this can act on it in any environment. An API with no current
-     * version answers them null.
+     * A `method` argument as an [EndpointMethod] (#1037): absent meaning GET — the pre-method era's call creates the
+     * pre-method era's route — and anything the surface does not publish (PATCH, a typo) is an invalid parameter, not
+     * a stored unreachable value.
      */
-    @Suppress("UnusedParameter") // the receiver shape every caller passes; the pin is the version's own name now
-    internal fun PublishedEndpoint.toResponse(): Map<String, Any?> =
+    internal fun methodOf(args: McpArguments): EndpointMethod =
+        args.string("method")?.let { raw ->
+            EndpointMethod.of(raw.trim().uppercase())
+                ?: throw McpArguments.invalidParams(
+                    "Invalid 'method': a published route answers GET, POST, PUT or DELETE — '$raw' does not.",
+                )
+        } ?: EndpointMethod.GET
+
+    /**
+     * The wire shape of one endpoint, unchanged by #786 (no get/list field is added — record §24) and carrying its
+     * `method` since #1037 (the route's identity half): `pipeline`, `timeout_seconds` and `description` are the API's
+     * CURRENT version's, the pipeline by NAME — the portable identity (pipeline-contract §11.1) — so an agent reading
+     * this can act on it in any environment. An API with no current version answers them null.
+     *
+     * #1040 adds what an author must see before acting on a route: `pipeline_version` (the current version's EXACT pin)
+     * and `request_body` — the pinned version's body [EndpointBodyContract.Mode] (`none`, `optional`, `required`) and the
+     * SCRIPT transformers that read the body (`node_id`, `template` as `id@version`); null when there is no current
+     * version or its pin no longer resolves.
+     */
+    internal fun PublishedEndpoint.toResponse(contract: EndpointBodyContract?): Map<String, Any?> =
         mapOf(
             "path" to pathPattern,
+            "method" to method.name,
             "pipeline" to current?.body?.pipelineName,
+            "pipeline_version" to current?.body?.pipelineVersion,
             "timeout_seconds" to current?.body?.timeoutSeconds,
             "description" to current?.body?.description,
+            "request_body" to contract?.wire(),
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
             "url" to "/api$pathPattern",
         )
+
+    /** One endpoint's wire shape with its body contract read through [publishing] (#1040). */
+    internal fun PublishedEndpoint.toResponse(publishing: EndpointPublishService): Map<String, Any?> =
+        toResponse(publishing.bodyContract(this))
 
     /**
      * The wire shape of one LEGACY row (#274) — a stored path today's grammar refuses, retired
@@ -87,30 +113,30 @@ object EndpointsTools {
             McpTools.tool(
                 name = "endpoints_create",
                 description =
-                    "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version " +
-                        "pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment " +
-                        "with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform " +
-                        "there. In an authoring-enabled deployment the draft is the entity's current version and serves " +
-                        "under the normal runtime checks — the entity is enabled, the caller's key is bound, and the " +
-                        "pinned pipeline version is eligible. The pin never moves when the pipeline's current version " +
-                        "moves. The category " +
-                        "is your namespace (a business domain, a team); categories matching v<number> and the literal " +
-                        "'api' are reserved to the product and refused with endpoint.path_reserved. The version is one " +
-                        "free-form segment (v1 by convention); path variables come after it. The pinned pipeline version " +
-                        "must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else " +
-                        "endpoint.pipeline_version.not_eligible) and must be side-effect-free: " +
-                        "every node DQL into tempdb or the caller, a " +
-                        "DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a " +
-                        "registered datasource, or a DQL node writing back to a datasource, is refused with " +
-                        "endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes " +
-                        "serving over GET safe, since GET is retried, preloaded and crawled. " +
-                        "path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a " +
-                        "declared parameter; remaining parameters come from the query string. A leading /api prefix " +
-                        "is stripped, not refused. A path that could match " +
-                        "the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by " +
-                        "precedence. Calling the endpoint needs an API key bound to it — create one with the " +
-                        "api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no " +
-                        "key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
+                    "Create an endpoint at /api/<category>/<version>/<path> for one HTTP method — GET by default, or " +
+                        "POST/PUT/DELETE for a mutation route (#1037): the method is half of the route's identity and " +
+                        "immutable like the path, so a GET and a POST at one pattern are two routes. This creates the " +
+                        "API's first DRAFT version pinned to the exact pipeline_version given; the pin never moves. " +
+                        "Authoring-disabled deployments refuse it (endpoint.authoring_disabled). The category is your " +
+                        "namespace; categories matching v<number> " +
+                        "and the literal 'api' are reserved (endpoint.path_reserved), as is a path that could match an " +
+                        "executions/{id} or executions/{id}/result polling suffix. The version is one free-form segment " +
+                        "(v1 by convention); path variables come after it; path is 3-10 segments, each a literal " +
+                        "[a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters " +
+                        "come from the query string; a leading /api prefix is stripped. The pinned version must be " +
+                        "eligible here (RELEASED; a DRAFT only where authoring is enabled — " +
+                        "endpoint.pipeline_version.not_eligible) and, for GET, side-effect-free: every node DQL into " +
+                        "tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE " +
+                        "nodes; a DML/DDL node against a registered datasource, or a DQL node writing back to one, is " +
+                        "refused endpoint.pipeline_not_readonly naming node and datasource — what makes GET safe to " +
+                        "retry and crawl; a mutation route's pin admits a writing pipeline by design. A route of the " +
+                        "SAME method that could match the same URL is refused " +
+                        "(endpoint.path_conflict), never resolved by precedence; another workspace's route at a " +
+                        "matching pattern is refused the same way with a redacted body naming nothing but your own " +
+                        "pattern. Calling the endpoint needs an API key granted its method — a GET grant is a tree " +
+                        "node bound over REST or in the UI (auth.md §7.7); a mutation grant names this one route and " +
+                        "is bound the same way with a method. Granted to no key, served to no one; an MCP key never " +
+                        "reaches REST (it acts over /mcp only).",
                 schema = CREATE_SCHEMA,
             )
 
@@ -132,7 +158,8 @@ object EndpointsTools {
                     timeoutSeconds =
                         args.rawMap()["timeout_seconds"]?.let { args.int("timeout_seconds", MIN_TIMEOUT, MIN_TIMEOUT, MAX_TIMEOUT) },
                     description = args.string("description").orEmpty(),
-                ).toResponse()
+                    method = methodOf(args),
+                ).toResponse(publishing)
 
         private companion object {
             const val MIN_TIMEOUT = 1
@@ -146,6 +173,7 @@ object EndpointsTools {
                   "additionalProperties": false,
                   "properties": {
                     "path": {"type": "string", "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."},
+                    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "description": "The route's HTTP method, immutable like the path. Absent means GET."},
                     "pipeline": {"type": "string", "description": "The pipeline NAME."},
                     "pipeline_version": {"type": "integer", "minimum": 1, "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."},
                     "timeout_seconds": {"type": "integer", "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."},
@@ -181,7 +209,7 @@ object EndpointsTools {
             mapOf(
                 "endpoints" to
                     (
-                        publishing.list(ctx.principal).map { it.toResponse() } +
+                        publishing.list(ctx.principal).map { it.toResponse(publishing) } +
                             publishing.listLegacy(ctx.principal).map { it.toLegacyResponse() }
                     ),
             )
@@ -195,8 +223,10 @@ object EndpointsTools {
             McpTools.tool(
                 name = "endpoints_get",
                 description =
-                    "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). " +
-                        "For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
+                    "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}') " +
+                        "and method (absent meaning GET, the pre-#1037 shape). A GET and a POST at one pattern are two " +
+                        "routes, each with its own versions. For a promoter's key an endpoint over a pipeline it cannot " +
+                        "see resolves as not-found.",
                 schema = PATH_SCHEMA,
             )
 
@@ -206,21 +236,23 @@ object EndpointsTools {
         ): Any {
             val path = args.requiredString("path")
             val endpoint =
-                publishing.get(ctx.principal, path)
+                publishing.get(ctx.principal, path, methodOf(args))
                     ?: throw DatapipelinesException(
                         code = PipelineErrorCodes.Endpoint.NOT_FOUND,
                         message = "No endpoint published at '$path'.",
                         details = mapOf("path" to path),
                     )
-            return endpoint.toResponse()
+            return endpoint.toResponse(publishing)
         }
     }
 
     /**
      * `endpoints_delete` (mcp-server.md §6.2.26). Permission: `endpoint.unpublish`. Mutating.
-     * Unpublish is BY the full stored path, so a legacy row stored past
-     * `EndpointPath.MAX_LENGTH`, whose echo is cut (#286), is deleted only by that path,
-     * and this tool refuses nothing by length (#304).
+     * Unpublish is BY the full stored path (and method, absent meaning GET), so a legacy row
+     * stored past `EndpointPath.MAX_LENGTH`, whose echo is cut (#286), is deleted only by that
+     * path, and this tool refuses nothing by length (#304). Deleting one method's route never
+     * touches a sibling method's route at the same pattern; exact mutation grants on the route
+     * go with it (the grant names the entity).
      */
     class DeleteTool(
         private val publishing: EndpointPublishService,
@@ -229,9 +261,11 @@ object EndpointsTools {
             McpTools.tool(
                 name = "endpoints_delete",
                 description =
-                    "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. " +
-                        "Key bindings on that path are NOT removed: they describe a node of the tree, which may still " +
-                        "carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired " +
+                    "Unpublish an endpoint by its path and method (absent meaning GET). The pipeline is untouched — " +
+                        "only the URL stops answering that method. " +
+                        "GET key bindings on that path are NOT removed: they describe a node of the tree, which may still " +
+                        "carry other endpoints beneath it; a mutation grant named this one route and goes with it. This is " +
+                        "also the fix for a LEGACY row (#274) — a retired " +
                         "path listed with \"legacy\": true never serves under the current grammar, and deleting it " +
                         "removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is " +
                         "refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
@@ -243,14 +277,15 @@ object EndpointsTools {
             ctx: McpToolContext,
         ): Any {
             val path = args.requiredString("path")
-            if (!publishing.unpublish(ctx.principal, path)) {
+            val method = methodOf(args)
+            if (!publishing.unpublish(ctx.principal, path, method)) {
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Endpoint.NOT_FOUND,
                     message = "No endpoint published at '$path'.",
-                    details = mapOf("path" to path),
+                    details = mapOf("path" to path, "method" to method.name),
                 )
             }
-            return mapOf("path" to path, "deleted" to true)
+            return mapOf("path" to path, "method" to method.name, "deleted" to true)
         }
     }
 
@@ -266,7 +301,8 @@ object EndpointsTools {
           "required": ["path"],
           "additionalProperties": false,
           "properties": {
-            "path": {"type": "string", "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."}
+            "path": {"type": "string", "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."},
+            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"], "description": "The route's method. Absent means GET."}
           }
         }
         """.trimIndent()

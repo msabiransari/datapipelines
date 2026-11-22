@@ -1,7 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.endpoints.CurrentVersion
+import co.datapipelines.application.endpoints.EndpointBodyContract
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPinValidator
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointVersionBody
@@ -64,6 +66,17 @@ class EndpointVersionsPageModelTest {
         mockk<EndpointPinValidator> {
             every { eligible(any()) } answers
                 { firstArg<PipelineVersionStatus>() == PipelineVersionStatus.RELEASED }
+            // #1040: pipeline version 4 takes a required body read by one transformer; every other takes none.
+            every { bodyContract(any(), any(), any()) } answers {
+                if (thirdArg<Int>() == 4) {
+                    EndpointBodyContract(
+                        EndpointBodyContract.Mode.REQUIRED,
+                        listOf(EndpointBodyContract.Reader("shape", "finance/shape.py@2")),
+                    )
+                } else {
+                    EndpointBodyContract(EndpointBodyContract.Mode.NONE, emptyList())
+                }
+            }
         }
     private val coordinator = mockk<ReleaseCoordinator>()
     private val model =
@@ -85,7 +98,10 @@ class EndpointVersionsPageModelTest {
         null,
     )
 
-    private fun visible(current: Int) {
+    private fun visible(
+        current: Int,
+        method: EndpointMethod = EndpointMethod.GET,
+    ) {
         every { publishing.getById(principal, id) } returns
             PublishedEndpoint.of(
                 id,
@@ -96,6 +112,7 @@ class EndpointVersionsPageModelTest {
                 Instant.EPOCH,
                 Instant.EPOCH,
                 CurrentVersion(current, PipelineVersionStatus.RELEASED, EndpointVersionBody("finance/revenue", 2, 30, "")),
+                method,
             )
     }
 
@@ -148,6 +165,40 @@ class EndpointVersionsPageModelTest {
         dialog.selectedVersion shouldBe 2
         dialog.options.map { it.version to it.eligible } shouldContainExactly listOf(5 to false, 4 to true, 2 to true)
         dialog.options.single { it.isCurrent }.version shouldBe 4
+        dialog.method shouldBe "GET"
+    }
+
+    @Test
+    fun `a POST route shows its fixed method, the selected pin's body contract and each option's body before save`() {
+        // #1040: method, exact pin and body input are visible before a save — the version card reads the SELECTED
+        // version's pinned contract, and every picker option carries its own, so moving the pin shows the body change.
+        visible(current = 2, method = EndpointMethod.POST)
+        listed(
+            EndpointVersionService.VersionView(version(3, PipelineVersionStatus.DRAFT, 2), isCurrent = false, eligible = false),
+            EndpointVersionService.VersionView(version(2, PipelineVersionStatus.RELEASED, 4), isCurrent = true, eligible = true),
+        )
+        val page = requireNotNull(model.page(principal, id, null))
+        page.method shouldBe "POST"
+        page.selectedBody shouldBe EndpointVersionsPageModel.BodyView("required", listOf("shape (finance/shape.py@2)"))
+        requireNotNull(model.page(principal, id, 3)).selectedBody shouldBe EndpointVersionsPageModel.BodyView("none", emptyList())
+
+        every { pipelines.findCurrentVersions(workspaceId) } returns
+            listOf(CurrentPipelineVersion(pipelineId, "finance/revenue", "Revenue", 4, "x", PipelineVersionStatus.RELEASED))
+        val record =
+            mockk<PipelineRecord> {
+                every { id } returns pipelineId
+                every { currentVersion } returns 4
+            }
+        every { pipelines.findByName(workspaceId, "finance/revenue") } returns record
+        every { pipelines.listVersions(workspaceId, pipelineId) } returns
+            listOf(
+                PipelineVersionRecord(pipelineId, 4, PipelineVersionStatus.RELEASED, "", Instant.EPOCH, UUID.randomUUID()),
+                PipelineVersionRecord(pipelineId, 2, PipelineVersionStatus.RELEASED, "", Instant.EPOCH, UUID.randomUUID()),
+            )
+        val dialog = model.draft(principal, id, null)
+        dialog.method shouldBe "POST"
+        dialog.options.map { it.version to it.body?.summary } shouldContainExactly
+            listOf(4 to "body required · read by shape (finance/shape.py@2)", 2 to "body none")
     }
 
     @Test

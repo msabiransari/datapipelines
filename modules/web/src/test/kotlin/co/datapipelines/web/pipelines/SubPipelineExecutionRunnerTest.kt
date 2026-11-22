@@ -315,6 +315,19 @@ class SubPipelineExecutionRunnerTest {
         }
 
     @Test
+    fun `a child of a body execution inherits its bounded diagnostics, and a child of an ordinary one does not`() =
+        runTest {
+            stubRegistry()
+            val bounded = ExecutorStub()
+            runner(bounded).run(pipelineNode(), context().copy(boundedDiagnostics = true))
+            bounded.captured.single().boundedDiagnostics shouldBe true
+
+            val ordinary = ExecutorStub()
+            runner(ordinary).run(pipelineNode(), context())
+            ordinary.captured.single().boundedDiagnostics shouldBe false
+        }
+
+    @Test
     fun `dashboard admission judges the exact loaded child and is inherited by its request`() {
         runTest {
             stubRegistry()
@@ -824,7 +837,7 @@ class SubPipelineExecutionRunnerTest {
                 }
 
             thrown.code shouldBe PipelineErrorCodes.Node.CHILD_EXECUTION_FAILED
-            verify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { writebackRunner.writebackRows(any(), any(), any(), any(), any(), any()) }
         }
 
     @Test
@@ -897,7 +910,7 @@ class SubPipelineExecutionRunnerTest {
             val ctx = context()
             val tracker = ctx.operations.begin("revenue", OperationKind.CHILD, OperationDestination.datasource("wb", "tgt"))
             val observers = mutableListOf<OperationObserver>()
-            every { writebackRunner.writebackRows(any(), any(), any(), any(), capture(observers)) } returns 1L
+            coEvery { writebackRunner.writebackRows(any(), any(), any(), any(), capture(observers), any()) } returns 1L
 
             runner(stub).run(pipelineNode(output = NodeOutput.Datasource("wb", "tgt", WriteMode.APPEND)), ctx)
 
@@ -970,7 +983,7 @@ class SubPipelineExecutionRunnerTest {
         runTest {
             stubRegistry()
             val output = NodeOutput.Datasource("warehouse", "revenue", WriteMode.APPEND)
-            every { writebackRunner.writebackRows(any(), any(), output, any()) } answers
+            coEvery { writebackRunner.writebackRows(any(), any(), output, any(), any(), any()) } answers
                 {
                     secondArg<Sequence<List<Any?>>>().count().toLong()
                 }
@@ -983,7 +996,7 @@ class SubPipelineExecutionRunnerTest {
             val result = runner(stub).run(pipelineNode(output = output), context())
 
             result.rowsOut shouldBe 2
-            verify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId) }
+            coVerify(exactly = 1) { writebackRunner.writebackRows(schema, any(), output, parentWorkspaceId, any(), any()) }
         }
 
     @Test

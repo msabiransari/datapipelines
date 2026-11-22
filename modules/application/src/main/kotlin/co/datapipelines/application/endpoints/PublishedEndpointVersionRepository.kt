@@ -68,14 +68,17 @@ class PublishedEndpointVersionRepository(
             ).singleOrNull()
 
     /**
-     * The version addressed by the API's immutable path (the release family's lookup key) — workspace-scoped. ONE
-     * statement answers the version row and the entity's id, current pointer and `is_enabled` (#902: the API node's
-     * operational fact rides this read, never a second statement).
+     * The version addressed by the API's immutable ROUTE — method and path, the release family's lookup key
+     * ([EndpointRouteKey]) — workspace-scoped. ONE statement answers the version row and the entity's id, current
+     * pointer and `is_enabled` (#902: the API node's operational fact rides this read, never a second statement). The
+     * method is part of the predicate: sibling methods at one path are separate entities whose version numbers overlap,
+     * so a path-only read would match several rows (#1037).
      */
     fun findByPath(
         workspaceId: UUID,
         pathPattern: String,
         version: Int,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Pair<EntityRead, PublishedEndpointVersion>? =
         jdbc
             .query(
@@ -86,9 +89,9 @@ class PublishedEndpointVersionRepository(
                        v.created_by, v.released_at, v.released_by
                   FROM published_endpoints e
                   JOIN published_endpoint_versions v ON v.endpoint_id = e.id
-                 WHERE e.workspace_id = :ws AND e.path_pattern = :path AND v.version = :version
+                 WHERE e.workspace_id = :ws AND e.path_pattern = :path AND e.method = :method AND v.version = :version
                 """.trimIndent(),
-                mapOf("ws" to workspaceId, "path" to pathPattern, "version" to version),
+                mapOf("ws" to workspaceId, "path" to pathPattern, "method" to method.name, "version" to version),
             ) { rs, n ->
                 val entity =
                     EntityRead(
@@ -332,7 +335,8 @@ class PublishedEndpointVersionRepository(
      * #877 §B — the bounded inverse arm pipeline ← API: one page of the API versions of [InverseRequest.workspaceId] whose
      * stored `pipeline_name` is [InverseRequest.targetKey] (and `pipeline_version` the target version when given), ONE
      * occurrence per version at [PIN_PATH], in the inverse total order (the entity id, the version), `limit + 1`
-     * rows. The dependent is named by its `path_pattern`. The API family's history rule makes ANY the LIVE set: a
+     * rows. The dependent is named by its route key (`path_pattern` for GET, `METHOD path_pattern` otherwise,
+     * [EndpointRouteKey]). The API family's history rule makes ANY the LIVE set: a
      * DISCARDED API version protects nothing, because its restore revalidates its pin (record §14, A39) — so the
      * entity purge (`EndpointVersionPipelineConsumers.anyVersionPins`) reads this arm at LIVE. WORKING is the draft, else
      * the pointer.
@@ -342,7 +346,7 @@ class PublishedEndpointVersionRepository(
         val exact = if (request.targetVersion == null) "" else "AND v.pipeline_version = :targetVersion"
         val occurrences =
             """
-            SELECT e.id::text AS dependent_id, e.path_pattern AS dependent_name, v.version AS dependent_version,
+            SELECT e.id::text AS dependent_id, $ROUTE_KEY_SQL AS dependent_name, v.version AS dependent_version,
                    v.status AS dependent_status, '$PIN_PATH' AS source_path,
                    v.pipeline_version AS stored_version, NULL::text AS element_id
               FROM published_endpoint_versions v
@@ -382,6 +386,9 @@ class PublishedEndpointVersionRepository(
     companion object {
         /** The field path of an API version's one pin, `pipeline_version` — the outgoing and the inverse spell it alike. */
         const val PIN_PATH = "pipeline_version"
+
+        /** [EndpointRouteKey.of] in SQL over the entity alias `e`: the bare path for GET, `METHOD path` otherwise. */
+        const val ROUTE_KEY_SQL = "(CASE WHEN e.method = 'GET' THEN e.path_pattern ELSE e.method || ' ' || e.path_pattern END)"
 
         /**
          * THE body hash (record §5.3, A44) — byte-equal to the expression quoted in V58's header (a drift test reads

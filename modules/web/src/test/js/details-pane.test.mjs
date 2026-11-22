@@ -105,6 +105,51 @@ test("a DQL node's Details: source, template, output, parameters", () => {
   assert.equal(editor.detailsSqlHead(DQL).includes("Rendered SQL"), true);
 });
 
+// #1034 (contract §4.4): a DML node shows its declared operation; an insert also shows its key
+// (physical column → logical id) and input; the Output row names where the result rows go.
+test("a DML insert's Details: operation, key, input, output (#1034)", () => {
+  editor.paramKeys = [];
+  editor.pipeline = { settings: {} };
+  const map = rowsToMap(editor.detailsMeta({
+    id: "insert_order",
+    type: "DML",
+    source: "shop",
+    template: { id: "shop/orders/insert_order", version: 1 },
+    operation: "insert",
+    key: { column: "order_id", type: "BIGINTEGER" },
+    input: { parameters: ["customer", "total"] },
+    output: { target: "tempdb", table: "new_order" },
+  }));
+  assert.equal(map.Operation, "insert");
+  assert.equal(map.Key, "order_id → id (BIGINTEGER)");
+  assert.equal(map.Input, "parameters customer, total (one row)");
+  assert.equal(map.Output, "tempdb → table new_order");
+  const staged = rowsToMap(editor.detailsMeta({
+    id: "insert_lines", type: "DML", source: "shop", template: { id: "t/a/b", version: 1 },
+    operation: "insert", key: { column: "line_id", type: "INTEGER" }, input: { table: "lines" },
+    output: { target: "discard" },
+  }));
+  assert.equal(staged.Input, "tempdb table lines (one insert per row)");
+  assert.equal(staged.Output, "discarded (side effect only)");
+});
+
+test("a DML update's Details carry no Key/Input rows; a missing operation or output says it is required (#1034)", () => {
+  editor.paramKeys = [];
+  editor.pipeline = { settings: {} };
+  const update = rowsToMap(editor.detailsMeta({
+    id: "reserve", type: "DML", source: "shop", template: { id: "t/a/b", version: 1 },
+    operation: "update", output: { target: "caller" },
+  }));
+  assert.equal(update.Operation, "update");
+  assert.equal("Key" in update, false);
+  assert.equal("Input" in update, false);
+  assert.equal(update.Output, "returns result to caller");
+  const legacy = rowsToMap(editor.detailsMeta({ id: "old", type: "DML", source: "shop", template: { id: "t/a/b", version: 1 } }));
+  assert.equal(legacy.Operation, "— (required)");
+  assert.equal(legacy.Output, "— (required)");
+  assert.equal(editor.outputText({ type: "DDL" }), "side effect", "DDL keeps its side-effect copy");
+});
+
 test("a CALCULATOR node's Details: kind, inputs with resolved values, writes, value", () => {
   editor.contextValues = { current_date: "2026-09-05", org_fiscal_start_date: "01-01" };
   editor.nodeValues = { fiscal_quarter: "2026-Q3" };

@@ -93,7 +93,7 @@ class NodeOperations(
             when (val output = node.output) {
                 is NodeOutput.Tempdb -> OperationKind.STAGE to destinationOf(output)
                 NodeOutput.Caller -> OperationKind.MATERIALIZE to OperationDestination.CALLER
-                is NodeOutput.Datasource, null -> error("a value-mode SCRIPT node has no operation")
+                is NodeOutput.Datasource, NodeOutput.Discard, null -> error("a value-mode SCRIPT node has no operation")
             }
 
         private fun dqlOperation(node: ExecutableNode): Pair<OperationKind, OperationDestination> =
@@ -110,6 +110,11 @@ class NodeOperations(
                 NodeOutput.Caller, null -> {
                     OperationKind.MATERIALIZE to OperationDestination.CALLER
                 }
+
+                // §12.4 refuses `discard` on a DQL node at save; were it reached, nothing is delivered.
+                NodeOutput.Discard -> {
+                    OperationKind.MATERIALIZE to OperationDestination.NONE
+                }
             }
 
         /** A DML statement writes INTO its source; no table is inferred from the SQL. */
@@ -124,7 +129,7 @@ class NodeOperations(
                 is NodeOutput.Tempdb -> OperationDestination.tempdb(output.table)
                 is NodeOutput.Datasource -> OperationDestination.datasource(output.datasource, output.table)
                 NodeOutput.Caller -> OperationDestination.CALLER
-                null -> OperationDestination.NONE
+                NodeOutput.Discard, null -> OperationDestination.NONE
             }
     }
 }

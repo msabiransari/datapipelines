@@ -28,7 +28,7 @@ class EndpointRegistryTest {
         every { repository.findAllEnabled() } returns listOf(endpoint("/nyc/v1/revenue"))
         val registry = EndpointRegistry(repository)
 
-        repeat(3) { registry.matcher().match("/nyc/v1/revenue").shouldNotBeNull() }
+        repeat(3) { registry.matcher().match("/nyc/v1/revenue", EndpointMethod.GET).shouldNotBeNull() }
 
         verify(exactly = 1) { repository.findAllEnabled() }
     }
@@ -40,18 +40,18 @@ class EndpointRegistryTest {
         // pointless and this test would fail.
         every { repository.findAllEnabled() } returns emptyList()
         val registry = EndpointRegistry(repository)
-        registry.matcher().match("/nyc/v1/summary") shouldBe null
+        registry.matcher().match("/nyc/v1/summary", EndpointMethod.GET) shouldBe null
 
         every { repository.findAllEnabled() } returns listOf(endpoint("/nyc/v1/summary"))
 
         assertAll(
-            { registry.matcher().match("/nyc/v1/summary") shouldBe null },
+            { registry.matcher().match("/nyc/v1/summary", EndpointMethod.GET) shouldBe null },
             {
                 registry
                     .let {
                         it.invalidateLocally()
                         it.matcher()
-                    }.match("/nyc/v1/summary")
+                    }.match("/nyc/v1/summary", EndpointMethod.GET)
                     .shouldNotBeNull()
             },
         )
@@ -95,7 +95,7 @@ class EndpointRegistryTest {
 
         assertAll(
             { matcher.size shouldBe 1 },
-            { matcher.match("/nyc/v1/revenue").shouldNotBeNull() },
+            { matcher.match("/nyc/v1/revenue", EndpointMethod.GET).shouldNotBeNull() },
         )
     }
 

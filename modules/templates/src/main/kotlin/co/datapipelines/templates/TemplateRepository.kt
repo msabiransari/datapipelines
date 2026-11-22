@@ -1233,7 +1233,7 @@ class TemplateRepository(
             // is exactly what keeps the hash's CASE arm off those rows (chk_script_blocks).
             "contractJson" to ScriptBlocks.writeContract(draft.contract),
             "invariantsJson" to ScriptBlocks.writeInvariants(draft.invariants),
-            "testsJson" to ScriptBlocks.writeTests(draft.tests),
+            "testsJson" to ScriptBlocks.writeTests(draft.tests, draft.contract),
             "actor" to actor,
         )
 

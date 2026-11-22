@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.78
+**Status:** v1.82
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-11-22
@@ -1080,10 +1080,27 @@ with the instruction to stop every other instance on the database. The success l
    check and need nothing. Both scans read every stored version, drafts and discarded ones
    included; neither covers a schedule's stored inputs. `PreDeployScanQueriesTest` runs the two
    blocks above, verbatim, against the shipped schema.
-5. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
-6. Start the new version (migrations apply on startup).
-7. Verify `/health` returns UP.
-8. Restore traffic.
+5. **Pre-deploy check for builds after 2026-11-21 (#1036): the single-database write transaction.**
+   From this build on, every run whose durable writes share one registration runs in one customer
+   transaction, and a run the transaction cannot cover is REFUSED before its first write (two
+   durable destinations, external DDL beside a write, an Oracle writer, an unqualified insert). There
+   is no opt-in, so stored versions, schedules and published APIs meet the rule at their first run.
+   Run the offline report against the metadata database first, with the NEW jar and a
+   `SELECT`-only role (credentials from the environment only):
+   `SPRING_DATASOURCE_URL=… SPRING_DATASOURCE_USERNAME=… SPRING_DATASOURCE_PASSWORD=…
+   ./scripts/local-write-compatibility-report.sh <new datapipelines-app.jar>`. It starts no
+   application and opens no customer connection. It prints one line per current, schedule-pinned
+   and API-pinned version (`unchanged`, `enrolled`, `refused` with its reason, or `unreadable`) and a
+   `SUMMARY` line. It runs BEFORE the migrations of step 7, so it reads the schema the previous
+   release still owns: a route stored before V65 is reported as a `GET` route, none dropped. A
+   `refused` line is refused after the upgrade with the same reason; fix it or accept it before
+   deploying. What it inspects, its exit codes and how to act on each line:
+   [DAG Executor §16.7](dag-executor.md#167-operating-the-transaction-1036). The engines and
+   operations the transaction admits: [§16.6](dag-executor.md#166-engine-qualification-1036).
+6. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
+7. Start the new version (migrations apply on startup).
+8. Verify `/health` returns UP.
+9. Restore traffic.
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
@@ -1168,6 +1185,10 @@ lifecycle:
 **Scheduler notifications (V51): older-image boundary.** Before downgrading to an image older than V51, disable notifications on every instance and let the current sender settle the backlog: `SELECT count(*) FROM schedule_notification_deliveries WHERE state = 'pending'` must be zero. Disabling stops new enqueue; the current sender settles existing rows as failed/disabled, so this drain is not a promise to send them. Already recorded kinds remain: `SELECT DISTINCT run_id FROM schedule_run_events WHERE kind LIKE 'notification\_%'` identifies runs whose detail is unreadable by the older image until it is upgraded again. The reader stays strict ([Enums](enums.md) additive-only wire convention); this feature promises no rolling reader compatibility, and an additive CHECK alone does not make an old artifact safe. Do not delete historical trail rows to hide the boundary.
 
 - App rollback: redeploy previous image. Schema migrations are forward-only — if a migration was applied, you can't run the old app version against the new schema.
+- **Published method identities (V65, #1037): older-image boundary.** An image older than V65 refuses to start on a migrated database (Flyway: `Detected applied migration not resolved locally: published endpoint method downgrade barrier`) — by design, because it would otherwise serve a non-GET route on GET. To roll back deliberately, follow [Metadata DB §7.4](metadata-db.md#74-rolling-back-v65-published-method-identities-1037): back up, set `datapipelines.endpoints.mutations-enabled=false`, drain, stop every V65-aware instance, run the documented block (it deletes every non-GET route, version and grant), then start the older image. Never `flyway repair` or ignore the missing migration instead.
+- **Execution commit outcomes (V66, #1035/#1036): older-image boundary.** An image older than V66 refuses to start on a migrated database (Flyway: `Detected applied migration not resolved locally: execution commit outcome downgrade barrier`). It cannot read `OUTCOME_UNKNOWN`, and its stale sweep would relabel an attempted commit `ABORTED`. To roll back deliberately, stop admitting runs (pause schedules, set `datapipelines.endpoints.mutations-enabled=false`, stop interactive traffic). Let in-flight runs drain (§8.3.1) or abort them. Keep every `OUTCOME_UNKNOWN` execution and its record; never rewrite one to `FAILED`. Settle each one by checking its target database ([DAG Executor §16.7](dag-executor.md#167-operating-the-transaction-1036)). Then run [Metadata DB §7.5](metadata-db.md#75-rolling-back-v66-execution-commit-outcomes-1035)'s documented block, which refuses while an unknown outcome or an unsettled commit attempt exists. An older image runs every writing run as independent commits again.
+- **Published mutation reservations (V67, #1039): no barrier, drain first.** An image older than V67 starts on a migrated database and simply refuses every published `POST`, `PUT` and `DELETE` (`503 endpoint.mutations_disabled`); it never reads `published_mutation_reservations`. Before rolling back, set `datapipelines.endpoints.mutations-enabled=false` — which withholds FRESH mutations only, so clients' identical retries and polling of already admitted runs keep working while they settle — and let admitted runs finish. After the rollback, polling of a mutation-started run answers `404` and a retry answers `503 endpoint.mutations_disabled` until the newer image returns (the reservations survive, so the retry is then answered from its original run); the optional table removal is [Metadata DB §7.6](metadata-db.md#76-rolling-back-v67-published-mutation-reservations-1039).
+- **Replay digests and `DATAPIPELINES_JWT_SECRET` (#1039).** A published mutation's reservation is found by a keyed digest derived from the JWT signing secret, so every replica must share that secret (it already must, for sessions). Rotating it makes every live reservation unrecognisable: an identical retry of a request admitted under the old secret is then admitted as a NEW request and can run again. Rotate only with mutations drained — `mutations-enabled=false`, admitted runs settled, and clients told that retries spanning the rotation are new requests — or after `datapipelines.idempotency.ttl-seconds` has passed since the last admission.
 - **For MINOR upgrades**: schema changes are additive; rollback usually works.
 - **For MAJOR upgrades**: take a DB backup before upgrade; restore it to roll back.
 
@@ -1690,7 +1711,11 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-22 | v1.78 | 1064 (#1064, js-rendered T13) | **What the edge sets (§6.2's table):** a row for `Access-Control-Allow-Origin: *` on a font file's successful answer under `/vendor/fonts/` only (never on an error answer, never with a credentials header), so a page of another origin that loads the client library's stylesheet can use its fonts. |
+| 2026-11-22 | v1.82 | 1064 (#1064, js-rendered T13) — renumbered at final sync after #1039's v1.81 | **What the edge sets (§6.2's table):** a row for `Access-Control-Allow-Origin: *` on a font file's successful answer under `/vendor/fonts/` only (never on an error answer, never with a credentials header), so a page of another origin that loads the client library's stylesheet can use its fonts. |
+| 2026-11-21 | v1.81 | 1039 (#1039) | **§8 rollback:** V67 needs no barrier — an older image refuses mutations by itself; drain with `mutations-enabled=false` (which now withholds fresh mutations only, so retries and polling of admitted runs still answer). New note: the replay digests derive from `DATAPIPELINES_JWT_SECRET`, so rotating it during the replay window turns retries into new requests — rotate with mutations drained. |
+| 2026-11-21 | v1.80 | 1036 r2 (#1036) | **§8.3 step 5:** the report runs before the migrations, so it reads the previous release's schema — a route stored before V65 is reported as a `GET` route (held by `LocalWriteCompatibilityPackagedIntegrationTest`: the packaged command on V64, then on the current schema). |
+| 2026-11-21 | v1.79 | 1036 (#1036) | **§8.3** gains step 5, the pre-deploy check for the single-database write transaction: run `scripts/local-write-compatibility-report.sh` (offline, read-only, no customer connection) with the new jar over current, schedule-pinned and API-pinned versions, and act on each `refused` line before deploying (DAG Executor §16.6/§16.7). The later steps renumber. **§8.4:** the V66 older-image boundary. The image refuses to start on the barrier; a deliberate rollback drains, preserves and settles every `OUTCOME_UNKNOWN`, then runs Metadata DB §7.5's block. |
+| 2026-11-20 | v1.78 | #1037 round 2 | **§8.4:** the V65 older-image boundary — an image older than V65 refuses to start on a migrated database (the repeatable downgrade-barrier migration); a deliberate rollback is Metadata DB §7.4's documented block after a drain; never `flyway repair`. |
 | 2026-11-17 | v1.77 | 1023 (#1023, static file cache). Renumbered after #997's v1.76 | **What the edge sets:** the `Cache-Control` row gains the static files' two rules (the owner's ruling of 2026-11-16): font files kept a year (`max-age=31536000, public, immutable`), every other file under `/css/`, `/js/` and `/vendor/` kept and re-checked by a content `ETag` (`no-cache`); the font rule's consequence for an operator (a new file name and ledger line per font upgrade, guarded by `FontPathLedgerTest` with the repository's history). The security chain writes no `Cache-Control`, `Pragma` or `Expires` of its own on a font file (Chromium treats `Pragma: no-cache` as `no-cache` and would re-check each font on every page); every other answer keeps all three, and an error answer on a font path (404, 416) carries all three as before. §6.7 needed no edit: `/`, `/site/**` and the docs keep their windows. |
 | 2026-11-17 | v1.76 | #997 final review F1 | **§6.6:** the process memory admission example follows the measured defaults: two staging databases with the lake on or off, after `staging-expansion-factor` became 10. The enabled non-heap terms total 4 GiB (staging 2, readers 1, reserve 1); this corrects the earlier seven-database example, not a measured capacity profile. |
 | 2026-11-15 | v1.75 | 819 (#819) — renumbered at final sync after #988's v1.74 | **§6.6:** the process memory admission — the boot-time sum of the counted engine budgets, the heap and a process reserve against the container limit less a headroom; its breakdown line; the chart's `memoryAdmission` values (chart 0.5.0); what it does not count; the limit is the cgroup's effective one, the smallest over the process's cgroup and its ancestors (round 3). |

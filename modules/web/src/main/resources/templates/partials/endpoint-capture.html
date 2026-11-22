@@ -1,0 +1,71 @@
+<!-- #1043 (ui-screens §4.18c) — the runtime capture card of one published POST, PUT or DELETE. Workspace administrators
+     only (execution.capture.manage, interactive session). Every value below is an identity, a time or a state: the card
+     never shows a captured value — that is the diagnostic page's, by execution id. Writes re-render this card. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="card" class="app-card-b" id="api-capture" data-api-capture-card
+     th:attr="data-capture-state=${cap.active != null} ? 'active' : 'disabled'">
+  <div class="app-alert app-alert-danger u-mb-md" th:if="${captureError != null}" role="alert"
+       data-api-capture-error th:text="${captureError}">A capture is already active.</div>
+  <p class="u-text-sm u-secondary" data-api-capture-warning>Capture keeps the declared output values of each transformer
+    node for the runs it admits. A declared output can itself contain personal data. Captured details are visible only
+    to workspace administrators and are deleted <span th:text="${retentionHours}">24</span> hours after each run was
+    admitted.</p>
+
+  <th:block th:if="${cap.active != null}">
+    <p class="u-text-sm">
+      <span class="app-chip app-chip-warn" data-api-capture-status><i class="ds-status"></i>active</span>
+      <span data-api-capture-remaining th:text="${remaining} + ' remaining'">14 min remaining</span>
+      — until <span class="u-mono" th:text="${cap.active.deadlineAt}">2026-11-22T10:15:00Z</span>
+    </p>
+    <p class="u-text-sm" th:if="${cap.active.correlationId != null}">Only requests with correlation id
+      <span class="u-mono" data-api-capture-filter th:text="${cap.active.correlationId}">…</span></p>
+    <p class="u-text-sm" th:if="${cap.active.correlationId == null}" data-api-capture-filter>Every request to this
+      route and method.</p>
+    <form th:attr="hx-post=@{'/partials/endpoints/{id}/capture/{cid}/stop'(id=${cap.endpoint.id},cid=${cap.active.id})}"
+          hx-target="#api-capture" hx-swap="outerHTML">
+      <button type="submit" class="ds-button ds-button-primary" data-api-capture-stop>Stop capture</button>
+    </form>
+  </th:block>
+
+  <th:block th:if="${cap.active == null}">
+    <p class="u-text-sm"><span class="app-chip" data-api-capture-status>disabled</span></p>
+    <form th:attr="hx-post=@{'/partials/endpoints/{id}/capture'(id=${cap.endpoint.id})}"
+          hx-target="#api-capture" hx-swap="outerHTML">
+      <label class="ds-field">
+        <span class="ds-field-label">Correlation id (optional)</span>
+        <input class="ds-input u-mono" type="text" name="correlation_id" autocomplete="off" maxlength="64"
+               placeholder="any request" data-api-capture-correlation>
+        <span class="ds-field-help">Capture only the request sent with this exact DP-Correlation-Id.</span>
+      </label>
+      <button type="submit" class="ds-button ds-button-primary" data-api-capture-start
+              th:text="'Capture for ' + ${windowMinutes} + ' minutes'">Capture for 15 minutes</button>
+    </form>
+  </th:block>
+
+  <th:block th:if="${not #lists.isEmpty(cap.recent)}">
+    <h3 class="ds-title u-mb-xs">Recent captures</h3>
+    <div class="dt-frame dt-flush">
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-api-capture-history>
+          <thead>
+          <tr>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Captured runs</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="w : ${cap.recent}" th:attr="data-capture-id=${w.session.id}">
+            <td class="u-mono" th:text="${w.session.startedAt}">2026-11-22T10:00:00Z</td>
+            <td class="u-mono" th:text="${w.session.activeAt(cap.now)} ? 'active' : ${w.session.endedAt}">—</td>
+            <td>
+              <span th:if="${#lists.isEmpty(w.executions)}" class="u-secondary">none</span>
+              <a th:each="e : ${w.executions}" class="app-chip app-chip-mono" data-api-capture-run
+                 th:href="@{'/executions/{id}/capture'(id=${e})}" th:text="${e}">run</a>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </th:block>
+</div>

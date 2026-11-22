@@ -86,7 +86,10 @@ class TemplateDryRendererImpl(
     }
 }
 
-/** The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc. */
+/**
+ * The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc.
+ * A body input (#1038) projects as the view's body input, which §12.13 binds only to `@request_body`.
+ */
 private fun viewOf(contract: ScriptContract): co.datapipelines.pipeline.ScriptContractView =
     co.datapipelines.pipeline.ScriptContractView(
         mode =
@@ -98,6 +101,10 @@ private fun viewOf(contract: ScriptContract): co.datapipelines.pipeline.ScriptCo
         inputs =
             contract.inputs.mapValues { (_, input) ->
                 when (input) {
+                    is ScriptInput.Body -> {
+                        co.datapipelines.pipeline.ScriptContractView.Input.Body
+                    }
+
                     is ScriptInput.Table -> {
                         co.datapipelines.pipeline.ScriptContractView.Input
                             .Table(input.columns.map(::viewColumn))

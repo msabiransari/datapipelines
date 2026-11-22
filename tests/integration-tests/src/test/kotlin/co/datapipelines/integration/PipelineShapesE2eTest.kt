@@ -165,6 +165,8 @@ class PipelineShapesE2eTest {
                         "type" to "DML",
                         "source" to "pg-local",
                         "template" to mapOf("id" to "test/wb_insert.sql", "version" to 1),
+                        "operation" to "update",
+                        "output" to mapOf("target" to "discard"),
                         "depends_on" to emptyList<String>(),
                     ),
                 ),

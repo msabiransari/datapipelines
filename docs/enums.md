@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.61 (living document — updated as enums evolve)
+**Status:** v1.65 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -78,7 +78,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 
 ---
 
-## 3. `OutputTarget` — where a DQL node's ResultSet goes
+## 3. `OutputTarget` — where a node's ResultSet goes
 
 **Source:** [Pipeline Contract §4.7](pipeline-contract.md#47-output-block-reference)
 **Used by:** pipeline-contract, dag-executor, staging.
@@ -86,8 +86,9 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | Value | Required fields | Description |
 |---|---|---|
 | `tempdb` | `table` | Stage ResultSet into in-memory tempdb table for downstream nodes to query. |
-| `caller` | (none) | Return ResultSet as the pipeline's result. **Default if the `output` block is omitted.** At most one node per pipeline may resolve to `caller`; zero is legal (pure write-back pipelines emit no `data_ready`). |
+| `caller` | (none) | Return ResultSet as the pipeline's result. **Default when a DQL node omits its `output` block.** A DML node must declare its output explicitly (§4.4 of the Pipeline Contract). At most one node per pipeline may resolve to `caller`; zero is legal (pure write-back pipelines emit no `data_ready`). |
 | `datasource` | `datasource`, `table`, `mode` | Stream ResultSet to an external datasource's table. |
+| `discard` | (none) | DML nodes only (#1034, [Pipeline Contract §4.4](pipeline-contract.md#44-json-structure-dml-node)): the statement's write is the node's only effect; no rows are staged or returned. |
 
 **Reserved for future:** `kafka`, `s3`, `email`, `webhook` (see [ROADMAP](ROADMAP.md)).
 
@@ -302,6 +303,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `SUCCESS` | All nodes completed; result returned |
 | `FAILED` | A node failed; execution aborted |
 | `ABORTED` | Execution cancelled: client disconnect beyond `sse.disconnect-grace-seconds`, explicit `DELETE /api/v1/executions/{id}`, server shutdown, or the crash sweep ([Metadata DB §8](metadata-db.md#8-operational-jobs)) |
+| `OUTCOME_UNKNOWN` | Terminal (#1035, V66): the family's shared local write transaction was attempted and its acknowledgement was lost — the database may or may not hold the writes, and the engine never replays them to find out. A child of that family inherits it. Carried on the `pipeline_failed` event's `status`; never produced when no commit was attempted ([DAG Executor §16.5](dag-executor.md#165-the-commit-boundary-and-outcome_unknown-1035)) |
 
 **Reserved for future:** `PARTIAL` (partial-result mode where some nodes succeeded but a non-critical path failed — see [ROADMAP](ROADMAP.md)).
 
@@ -430,6 +432,9 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.version_restored` (#786) | A DISCARDED API version was restored after its pin was rechecked |
 | `endpoint.version_purged` (#786) | An API DRAFT version was purged |
 | `endpoint.current_switched` (#786) | The API's runtime current version was switched; `details.from` and `details.to` carry both numbers |
+| `execution.capture.started` | (#1043) A workspace administrator or super admin opened a runtime capture window on a published mutation route ([Auth §10.1](auth.md#101-events)); `details` carry identities and times, never the correlation filter, a request or a captured output |
+| `execution.capture.stopped` | (#1043) The window was stopped (`details.end_reason`: `STOPPED` / `EXPIRED`); a repeated stop of an ended window writes no row |
+| `execution.capture.inspected` | (#1043) An administrator read a captured execution's private details; a refused read (absent, expired) writes no row, and `details` never carry a value |
 
 > Password and lockout events exist only for the optional local accounts ([Auth §5A](auth.md#5a-local-password-accounts-optional)); an OIDC-only deployment never writes them. No event in this table ever carries credential material.
 
@@ -1424,6 +1429,10 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.65 | 1043 (#1043) | **§15:** the three runtime capture audit events `execution.capture.started`, `.stopped` and `.inspected`, mirrored from [Auth §10.1](auth.md#101-events). |
+| 2026-11-20 | v1.64 | 1035 (#1035) | **§10 `ExecutionStatus`:** gains `OUTCOME_UNKNOWN` (V66) — terminal; the family's shared commit was attempted and not acknowledged. Carried on `pipeline_failed`'s `status`; the metric tag `status` gains `outcome_unknown`. |
+| 2026-11-21 | v1.63 | #1034 review F1 | §3 scopes the omitted-output `caller` default to DQL; DML always declares its output explicitly. |
+| 2026-11-20 | v1.62 | 1034 (#1034) | **§3 `OutputTarget`:** gains `discard`, the DML-only target whose write is the node's only effect (pipeline contract §4.4). |
 | 2026-11-15 | v1.61 | 989 (#989, js-rendered F5) | **§63 `ChartType`:** rows `line` and `area`, each with its enum entry, schema file, template and fixtures; their `x` is a band or a position (a temporal `x` has the one form `position`). |
 | 2026-11-15 | v1.60 | 988 (#988, js-rendered F4) | **§31 `RendererKind`:** the closing paragraph no longer names the kind retired by #860; it is refused as any unknown kind, as before. Text only: the closed set and its refusal are unchanged. |
 | 2026-11-15 | v1.59 | 986 (#986, js-rendered F2) | **§31 `RendererKind`:** the retired `plotly` is refused as any unknown kind (`details.reason` `unknown_kind`, the message listing the allowed kinds). **§32 `AssertionKind`:** on a chart, `rendered`, `mark_count` and `text_visible` are judged by the mechanical check from the chart engine's canonical render at 640 × 400 (`text_visible`: a text the chart shows), unjudged only on a host without the JavaScript runtime. No value added or removed. |

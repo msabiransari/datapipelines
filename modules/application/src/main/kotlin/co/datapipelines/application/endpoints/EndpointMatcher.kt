@@ -23,14 +23,15 @@ import org.springframework.web.util.pattern.PatternParseException
  * `PathPattern` implements `Comparable` and Spring's own mapping uses it to prefer `/a/b` over
  * `/a/{x}`. This matcher does not sort, does not rank and has no tie-break — because §4.1
  * refuses to publish an ambiguous pattern in the first place ([EndpointPath.overlaps], enforced
- * by the repository with `endpoint.path_conflict`). At request time **at most one** pattern can
- * therefore match.
+ * by the repository with `endpoint.path_conflict`). At request time **at most one** pattern of a
+ * given METHOD (#1037: a route is a method+path pair, and the conflict refusal is per method)
+ * can therefore match.
  *
  * That invariant is load-bearing enough to be asserted rather than asserted-in-prose:
  * `EndpointMatcherTest` publishes a conflict-free set and fuzzes request paths against it,
- * failing if any path ever matches two patterns. If the ambiguity check were ever weakened, this
- * matcher would start silently picking one of two meanings for a URL — the fuzz is what makes
- * that go red instead.
+ * failing if any path ever matches two patterns of one method. If the ambiguity check were ever
+ * weakened, this matcher would start silently picking one of two meanings for a URL — the fuzz
+ * is what makes that go red instead.
  */
 class EndpointMatcher(
     endpoints: Collection<PublishedEndpoint>,
@@ -63,14 +64,23 @@ class EndpointMatcher(
     val size: Int get() = compiled.size
 
     /**
-     * The endpoint this request path resolves to, with its extracted path variables — or null
-     * when nothing matches (§5.6's `404`).
+     * The endpoint this request path resolves to ON [method], with its extracted path variables — or null when
+     * nothing matches (§5.6's `404`).
      *
-     * [path] is the part AFTER `/api`, with its leading `/` (`/nyc/v1/revenue/Manhattan`).
+     * [path] is the part AFTER `/api`, with its leading `/` (`/nyc/v1/revenue/Manhattan`). The method filter is
+     * what makes same-path routes coexist (#1037): `GET /nyc/v1/revenue` and `POST /nyc/v1/revenue` are two
+     * entities, and a request for one never resolves to the other — a GET request at a POST-only path is the
+     * opaque `404`, not a hit.
      */
-    fun match(path: String): Match? {
+    fun match(
+        path: String,
+        method: EndpointMethod,
+    ): Match? {
         val parsed = PathContainer.parsePath(path)
-        val hit = compiled.firstOrNull { (pattern, _) -> pattern.matches(parsed) } ?: return null
+        val hit =
+            compiled.firstOrNull { (pattern, endpoint) ->
+                endpoint.method == method && pattern.matches(parsed)
+            } ?: return null
         val variables =
             hit.first
                 .matchAndExtract(parsed)
@@ -80,12 +90,16 @@ class EndpointMatcher(
     }
 
     /**
-     * Every endpoint whose pattern matches [path]. Only ever more than one if the §4.1 ambiguity
-     * refusal has been bypassed — which is exactly what the fuzz test uses this for.
+     * Every endpoint of [method] whose pattern matches [path]. Only ever more than one if the §4.1 ambiguity
+     * refusal has been bypassed — which is exactly what the fuzz test uses this for. Per method on purpose
+     * (#1037): several methods matching one path is the LEGAL cross-method shape, not an ambiguity.
      */
-    fun matchAll(path: String): List<PublishedEndpoint> {
+    fun matchAll(
+        path: String,
+        method: EndpointMethod,
+    ): List<PublishedEndpoint> {
         val parsed = PathContainer.parsePath(path)
-        return compiled.filter { (pattern, _) -> pattern.matches(parsed) }.map { it.second }
+        return compiled.filter { (pattern, endpoint) -> endpoint.method == method && pattern.matches(parsed) }.map { it.second }
     }
 
     /** A resolved request: the row, and the path variables the pattern bound. */

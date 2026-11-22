@@ -116,6 +116,20 @@
                          data-verb="key-bind">
                   <span class="ds-mono" th:text="${node == '/'} ? '/** (everything)' : ${node} + '/**'">/nyc/**</span>
                 </label>
+                <!-- #1040 — method grants: one checkbox per published POST/PUT/DELETE ROUTE. A grant names exactly
+                     that route and method (never a tree node, never a sibling method at the path); a GET node above
+                     never grants it. grantsOffered names every route this form rendered, so a save only changes the
+                     grants it showed. -->
+                <th:block th:if="${not #lists.isEmpty(methodRoutes)}">
+                  <p class="u-text-sm u-secondary u-mt-xs u-mb-xs">Method grants (exactly one route each)</p>
+                  <label class="app-picker-row" th:each="route : ${methodRoutes}">
+                    <input type="hidden" name="grantsOffered" th:value="${route}">
+                    <input type="checkbox" name="grants" th:value="${route}"
+                           th:checked="${#lists.contains(k.boundPaths, route)}"
+                           data-verb="key-grant">
+                    <span class="ds-mono" th:text="${route}">POST /lending/v1/applications</span>
+                  </label>
+                </th:block>
                 <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Save associations</button>
               </form>
             </details>

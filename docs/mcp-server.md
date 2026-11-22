@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.83 (frozen contract — additive-only changes after this point)
+**Status:** v1.90 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-22
 
 ---
 
@@ -344,6 +344,10 @@ Execute a pipeline.
         "type": "object",
         "description": "Object whose keys match the pipeline's declared parameters. Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types).",
         "additionalProperties": true
+      },
+      "request_body": {
+        "description": "The pipeline's structured request body (pipeline-contract §3.4): one JSON object or array of objects, delivered unchanged to the SCRIPT transformer that binds @request_body. Only for a pipeline that declares request_body; never part of parameters. A member repeated anywhere inside it is refused, and every number keeps its exact value.",
+        "anyOf": [{"type": "object"}, {"type": "array", "items": {"type": "object"}}]
       }
     }
   }
@@ -367,6 +371,10 @@ MCP **progress notifications** for in-flight nodes are deliberately not implemen
 **If the agent abandons the call** (aborts the HTTP request, client crash): a blocking `POST /mcp` gives the servlet no disconnect callback, so the `datapipelines.sse.disconnect-grace-seconds` cancellation that a dropped **REST SSE** stream gets ([REST API §6.8](rest-api.md#68-client-disconnect)) does **not** apply to an abandoned tool call in v1 — the execution runs until it finishes or hits `datapipelines.executor.execution-timeout-seconds`. To stop an in-flight execution deterministically, cancel it: over MCP with `executions_cancel` (§6.2.35) when this key's own MCP calls started it, or out-of-band via `DELETE /api/v1/executions/{id}` ([REST API §10.4](rest-api.md#104-cancel-execution)) from any instance — in-flight statements are interrupted and the abandoned tool call returns an `ABORTED` result. There is no resumption path (a reconnecting agent must re-execute).
 
 **With no `version`, this runs the WORKING version** (D56, 099): the draft when one exists, else the latest release — "always run the LAST version". On a development server that may well be a draft (drafts have been executable since 039); on a hardened server `authoring-enabled=false` refuses every draft-creating write, so the working version is a RELEASED version by construction ([versioning §7.2](versioning.md#72-execute-with-no-version-runs-the-working-version-d56-099)). The execution record pins the version that actually ran and the executions screen marks a draft run, so a result is never ambiguous about what produced it. An explicit `version` is exact and never clamped.
+
+**The structured request body (#1038).** A pipeline that declares `request_body` ([Pipeline Contract §3.4](pipeline-contract.md#34-structured-request-body)) takes one JSON object or array of objects in the optional `request_body` argument — the same fixture framework execute carries ([REST API §6.1](rest-api.md#61-endpoint)) and the same value its published API's request body delivers. It is decoded by the one bounded decoder (shape, depth, size — the byte budget counted on the body's canonical encoding, as framework execute counts it, so a long spelling of the same value costs the same), joins the `Idempotency-Key` fingerprint when present (a different body under one key is `idempotency.key_reused_for_different_request`), and is never written into the stored parameters. A refusal is `pipeline.execution.request_body_invalid` with a `details.reason` and never a value. The `/mcp` transport guards the value before the SDK discards information (round 2, completing #1056): the transport mapper reads the same JSON-RPC text once more and, for the `request_body` member alone, refuses a member repeated anywhere inside it (or `request_body`, `arguments` or `params` given twice beside it) before any tool, execution, reservation or write runs, and restores every fraction as an exact decimal, so a duplicate refuses and a long fraction arrives exactly as framework execute would see it (an integer past 2^53 and a decimal alike); the refusal names no member and no value. Every other argument of every tool keeps its ordinary reading. The failure of a body execution discloses its code and node metadata only ([Pipeline Contract §3.4](pipeline-contract.md#34-structured-request-body), Diagnostics).
+
+**Authored body fixtures (#1038 round 3).** The transport also keeps the exact text of the `input` argument of `templates_evaluate` and the `tests` argument of `templates_create` and `templates_update`, and the tool binds a body fixture from that text. A member repeated inside the fixture is refused (`duplicate_member`), and a long fraction is evaluated exactly as `pipelines_execute` would run it. A client-supplied copy of the transport's private `_meta` key is discarded. A saved fixture keeps its member order, every repeated member and its exact numbers through the stored tests, `templates_get`, a re-save and the release run (#1080). A body case's evaluation and suite verdict use the bounded diagnostics ([Pipeline Contract §3.4](pipeline-contract.md#34-structured-request-body), Diagnostics).
 
 **Render before you run (139).** Executing a DRAFT version whose pinned template version is itself a DRAFT written after this key's last successful `templates_render` of it is refused — `pipeline.execution.template_unrendered`, with `details.templates` carrying each `{id, version, updated_at, last_render}`. RELEASED pins are exempt (they rendered before release and cannot change), and so is any execute of a RELEASED version: the check reads the caller's own audit rows, so it is an AGENT-surface rule — REST, the UI and a human's key keep their freedom. A `templates_update` therefore makes the next execute refuse again until a fresh render: the render-then-run loop the SKILL's steps 3 and 5 describe, enforced at the entry point instead of asked of the model a third time. `pipelines_execute_node` (§6.2.20) runs the same check on the one node it resolves.
 
@@ -668,7 +676,7 @@ List recent executions.
     "type": "object",
     "properties": {
       "pipeline_id": {"type": "string", "format": "uuid"},
-      "status": {"type": "string", "enum": ["RUNNING", "SUCCESS", "FAILED", "ABORTED"]},
+      "status": {"type": "string", "enum": ["RUNNING", "SUCCESS", "FAILED", "ABORTED", "OUTCOME_UNKNOWN"]},
       "limit": {"type": "integer", "default": 50, "maximum": 200}
     }
   }
@@ -698,6 +706,8 @@ Fetch metadata for a specific execution (no rows).
 ```
 
 **Permission:** `execution.read`.
+
+**`OUTCOME_UNKNOWN` and `result_unavailable` (#1035).** The record's `status` may be `OUTCOME_UNKNOWN` — terminal, with `error.code` `pipeline.execution.local_write_commit_failed`: the family's shared commit was attempted and its acknowledgement lost, so the writes may or may not exist. Never re-run to settle it; a re-run can write twice. A `SUCCESS` record may carry `result_unavailable: true` — the commit is confirmed, only the caller result was not delivered; `executions_get_result` then answers `result.storage_unavailable` and the status stays `SUCCESS`. A `pipelines_execute` call (fresh, or attached to the same `Idempotency-Key`) whose run ends that way returns `status: "SUCCESS"` with `"result_unavailable": true` and no `rows` — not an error, and not an empty result that reads as a zero-caller run (#1035 r3). A child of such a family stays `RUNNING` until its root settles and then reports the root's final status.
 
 **Response (057, on a `FAILED` execution):** `error` is the full failure record — the same object the SSE stream carried and `error_json` stores. (Plain fence: an example, not a tool definition — §6.2's `json` fences are exactly the input schemas `McpToolSurfaceSpecDriftTest` pins.)
 
@@ -766,7 +776,7 @@ This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-r
 |---|---|
 | `result.execution_not_found` | Unknown execution id — check `executions_list`. |
 | `result.execution_incomplete` | Still running; wait or re-check with `executions_get`. |
-| `result.execution_failed` | The execution failed; there is no result. Use `executions_get` for the failure. |
+| `result.execution_failed` | The execution failed; there is no result. Use `executions_get` for the failure. Also `OUTCOME_UNKNOWN` (#1035, `details.status`): the write transaction's commit was attempted and not acknowledged — the database may hold the writes. Do NOT re-run the pipeline to find out; check the target, or ask the person. |
 | `result.expired` | TTL elapsed. Re-run the pipeline — the result is unrecoverable. |
 | `result.format_unsupported` | Unknown `format` value. |
 
@@ -918,7 +928,7 @@ Runs ONE pipeline node's rendered SQL against its own datasource — a debug que
 ```json
 {
   "name": "pipelines_execute_node",
-  "description": "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, and so is a SCRIPT node (use templates_evaluate). Parameters bind through the pipeline's declarations; unsupplied required parameters fall back to sample values and the response names them in sampled_parameters. Absent version runs the DRAFT if one exists, else the current released version; the response states which version and status ran. A draft whose pinned draft template was updated after this key's last templates_render of it is refused pipeline.execution.template_unrendered — render, then run.",
+  "description": "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, and so is a SCRIPT node (use templates_evaluate) and a DML insert whose input is a staged table. Parameters bind through the pipeline's declarations; unsupplied required parameters fall back to sample values and the response names them in sampled_parameters. Absent version runs the DRAFT if one exists, else the current released version; the response states which version and status ran. A draft whose pinned draft template was updated after this key's last templates_render of it is refused pipeline.execution.template_unrendered — render, then run.",
   "inputSchema": {
     "type": "object",
     "required": ["pipeline_id", "node_id"],
@@ -938,7 +948,7 @@ Runs ONE pipeline node's rendered SQL against its own datasource — a debug que
 
 Returns: `{"node_id", "node_type", "datasource", "version", "status", "sql", "sampled_parameters"?, "elapsed_ms"}` plus, for DQL nodes, `{"columns": [{"name", "type"}], "rows": [{column: value, ...}], "row_count", "truncated"}` (capped at 50 rows like `datasources_preview_rows`), or for DML/DDL nodes `{"affected_rows"}` — **DML/DDL execute for real**, with no execution row, no SSE and no idempotency record (ratified, 037 §A). `sql` is the rendered template output in its `:name` form; execution binds those names as statement parameters. `status` is the run version's lifecycle status (`DRAFT`/`RELEASED`), so the agent never infers which body it ran.
 
-Refusals, all before anything runs: an unknown node id → `pipeline.node.not_found` (404 semantics); a node whose `source` is `tempdb` → `pipeline.node.standalone_execution_refused` with `details.reason = tempdb_source` (the staging database exists only inside a full execution — use `pipelines_execute`); a PIPELINE node → the same code with `details.reason = pipeline_node` (it runs a child pipeline, not SQL); a missing pinned template → `pipeline.node.template_not_found`; a render failure → `pipeline.node.template_render_failed`; a supplied parameter failing §6.3 coercion → `pipeline.execution.invalid_parameter_type` naming every failure; a rendered `:name` the pipeline does not declare → `pipeline.node.sql_parameter_missing` (042). A DML/DDL node against a readonly datasource is refused with `pipeline.node.datasource_readonly`; a datasource invisible to the key's workspace resolves as `datasource.not_found`, and an unreachable datasource as `pipeline.execution.datasource_unreachable`; a refused statement is `pipeline.node.query_execution_failed`.
+Refusals, all before anything runs: an unknown node id → `pipeline.node.not_found` (404 semantics); a node whose `source` is `tempdb` → `pipeline.node.standalone_execution_refused` with `details.reason = tempdb_source` (the staging database exists only inside a full execution — use `pipelines_execute`); a PIPELINE node → the same code with `details.reason = pipeline_node` (it runs a child pipeline, not SQL); a DML `insert` whose `input.table` names a staged table → the same code with `details.reason = staged_input`, before the datasource is resolved (#1034 — there is no ancestor run to stage it; a template binding an input row's own fields or `id` is refused `pipeline.node.sql_parameter_missing` at render, also before any SQL); a DML node otherwise keeps this tool's single-statement `affected_rows` envelope, outside the full run's `insert` result contract; a missing pinned template → `pipeline.node.template_not_found`; a render failure → `pipeline.node.template_render_failed`; a supplied parameter failing §6.3 coercion → `pipeline.execution.invalid_parameter_type` naming every failure; a rendered `:name` the pipeline does not declare → `pipeline.node.sql_parameter_missing` (042). A DML/DDL node against a readonly datasource is refused with `pipeline.node.datasource_readonly`; a datasource invisible to the key's workspace resolves as `datasource.not_found`, and an unreachable datasource as `pipeline.execution.datasource_unreachable`; a refused statement is `pipeline.node.query_execution_failed`.
 
 **Permission:** `pipeline.execute_node` — this runs real SQL and returns arbitrary customer row data; the same 037 F reasoning as `datasources_preview_rows`.
 
@@ -978,47 +988,57 @@ An agent that needs a datasource it cannot find should **ask the person** to add
 
 #### 6.2.23 `endpoints_create`
 
-Create a `GET` API at `/api/<category>/<version>/<path…>` (R-EP5; [REST API §19](rest-api.md#19-published-endpoints)) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule, the same reserved-category refusal, the same ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
+Create an API at `/api/<category>/<version>/<path…>` for one HTTP method — `GET` by default, or `POST`/`PUT`/`DELETE` for a mutation route (#1037; method identity is half of the route, immutable like the path) — its version 1 a DRAFT pinned to the EXACT `pipeline_version` given (#786; dependency-graph record §24): the pin never moves when the pipeline's current version moves, and no tool releases it — releasing is a person's act in the UI or over REST (`POST /api/v1/endpoints/{id}/release`, session only). Calls the same service `POST /api/v1/endpoints` calls — the same read-only rule (`GET` routes only; a mutation route's pin admits a writing pipeline), the same reserved-category and executions-suffix refusals, the same per-method ambiguity refusal, the same audit (049's rule: two entry points, one validated path).
 
 ```json
 {
   "name": "endpoints_create",
-  "description": "Create a GET endpoint at /api/<category>/<version>/<path>: this creates the API's first DRAFT version pinned to the exact pipeline_version given. Creation is an authoring operation: a deployment with authoring disabled refuses it (endpoint.authoring_disabled); there is no release to perform there. In an authoring-enabled deployment the draft is the entity's current version and serves under the normal runtime checks — the entity is enabled, the caller's key is bound, and the pinned pipeline version is eligible. The pin never moves when the pipeline's current version moves. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pinned pipeline version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — else endpoint.pipeline_version.not_eligible) and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
+  "description": "Create an endpoint at /api/<category>/<version>/<path> for one HTTP method — GET by default, or POST/PUT/DELETE for a mutation route (#1037): the method is half of the route's identity and immutable like the path, so a GET and a POST at one pattern are two routes. This creates the API's first DRAFT version pinned to the exact pipeline_version given; the pin never moves. Authoring-disabled deployments refuse it (endpoint.authoring_disabled). The category is your namespace; categories matching v<number> and the literal 'api' are reserved (endpoint.path_reserved), as is a path that could match an executions/{id} or executions/{id}/result polling suffix. The version is one free-form segment (v1 by convention); path variables come after it; path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string; a leading /api prefix is stripped. The pinned version must be eligible here (RELEASED; a DRAFT only where authoring is enabled — endpoint.pipeline_version.not_eligible) and, for GET, side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes; a DML/DDL node against a registered datasource, or a DQL node writing back to one, is refused endpoint.pipeline_not_readonly naming node and datasource — what makes GET safe to retry and crawl; a mutation route's pin admits a writing pipeline by design. A route of the SAME method that could match the same URL is refused (endpoint.path_conflict), never resolved by precedence; another workspace's route at a matching pattern is refused the same way with a redacted body naming nothing but your own pattern. Calling the endpoint needs an API key granted its method — a GET grant is a tree node bound over REST or in the UI (auth.md §7.7); a mutation grant names this one route and is bound the same way with a method. Granted to no key, served to no one; an MCP key never reaches REST (it acts over /mcp only).",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path",
-      "pipeline",
-      "pipeline_version"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."
-      },
-      "pipeline": {
-        "type": "string",
-        "description": "The pipeline NAME."
-      },
-      "pipeline_version": {
-        "type": "integer",
-        "minimum": 1,
-        "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
-      },
-      "timeout_seconds": {
-        "type": "integer",
-        "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."
-      },
-      "description": {
-        "type": "string"
-      }
+  "type": "object",
+  "required": [
+    "path",
+    "pipeline",
+    "pipeline_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "e.g. /finance/v1/revenue/{region} — category, version, then the path; no /api prefix (one is stripped, not refused), no trailing slash."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's HTTP method, immutable like the path. Absent means GET."
+    },
+    "pipeline": {
+      "type": "string",
+      "description": "The pipeline NAME."
+    },
+    "pipeline_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The EXACT pipeline version the API's first draft pins. It never moves when the pipeline's current version moves."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Clamped by datapipelines.endpoints.timeout-min-seconds/max-seconds. On timeout the endpoint answers 202 and the execution keeps running."
+    },
+    "description": {
+      "type": "string"
     }
   }
 }
+}
 ```
 
-Returns the endpoint's wire shape: `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
+Returns the endpoint's wire shape: `method`, `path`, `pipeline` (by NAME), `pipeline_version` (the current version's EXACT pin, #1040), `timeout_seconds`, `description`, `request_body` (#1040: the pinned version's body contract — `{"mode": "none" | "optional" | "required", "readers": [{"node_id", "template": "id@version"}]}`, the SCRIPT transformers that read the body; `null` with no current version or a pin that no longer resolves — the same spelling as [REST §19.5a](rest-api.md#195a-authoring-a-mutation-route-1040)), `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
 
 #### 6.2.24 `endpoints_list`
 
@@ -1040,25 +1060,35 @@ Returns `{endpoints: [...]}` in the shape §6.2.23 returns. Legacy rows (#274) a
 
 #### 6.2.25 `endpoints_get`
 
-One published endpoint, by its path PATTERN.
+One published endpoint, by its path PATTERN and method (absent meaning `GET`, the pre-#1037 shape — a `GET` and a `POST` at one pattern are two routes, each with its own versions).
 
 ```json
 {
   "name": "endpoints_get",
-  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
+  "description": "One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}') and method (absent meaning GET, the pre-#1037 shape). A GET and a POST at one pattern are two routes, each with its own versions. For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
-      }
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's method. Absent means GET."
     }
   }
+}
 }
 ```
 
@@ -1066,29 +1096,39 @@ Returns the §6.2.23 shape, or `endpoint.not_found`.
 
 #### 6.2.26 `endpoints_delete`
 
-Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; key bindings on that node are not removed, since a node may still carry other endpoints beneath it. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
+Unpublish an endpoint — the guarded entity deletion (#786). The pipeline is untouched; GET key bindings on that path are not removed, since a node may still carry other endpoints beneath it, while a mutation grant named this one route goes with it (#1037: the grant names the entity). Deleting one method's route never touches a sibling method's route at the same pattern. An API is deleted only while every version it holds is a DRAFT: a RELEASED version (current or not) or a DISCARDED one refuses `endpoint.version.last_release` (409) with nothing removed — the API, its pointer, its versions and its bindings stay. A legacy row (#274) is never served and stays deletable.
 
 ```json
 {
   "name": "endpoints_delete",
-  "description": "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. Key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
+  "description": "Unpublish an endpoint by its path and method (absent meaning GET). The pipeline is untouched — only the URL stops answering that method. GET key bindings on that path are NOT removed: they describe a node of the tree, which may still carry other endpoints beneath it; a mutation grant named this one route and goes with it. This is also the fix for a LEGACY row (#274) — a retired path listed with \"legacy\": true never serves under the current grammar, and deleting it removes the row. An API that holds a RELEASED or DISCARDED version is never deleted: the call is refused endpoint.version.last_release and nothing is removed — discard is per version, the API stays.",
   "inputSchema": {
-    "type": "object",
-    "required": [
-      "path"
-    ],
-    "additionalProperties": false,
-    "properties": {
-      "path": {
-        "type": "string",
-        "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
-      }
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The published path PATTERN, e.g. /finance/v1/revenue/{region}."
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "description": "The route's method. Absent means GET."
     }
   }
 }
+}
 ```
 
-Returns `{path, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
+Returns `{path, method, deleted: true}`, `endpoint.not_found`, or `endpoint.version.last_release` (`details`: this API's blocking `version` and `status`).
 
 **Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -3124,6 +3164,13 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.90 | 1040 (#1040) | **§6.2.23–§6.2.25 (additive):** `endpoints_create`, `endpoints_list` and `endpoints_get` answer `pipeline_version` (the current version's exact pin) and `request_body` (`mode` + the reading SCRIPT transformers, `null` with no current version or an unresolvable pin) — what an author must see before acting on a route; the REST management read carries the same spelling (rest-api §19.5a). The status line, stale at v1.85 since v1.86, is brought to this entry. No tool, input or permission change. |
+| 2026-11-21 | v1.89 | 1038 r4 (#1038) | **§6.2.3 / template writes:** a body fixture saved with `templates_create`/`_update` keeps member order, repeated members and exact numbers through stored tests, `templates_get`, re-save and release (#1080). |
+| 2026-11-21 | v1.88 | 1038 r3 (#1038) | **§6.2.3:** `request_body`'s byte budget counts canonical bytes, as framework execute does. **§6.2.3 / §6.2.43 / template writes:** body fixtures in `templates_evaluate` `input` and `templates_create`/`_update` `tests` are bound from the exact argument text (a repeated member refused, exact fractions); body-case diagnostics are bounded. |
+| 2026-11-21 | v1.87 | 1038 r2 (#1038) | **§6.2.3:** the transport deviation is removed — `pipelines_execute` refuses a member repeated inside `request_body` before any tool runs and keeps every number exact (#1056 completed); a failed body execution reports its code and node metadata only. |
+| 2026-11-21 | v1.86 | 1038 (#1038) | **§6.2.3 `pipelines_execute` (additive):** optional `request_body` input — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4); bounded decoding, part of the idempotency fingerprint, never stored in parameters; refusal `pipeline.execution.request_body_invalid`. The transport-parsing difference from framework execute is stated. |
+| 2026-11-21 | v1.85 | 1035 r3 (#1035) | **§6.2.3 `pipelines_execute`:** a confirmed run whose caller result cannot be delivered returns `status: "SUCCESS"` with `result_unavailable: true` and no rows (before: a `result.expired` error); the attached replay of the same key says the same. No new tool, no new permission. |
+| 2026-11-20 | v1.84 | 1035 (#1035) | **§6.2.13 `executions_list`:** the `status` filter gains `OUTCOME_UNKNOWN`. **§6.2.14 `executions_get`:** `status` may be `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; a family child stays `RUNNING` until its root settles. **§6.2.15:** `result.execution_failed` covers `OUTCOME_UNKNOWN`, `result.storage_unavailable` a confirmed SUCCESS whose result was not delivered. No new tool, no new permission. |
 | 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |
 | 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |

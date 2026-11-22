@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui.site
 
 import co.datapipelines.web.ui.DocsCatalog
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
@@ -55,7 +56,9 @@ class LlmsTextTest {
         val positions = titles.map { full.indexOf("\n# $it\n") }
         positions.filter { it < 0 }.shouldBeEmpty()
         positions shouldBe positions.sorted()
-        slugs.forEach { slug -> full shouldContain "Source: $SITE_ORIGIN/docs/$slug.md" }
+        slugs.forEach { slug ->
+            withClue("the full file carries the source line of $slug") { full.contains("Source: $SITE_ORIGIN/docs/$slug.md") shouldBe true }
+        }
         // The separator IS the doc's H1: the doc's own leading `# Title` line was folded into
         // it, so the title heads its section exactly once.
         titles
@@ -65,11 +68,11 @@ class LlmsTextTest {
 
     @Test
     fun `both files open with the llmstxt shape and the homepage's own summary`() {
-        // Only the opening is compared, so no assertion message can be built from the whole
-        // text: llms-full runs to megabytes, and the pregate's one test JVM is short of heap (#1058).
+        // A boolean, not `shouldStartWith`: that matcher builds its message from the whole text (the full file is
+        // several MB), a humongous allocation the single-fork 1 GiB test JVM cannot always make (#1058).
         val opening = "# ${LlmsText.SITE_NAME}\n\n> $SITE_SUMMARY\n\n"
-        listOf(index, full).forEach { text ->
-            text.take(opening.length) shouldBe opening
+        listOf("index" to index, "full" to full).forEach { (name, text) ->
+            withClue("$name opens with the llmstxt shape") { text.startsWith(opening) shouldBe true }
         }
         // Every link line is `- [title](absolute url): description` — the description is
         // what an agent reads before it fetches.

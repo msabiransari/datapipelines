@@ -2,6 +2,7 @@ package co.datapipelines.executor
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.body.StructuredBody
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.RedisScript
@@ -145,17 +146,27 @@ class RedisIdempotencyStore(
 /** Hashing for the two §11.2 inputs: the key itself, and the request it is bound to. */
 object IdempotencyKeys {
     /**
-     * The request hash: `pipeline_id + version + parameters` (§11.2).
+     * The request hash: `pipeline_id + version + parameters` (§11.2), plus the canonical structured
+     * request body when one was supplied (#1038).
      *
      * The **serialized** parameters are hashed, not the map's `hashCode`: a JVM hash is neither
      * stable across processes nor collision-resistant, and this value decides whether two requests
      * are "the same".
+     *
+     * [requestBody] joins only when present, as its canonical form (object member order
+     * immaterial, array order material, numbers by exact value) behind its length — so every
+     * request without a body hashes exactly as it did before #1038, absent never equals `{}` or
+     * `[]`, and one key reused with a different body is a different request.
      */
     fun requestHash(
         pipelineId: UUID,
         pipelineVersion: Int,
         parametersJson: String,
-    ): String = hash("$pipelineId|$pipelineVersion|$parametersJson")
+        requestBody: StructuredBody = StructuredBody.Absent,
+    ): String {
+        val body = requestBody.canonical()?.let { canonical -> "|request_body:${canonical.length}:$canonical" }.orEmpty()
+        return hash("$pipelineId|$pipelineVersion|$parametersJson$body")
+    }
 
     /** SHA-256, hex-encoded. */
     fun hash(value: String): String =

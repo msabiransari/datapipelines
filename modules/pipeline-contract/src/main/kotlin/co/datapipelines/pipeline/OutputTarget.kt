@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 
 /**
- * Where a DQL node's ResultSet goes (pipeline-contract §4.7, enums.md §3).
+ * Where a DQL node's ResultSet — or a DML node's result rows — goes (pipeline-contract §4.7, enums.md §3).
  *
  * This enum is the wire **discriminator** only. The modelled output is [NodeOutput], a flat
  * sealed interface whose variants carry each target's additional fields — so an impossible
@@ -25,6 +25,12 @@ enum class OutputTarget(
 
     /** Stream the ResultSet to an external datasource's table. */
     DATASOURCE("datasource"),
+
+    /**
+     * DML nodes only (§4.4): the node's result rows are explicitly dropped — the write is the
+     * node's whole purpose. Refused on every other node type (§12.4 `output_target_invalid`).
+     */
+    DISCARD("discard"),
     ;
 
     companion object {

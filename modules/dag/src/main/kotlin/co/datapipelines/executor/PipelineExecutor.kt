@@ -16,6 +16,7 @@ import co.datapipelines.events.PipelineFailed
 import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestBodyAdmission
 import co.datapipelines.staging.Staging
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateEngine
@@ -45,6 +46,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -67,8 +69,11 @@ import kotlin.time.Duration.Companion.seconds
  * concurrency, pending nodes never start, and the execution reports `FAILED` with per-node stats.
  * Cancellation (§8.3) is a separate, first-class path that reports `ABORTED` and carries no error
  * code.
+ *
+ * `LargeClass` is suppressed: #1033's root-only plan/settle seam belongs to the executor that
+ * owns the run's lifetime — commit and rollback ride the five terminal handlers already here.
  */
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "LargeClass")
 class PipelineExecutor(
     private val nodeRunner: NodeRunner,
     private val stagingFactory: StagingFactory,
@@ -104,6 +109,14 @@ class PipelineExecutor(
      */
     private val calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
         co.datapipelines.calculators.CalculatorRegistry::find,
+    /**
+     * (write-transactions §3.1) The preflight write-set planner. Wired, a ROOT execution plans
+     * its write set before any business SQL and enrolls one local write transaction when every
+     * eligible write targets a single registration; the root alone commits/rolls it back and
+     * hands it to children through [ExecuteRequest.localWriteTransaction]. Null (tests, or a
+     * runtime without a pipeline resolver) keeps today's per-statement autocommit behaviour.
+     */
+    private val localWritePlanner: LocalWritePlanner? = null,
 ) {
     /**
      * Runs one execution end to end (§5.1).
@@ -161,6 +174,10 @@ class PipelineExecutor(
         // declared parameters resolved against the request's inputs. LIVE — a CALCULATOR node
         // writes tier 5 into this same map at its DAG position, and every node scheduled after
         // it renders and binds against the value (RunContext's KDoc).
+        // #1038: the request body is admitted on the same footing as the parameters — before the
+        // stream opens, so a missing required body or a body the pipeline does not take is a 400
+        // with no execution at all. Every surface also checks it earlier; this is the last line.
+        RequestBodyAdmission.check(request.pipeline, request.requestBody, request.parameters.keys)
         val context = RunContext.create(config.orgContext, request.pipeline, request.parameters, executionId, startedAt, calculatorKinds)
         val run = ExecutionRun(executionId, request, plan, startedAt, context)
 
@@ -181,15 +198,66 @@ class PipelineExecutor(
 
         var staging: Staging? = null
         var lakeSession: co.datapipelines.pipeline.LakeAppendSession? = null
+        var localWrite: LocalWriteTransaction? = null
         val handle = cancellationRegistry.register(executionId)
-        try {
+        // One expression, one return: every catch below passes through [settledOr] first (#1035).
+        return try {
+            // (write-transactions §4 row 1, §7; pipeline-contract §12.4, #1034) Every execution —
+            // root or child, writable or read-only — re-applies the DML shape rules to the PINNED
+            // body before any business write.
+            DmlAdmission.refuseInvalidShape(request.pipeline)
+            // (write-transactions §3.1/§3.4) Run admission's write-set gate — ROOT executions of
+            // writable runs only. `rootExecutionId == null` marks a root structurally (a child
+            // carries it even when the family enrolled nothing), so a planner wired into a child
+            // executor by mistake can never make a child plan its own transaction — the root's
+            // verdict covers the whole family, children and all, and only the root settles.
+            // Read-only runs (dashboards, GET endpoints) have no durable writes to cover and keep
+            // today's path. A refusal is a catalogued setup failure on an execution that has
+            // already emitted `execution_started` (F9): the run ends FAILED before any business
+            // write or staging allocation.
+            val planner = localWritePlanner
+            if (planner != null && request.rootExecutionId == null && !request.readOnly) {
+                // §15.2: the plan walks children and reads the registry — blocking I/O, so it
+                // belongs on the executor's own pool, not a caller thread.
+                when (val verdict = withContext(dispatcher.context) { planner.plan(request.pipeline, request.workspaceId) }) {
+                    is LocalWriteVerdict.Refuse -> {
+                        throw DatapipelinesException(
+                            code = PipelineErrorCodes.Execution.LOCAL_WRITE_REFUSED,
+                            message = localWriteRefusalMessage(verdict.reason),
+                            details = verdict.details + ("reason" to verdict.reason),
+                        )
+                    }
+
+                    is LocalWriteVerdict.Enroll -> {
+                        // R7: the lease must be bounded by the execution's own deadline — the
+                        // `withTimeout` below starts just after planning, so `startedAt + timeout`
+                        // is a close, conservative lower bound. A detached node body that acquires
+                        // past it returns its lease instead of enlisting behind the settlement.
+                        val transaction =
+                            planner.open(
+                                verdict,
+                                executionId,
+                                request.workspaceId,
+                                metrics,
+                                dispatcher,
+                                startedAt.plusSeconds(config.executionTimeoutSeconds),
+                            )
+                        run.localWriteTransaction = transaction
+                        localWrite = transaction
+                    }
+
+                    LocalWriteVerdict.Ordinary -> {
+                        // No transaction: every node leases from its own pool, §16's ordinary seam.
+                    }
+                }
+            }
             // §15.2: staging creation opens JDBC connections — blocking work, so it belongs on the
             // executor's own pool, never on whatever thread the caller happened to arrive on.
             // The opened database is recorded INSIDE the block, for `finally` to close: withContext
             // dispatches its result back "with a prompt cancellation guarantee" — a caller cancelled
             // by then gets CancellationException and the result is discarded (its KDoc) — so an
             // assignment after the call would never run and the database would leak (#795 F5).
-            return withTimeout(config.executionTimeoutSeconds.seconds) {
+            withTimeout(config.executionTimeoutSeconds.seconds) {
                 handle.bind(coroutineContext.job)
                 val opened =
                     withContext(dispatcher.context) {
@@ -221,27 +289,35 @@ class PipelineExecutor(
                 }
             }
         } catch (e: NodeExecutionException) {
-            lakeSession?.failed(e.errorCode)
-            failWithNode(run, e)
+            settledOr(run, e) {
+                lakeSession?.failed(e.errorCode)
+                failWithNode(run, e)
+            }
         } catch (e: TimeoutCancellationException) {
-            // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
-            // `CancellationException` down to children **verbatim** (`getChildJobCancellationCause`),
-            // so a parent's expired deadline arrives here as this exact type — see [cancelledByAncestor].
-            if (cancelledByAncestor()) abortStructurally(run, e) else failWithTimeout(run, e)
+            settledOr(run, e) {
+                // Ours, or an ancestor's? kotlinx passes a cancellation cause that is ALREADY a
+                // `CancellationException` down to children **verbatim** (`getChildJobCancellationCause`),
+                // so a parent's expired deadline arrives here as this exact type — see [cancelledByAncestor].
+                if (cancelledByAncestor()) abortStructurally(run, e) else failWithTimeout(run, e)
+            }
         } catch (e: ExecutionAbortedException) {
-            abort(run, e)
+            settledOr(run, e) { abort(run, e) }
         } catch (e: DatapipelinesException) {
-            lakeSession?.failed(e.code)
-            // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
-            // the stream as `pipeline_failed` on the execution the caller is already watching.
-            failWithSetup(run, e)
+            settledOr(run, e) {
+                lakeSession?.failed(e.code)
+                // A catalogued setup failure — staging creation is the one §8.2 names (F9). It reaches
+                // the stream as `pipeline_failed` on the execution the caller is already watching.
+                failWithSetup(run, e)
+            }
         } catch (e: CancellationException) {
-            // Everything ABOVE this clause is a cancellation this execution decided for itself.
-            // This one is decided by the machinery: our scope was cancelled by an ANCESTOR — see
-            // [abortStructurally].
-            abortStructurally(run, e)
+            settledOr(run, e) {
+                // Everything ABOVE this clause is a cancellation this execution decided for itself.
+                // This one is decided by the machinery: our scope was cancelled by an ANCESTOR — see
+                // [abortStructurally].
+                abortStructurally(run, e)
+            }
         } finally {
-            cleanup(executionId, staging, lakeSession)
+            cleanup(executionId, staging, lakeSession, localWrite)
         }
     }
 
@@ -511,7 +587,7 @@ class PipelineExecutor(
         cancellation: CancellationException,
     ) {
         val original = cancellation.suppressed.firstOrNull() ?: return
-        val mapped = (original as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(original, NodePhase.EXECUTE, node.id)
+        val mapped = disclosed(run, (original as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(original, NodePhase.EXECUTE, node.id))
         run.stats.abortedWithCause(node.id, mapped)
     }
 
@@ -521,7 +597,8 @@ class PipelineExecutor(
         run: ExecutionRun,
         startedAt: Instant,
     ): NodeResult {
-        val result = runWithNodeDeadline(node, ctx, run, startedAt)
+        // #1043: a published mutation's ordinary history keeps no node-computed value (ExecuteRequest.privateNodeValues).
+        val result = runWithNodeDeadline(node, ctx, run, startedAt).let { if (run.request.privateNodeValues) it.withoutValues() else it }
         run.stats.completed(result)
         metrics.nodeFinished(run.request.pipelineId, node.id, node.source, Duration.ofMillis(result.durationMs), result.rowsOut)
         // 149: the terminal progress sample precedes the node's own terminal event, always.
@@ -546,7 +623,8 @@ class PipelineExecutor(
         run: ExecutionRun,
         cause: Exception,
     ): Exception {
-        val mapped = (cause as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(cause, NodePhase.EXECUTE, node.id)
+        val mapped = disclosed(run, (cause as? NodeFailedSignal)?.error ?: ErrorCodeMapper.map(cause, NodePhase.EXECUTE, node.id))
+        val bounded = run.request.boundedDiagnostics
 
         // F8: the reason is recorded on EVERY path, including the two suppressed ones — only the
         // *event* is suppressed. On those two the node is `ABORTED`-with-cause rather than `FAILED`:
@@ -572,23 +650,36 @@ class PipelineExecutor(
         // terminal `pipeline_failed` and `error_json`. The node runner attached the node
         // context and rendered SQL at the failure site; the recorder fills anything still
         // missing and adds the exception detail under `error-detail=full`.
-        val failure = completeRecord(mapped, node, ctx, cause)
+        val failure = completeRecord(mapped, node, ctx, cause, bounded)
         // The log half of the page↔log pair: one ERROR line whose correlation id is the
         // join key the screen now shows, and whose throwable prints the SAME chain the
         // record transports. A streamed failure previously logged nothing at all — the
         // record was in the event and error_json only, so grepping the log by the
         // correlation id the UI displayed found silence (found on the 057 gate stack).
-        LOG.error(
-            "node {} failed ({}) execution_id={} correlation_id={}",
-            node.id,
-            failure.code,
-            run.executionId,
-            run.request.correlationId,
-            cause.cause ?: cause,
-        )
+        // #1038: a body execution's line carries the code and no throwable — its message and
+        // chain can quote the body, an extracted value or author text (BoundedFailure).
+        if (bounded) {
+            LOG.error(
+                "node {} failed ({}) execution_id={} correlation_id={}",
+                node.id,
+                failure.code,
+                run.executionId,
+                run.request.correlationId,
+            )
+        } else {
+            LOG.error(
+                "node {} failed ({}) execution_id={} correlation_id={}",
+                node.id,
+                failure.code,
+                run.executionId,
+                run.request.correlationId,
+                cause.cause ?: cause,
+            )
+        }
         flushOperation(node, ctx, run, OperationOutcome.FAILED)
         emit(NodeFailed(run.executionId, node.id, failure, run.stats.snapshot(listOf(node.id)).first()))
-        return NodeExecutionException(node.id, mapped.code, mapped.details, cause.cause ?: cause, failure)
+        val thrownCause = if (bounded) BoundedFailure.Cause(mapped.code) else cause.cause ?: cause
+        return NodeExecutionException(node.id, mapped.code, mapped.details, thrownCause, failure)
     }
 
     /**
@@ -602,10 +693,12 @@ class PipelineExecutor(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
         cause: Exception,
+        bounded: Boolean,
     ): MappedError {
         val original = cause.cause ?: cause
         val base = mapped.copy(node = mapped.node ?: NodeErrorContext.of(node, dialectOf(node, ctx)))
-        return if (config.errorDetail == ErrorDetail.FULL) {
+        // A bounded record never carries the exception chain, whatever `error-detail` says (#1038).
+        return if (config.errorDetail == ErrorDetail.FULL && !bounded) {
             base.copy(exception = ExceptionDetail.of(original))
         } else {
             base
@@ -637,8 +730,30 @@ class PipelineExecutor(
         val resultRef = run.plan.callerNodeId?.let { results.getValue(it).callerResultRef }
         val view = resultRef?.let { resolveStoredResult(run, it) }
 
+        // (write-transactions §3.5) The family's writes become durable HERE — after every
+        // required node (children included) succeeded and the caller result was prepared,
+        // before the terminal event claims SUCCESS. Root-owned by construction: only the root's
+        // planning gate ever sets `run.localWriteTransaction` (a child inherits the family's
+        // transaction through its request and settles nothing).
+        val transaction = run.localWriteTransaction
+        if (transaction != null) {
+            // (#1035) The result is prepared and held: nothing below publishes it until the commit is
+            // confirmed. `commit()` persists the attempt boundary first, so from the instant it is entered
+            // every terminal path (cancellation, deadline, a lost acknowledgement, a dead instance's sweep)
+            // reads "may have committed" and none may report ABORTED or FAILED for it.
+            run.heldResultRef = resultRef
+            run.heldResultView = view
+            run.dataReadyPending.set(view != null)
+            transaction.commit()
+            return settleCommitted(run)
+        }
+
         val completedAt = Instant.now()
         val stats = run.stats.snapshot(run.plan.dag.nodeIds)
+        // (#1035) A CHILD of an enrolled family finished provisionally: its writes are not durable until
+        // the root commits. Its record is withheld (pending settlement), no event claims success to a
+        // stream, and no result URL is announced — the root's terminal write settles it.
+        val provisional = run.request.localWriteTransaction != null
         run.emitTerminal {
             emit(
                 PipelineCompleted(
@@ -649,14 +764,207 @@ class PipelineExecutor(
                     completedAt = completedAt,
                     durationMs = run.elapsedMsAt(completedAt),
                     nodeStats = stats,
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
+                    provisional = provisional,
+                    // (#1035) The terminal row carries the caller result's counts: a reader can never see a
+                    // SUCCESS that had a caller result as one with none, whatever later happens to the store.
+                    resultRowCount = view?.totalRows,
+                    resultSizeBytes = view?.bytes,
                 ),
             )
         }
         // §6.4.2: built from the **stored** result, never from the ResultSet.
-        view?.let { emit(DataReady.from(run.request.pipelineId, it, resultUrls.urlFor(run.executionId), run.resultTtlSeconds(config))) }
+        if (!provisional) {
+            view?.let { emit(DataReady.from(run.request.pipelineId, it, resultUrls.urlFor(run.executionId), run.resultTtlSeconds(config))) }
+        }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.SUCCESS, run.elapsed(completedAt))
         return run.result(ExecutionStatus.SUCCESS, stats, resultRef, completedAt)
+    }
+
+    /**
+     * (#1035) The root's confirmed commit: publishes terminal SUCCESS and the designated caller
+     * result. Reached from the normal success path and from every handler that finds the commit
+     * already confirmed (a late cancellation, a deadline, a failed delivery) — the writes are
+     * durable, so the execution is SUCCESS whatever happened to delivery. A delivery failure after
+     * the confirmation is recorded separately (`result_unavailable`) and never changes the status
+     * or re-runs any business SQL.
+     *
+     * The held result is re-checked against the store BEFORE the terminal event ([heldDelivery]):
+     * a result lost between its preparation and now is recorded on the terminal row itself
+     * (`result_unavailable`, with the prepared counts) and is never announced.
+     */
+    private suspend fun settleCommitted(run: ExecutionRun): ExecutionResult {
+        val delivery = heldDelivery(run)
+        val completedAt = Instant.now()
+        val stats = run.stats.snapshot(run.plan.dag.nodeIds)
+        val unavailable = delivery is HeldResultDelivery.Unavailable
+        run.emitTerminal {
+            emit(
+                PipelineCompleted(
+                    executionId = run.executionId,
+                    pipelineId = run.request.pipelineId,
+                    pipelineVersion = run.request.pipelineVersion,
+                    startedAt = run.startedAt,
+                    completedAt = completedAt,
+                    durationMs = run.elapsedMsAt(completedAt),
+                    nodeStats = stats,
+                    contextSnapshot = historySnapshot(run),
+                    resultUnavailable = unavailable,
+                    settlesFamily = true,
+                    resultRowCount = delivery.prepared?.totalRows,
+                    resultSizeBytes = delivery.prepared?.bytes,
+                ),
+            )
+            metrics.executionFinished(run.request.pipelineId, ExecutionStatus.SUCCESS, run.elapsed(completedAt))
+        }
+        if (unavailable) markResultUnavailable(run)
+        deliverHeldResult(run, delivery)
+        return run.result(ExecutionStatus.SUCCESS, stats, run.heldResultRef, completedAt, resultUnavailable = run.resultUnavailable.get())
+    }
+
+    /**
+     * (#1035) Decides, once per run, what the confirmed commit can publish of its held caller result
+     * ([HeldResultDelivery]). Runs after the confirmation and before the terminal event, under
+     * [NonCancellable] (a cancellation after the confirmation must not cost the caller a durable
+     * commit's result). The announcement's URL is built first, then the stored result is read back
+     * from the store: a key that is gone, or a store or URL failure, makes the result unavailable —
+     * the status stays SUCCESS and nothing is announced. Never throws.
+     */
+    private suspend fun heldDelivery(run: ExecutionRun): HeldResultDelivery {
+        run.heldDelivery.get()?.let { return it }
+        val decided = withContext(NonCancellable) { verifyHeldResult(run) }
+        return if (run.heldDelivery.compareAndSet(null, decided)) decided else requireNotNull(run.heldDelivery.get())
+    }
+
+    private suspend fun verifyHeldResult(run: ExecutionRun): HeldResultDelivery {
+        val prepared = run.heldResultView ?: return HeldResultDelivery.NoCaller
+        return try {
+            val url = resultUrls.urlFor(run.executionId)
+            // §15.2: a Redis read is blocking I/O and belongs on the executor's own pool.
+            val stored = withContext(dispatcher.context) { resultStore.describe(prepared.key, run.request.resultPageRows) }
+            if (stored == null) {
+                LOG.error(
+                    "Stored result of execution {} is gone after its confirmed commit; status stays SUCCESS, result unavailable",
+                    run.executionId,
+                )
+                HeldResultDelivery.Unavailable(prepared)
+            } else {
+                HeldResultDelivery.Deliverable(prepared, stored, url)
+            }
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            LOG.error(
+                "Result of execution {} could not be prepared for delivery after its confirmed commit ({}); status stays SUCCESS",
+                run.executionId,
+                e.javaClass.simpleName,
+            )
+            HeldResultDelivery.Unavailable(prepared)
+        }
+    }
+
+    /**
+     * Announces the held caller result (`data_ready`) exactly once, after the confirmed commit, from
+     * the view [heldDelivery] read back after the confirmation. Runs under [NonCancellable]: a
+     * cancellation that landed after the confirmation must not cost the caller the result of a commit
+     * that is durable. A failure is NOT rethrown — the commit stands — it marks the row's
+     * `result_unavailable` and is logged without row data.
+     */
+    private suspend fun deliverHeldResult(
+        run: ExecutionRun,
+        delivery: HeldResultDelivery,
+    ) {
+        if (delivery !is HeldResultDelivery.Deliverable) return
+        if (!run.dataReadyPending.compareAndSet(true, false)) return
+        withContext(NonCancellable) {
+            try {
+                emit(DataReady.from(run.request.pipelineId, delivery.view, delivery.url, run.resultTtlSeconds(config)))
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                LOG.error(
+                    "Result delivery of execution {} failed after its confirmed commit ({}); status stays SUCCESS",
+                    run.executionId,
+                    e.javaClass.simpleName,
+                )
+                markResultUnavailable(run)
+            }
+        }
+    }
+
+    /** (#1035) Records the confirmed commit's undelivered result on the run and its row; best effort, never throws. */
+    private suspend fun markResultUnavailable(run: ExecutionRun) {
+        run.resultUnavailable.set(true)
+        withContext(NonCancellable + dispatcher.context) { run.localWriteTransaction?.markResultUnavailable() }
+    }
+
+    /**
+     * (#1035) What a terminal path does when the family's commit boundary was crossed — the single
+     * funnel every `catch` of [runExecution] passes through before its ordinary handler.
+     *
+     * - boundary not crossed (no transaction, or no commit attempt): returns null — the ordinary
+     *   rollback-and-fail/abort handler runs, with rollback evidence on confirmation;
+     * - crossed and the driver CONFIRMED: settles SUCCESS ([settleCommitted]) and returns the result;
+     * - crossed and NOT confirmed: the commit may have landed — terminal OUTCOME_UNKNOWN, never a
+     *   rollback claim and never a replay; throws the catalogued commit failure.
+     *
+     * When the cause is a cancellation from an ANCESTOR the terminal row is still written, then the
+     * cancellation is rethrown so the ancestor's structured concurrency unwinds as before.
+     */
+    private suspend fun settleCommitWindow(
+        run: ExecutionRun,
+        cause: Throwable,
+    ): ExecutionResult? {
+        val transaction = run.localWriteTransaction ?: return null
+        if (!transaction.commitAttempted) return null
+        val unwoundByAncestor = cause is CancellationException && cancelledByAncestor()
+        if (transaction.commitConfirmed) {
+            val result = settleCommitted(run)
+            if (unwoundByAncestor) throw cause
+            return result
+        }
+        val failure = settleOutcomeUnknown(run, cause)
+        throw if (unwoundByAncestor) cause else failure
+    }
+
+    /**
+     * (#1035) The funnel every `catch` of [runExecution] passes through: the commit boundary decides first
+     * ([settleCommitWindow]); only when it was not crossed does the ordinary handler [ordinary] run.
+     */
+    private suspend inline fun settledOr(
+        run: ExecutionRun,
+        cause: Throwable,
+        ordinary: () -> Nothing,
+    ): ExecutionResult = settleCommitWindow(run, cause) ?: ordinary()
+
+    /** Terminal OUTCOME_UNKNOWN: the commit was attempted and its acknowledgement never arrived. */
+    private suspend fun settleOutcomeUnknown(
+        run: ExecutionRun,
+        cause: Throwable,
+    ): DatapipelinesException {
+        val failedAt = Instant.now()
+        // #1038: a body execution's failure keeps no driver text or cause chain (BoundedFailure).
+        val bounded = run.request.boundedDiagnostics
+        val failure =
+            (cause as? DatapipelinesException)
+                ?.takeIf { it.code == PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED && !bounded }
+                ?: DatapipelinesException(
+                    code = PipelineErrorCodes.Execution.LOCAL_WRITE_COMMIT_FAILED,
+                    message = "The pipeline's local write transaction could not be committed; its outcome is unknown",
+                    details = mapOf("execution_id" to run.executionId.toString()),
+                    cause = cause.takeUnless { bounded },
+                )
+        val record =
+            MappedError(failure.code, failure.message.orEmpty(), failure.details)
+                .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(failure)) else it }
+        run.emitTerminal {
+            emit(
+                pipelineFailed(run, failedAt, failedNodeId = null, error = record)
+                    .copy(status = ExecutionStatus.OUTCOME_UNKNOWN),
+            )
+            metrics.executionFinished(run.request.pipelineId, ExecutionStatus.OUTCOME_UNKNOWN, run.elapsed(failedAt))
+        }
+        return failure
     }
 
     /**
@@ -705,6 +1013,9 @@ class PipelineExecutor(
         // recording site — rebuilt from code/details only on the one path that never passed
         // through failNode (the vanished-result throw in resolveStoredResult carries its own).
         val record = e.errorRecord ?: MappedError(e.errorCode, e.message.orEmpty(), e.errorDetails)
+        // §4 row 3: a failed node rolls the family's writes back — root-owned (see [succeed]),
+        // best-effort, BEFORE the terminal event reports FAILED.
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, e.nodeId, record)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw PipelineExecutionFailed(e.nodeId, e.errorCode, e.errorDetails, e.errorRecord)
@@ -722,6 +1033,7 @@ class PipelineExecutor(
         val error =
             MappedError(timeout.code, timeout.message.orEmpty(), timeout.details)
                 .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(cause)) else it }
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, timeout.timedOutNodeId, error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw timeout.also { it.addSuppressed(cause) }
@@ -745,6 +1057,7 @@ class PipelineExecutor(
         val error =
             MappedError(e.code, e.message.orEmpty(), e.details)
                 .let { if (config.errorDetail == ErrorDetail.FULL) it.copy(exception = ExceptionDetail.of(e)) else it }
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal { emit(pipelineFailed(run, failedAt, failedNodeId = null, error = error)) }
         metrics.executionFinished(run.request.pipelineId, ExecutionStatus.FAILED, run.elapsed(failedAt))
         throw e
@@ -755,6 +1068,7 @@ class PipelineExecutor(
         e: ExecutionAbortedException,
     ): Nothing {
         val abortedAt = Instant.now()
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal {
             emit(
                 ExecutionAborted(
@@ -763,7 +1077,8 @@ class PipelineExecutor(
                     reason = e.reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
+                    settlesFamily = run.localWriteTransaction != null,
                 ),
             )
         }
@@ -813,6 +1128,9 @@ class PipelineExecutor(
     ): Nothing {
         val reason = familyAbortReason(cancellation)
         val abortedAt = Instant.now()
+        // Outside the `emitTerminal` block on purpose as well as inside it: this path runs on an
+        // already-cancelled scope, and rollbackQuietly carries its own NonCancellable hop (§3.3).
+        run.localWriteTransaction?.rollbackQuietly()
         run.emitTerminal {
             emit(
                 ExecutionAborted(
@@ -821,7 +1139,8 @@ class PipelineExecutor(
                     reason = reason,
                     abortedAt = abortedAt,
                     nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-                    contextSnapshot = run.context.snapshot(),
+                    contextSnapshot = historySnapshot(run),
+                    settlesFamily = run.localWriteTransaction != null,
                 ),
             )
             metrics.executionAborted(reason)
@@ -851,6 +1170,23 @@ class PipelineExecutor(
             .firstOrNull()
             ?.reason
 
+    /**
+     * [error] as the execution may disclose it: unchanged, or — for an execution that carries a
+     * structured request body or is a child of one — the bounded form ([BoundedFailure]).
+     */
+    private fun disclosed(
+        run: ExecutionRun,
+        error: MappedError,
+    ): MappedError = if (run.request.boundedDiagnostics) BoundedFailure.of(error) else error
+
+    /**
+     * The Context snapshot the terminal events carry into ordinary history: the whole resolved Context, or — on a run
+     * whose node values are private (#1043, [ExecuteRequest.privateNodeValues]) — only the run's inputs (org config,
+     * platform keys, typed parameters), never a value a node computed.
+     */
+    private fun historySnapshot(run: ExecutionRun): Map<String, Any?> =
+        if (run.request.privateNodeValues) run.context.inputSnapshot() else run.context.snapshot()
+
     private fun pipelineFailed(
         run: ExecutionRun,
         failedAt: Instant,
@@ -864,9 +1200,10 @@ class PipelineExecutor(
         failedAt = failedAt,
         durationMs = run.elapsedMsAt(failedAt),
         failedNodeId = failedNodeId,
-        error = error,
+        error = disclosed(run, error),
         nodeStats = run.stats.snapshot(run.plan.dag.nodeIds),
-        contextSnapshot = run.context.snapshot(),
+        contextSnapshot = historySnapshot(run),
+        settlesFamily = run.localWriteTransaction != null,
     )
 
     // ------------------------------------------------------------ plumbing
@@ -883,6 +1220,7 @@ class PipelineExecutor(
         executionId: UUID,
         staging: Staging?,
         lakeSession: co.datapipelines.pipeline.LakeAppendSession?,
+        localWrite: LocalWriteTransaction?,
     ) {
         cancellationRegistry.deregister(executionId)
         // The one path every execution takes, which is why the progress sink's per-execution state
@@ -893,6 +1231,10 @@ class PipelineExecutor(
         // complete even when we got here by cancellation.
         withContext(dispatcher.context + NonCancellable) {
             try {
+                // The local write transaction's connection goes back to the pool on every path —
+                // after the terminal settle (commit/rollback) the handlers already performed, and
+                // as the last resort before the pool's own reset (§3.3).
+                localWrite?.close()
                 cancellationFlags.clear(executionId)
             } finally {
                 try {
@@ -1081,6 +1423,13 @@ class PipelineExecutor(
             lakeDeliveryNodeId = resources.deliveryNodeId,
             readOnly = request.readOnly,
             pipelineAdmission = request.pipelineAdmission,
+            requestBody = request.requestBody,
+            boundedDiagnostics = request.boundedDiagnostics,
+            privateNodeValues = request.privateNodeValues,
+            valueCapture = request.valueCapture,
+            // §3.3: the family's transaction — a child inherits the root's through its request;
+            // a root uses the one its planning gate enrolled. Null on ordinary runs.
+            localWriteTransaction = request.localWriteTransaction ?: run.localWriteTransaction,
             // 108 §D: the staging drain's per-batch count lands in the stats collector and, at
             // most once per `progress-write-interval-seconds`, in the row. The snapshot is built
             // inside the lambda so a throttled tick that decides not to write does not build it.
@@ -1127,6 +1476,34 @@ internal class ExecutionRun(
 ) {
     val stats = NodeStatsCollector()
     val warnings = WarningSink()
+
+    /**
+     * (write-transactions §3.3) The family's local write transaction — set by the ROOT's
+     * planning gate only, after `execution_started` and before any node runs. Null on children
+     * (they carry the family's through [ExecuteRequest.localWriteTransaction]) and on ordinary
+     * runs. Mutability is the point: the run is constructed before the verdict exists.
+     */
+    var localWriteTransaction: LocalWriteTransaction? = null
+
+    /**
+     * (#1035) The caller result prepared before the commit and HELD until it is confirmed: its
+     * stored reference and its first-page view. Written once on the root's success path, read by
+     * whichever terminal path settles the confirmed commit.
+     */
+    @Volatile
+    var heldResultRef: String? = null
+
+    @Volatile
+    var heldResultView: StoredResultView? = null
+
+    /** `data_ready` still owed after the confirmed commit — flipped once by [PipelineExecutor.deliverHeldResult]. */
+    val dataReadyPending = AtomicBoolean()
+
+    /** (#1035) What the confirmed commit can publish of the held result — decided once by [PipelineExecutor.heldDelivery]. */
+    val heldDelivery = AtomicReference<HeldResultDelivery?>()
+
+    /** (#1035) The confirmed commit's caller result could not be delivered; carried onto [ExecutionResult.resultUnavailable]. */
+    val resultUnavailable = AtomicBoolean()
 
     /**
      * Set once the execution scope is unwinding with an outcome already decided, and the in-flight
@@ -1176,6 +1553,7 @@ internal class ExecutionRun(
         nodeStats: List<NodeStats>,
         resultRef: String?,
         completedAt: Instant,
+        resultUnavailable: Boolean = false,
     ): ExecutionResult =
         ExecutionResult(
             executionId = executionId,
@@ -1186,6 +1564,7 @@ internal class ExecutionRun(
             completedAt = completedAt,
             durationMs = elapsedMsAt(completedAt),
             warnings = warnings.collected(),
+            resultUnavailable = resultUnavailable,
         )
 }
 
@@ -1241,6 +1620,12 @@ fun pipelineExecutor(
      * composition port.
      */
     scripts: ScriptSupport? = null,
+    /**
+     * (write-transactions §3.1) The write-set planner — see the class parameter of the same
+     * name. The assembling layer wires it with the repository pipeline resolver, the
+     * datasource registry and `max-composition-depth`; left null, no run enrolls.
+     */
+    localWritePlanner: LocalWritePlanner? = null,
 ): PipelineExecutor =
     PipelineExecutor(
         nodeRunner =
@@ -1269,4 +1654,5 @@ fun pipelineExecutor(
         resultUrls = resultUrls,
         lakeAppendPort = lakeAppendPort,
         calculatorKinds = calculatorKinds,
+        localWritePlanner = localWritePlanner,
     )

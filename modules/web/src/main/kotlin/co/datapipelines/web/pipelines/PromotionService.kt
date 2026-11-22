@@ -232,7 +232,7 @@ class PromotionService(
                 templates = closure.templatePayloads(inventory),
                 parameterSets = setEntries,
                 pipelines = closure.pipelinePayloads(inventory),
-                endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames()).orEmpty(),
+                endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames(), inventory.endpointCapabilities).orEmpty(),
                 visualizations = visualizationEntries,
                 dashboards = dashboardEntries,
             )

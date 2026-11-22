@@ -237,13 +237,14 @@ class ReferenceRulesTest {
                 nodes =
                     listOf(
                         Fixtures.node(id = "read", source = "pg-prod", output = NodeOutput.Tempdb("src")),
-                        Fixtures.node(
-                            id = "write_temp",
-                            type = NodeType.DML,
-                            source = "tempdb",
-                            template = TemplateRef("test/h2_write.sql", 1),
-                            dependsOn = listOf("read"),
-                        ),
+                        Fixtures
+                            .node(
+                                id = "write_temp",
+                                type = NodeType.DML,
+                                source = "tempdb",
+                                template = TemplateRef("test/h2_write.sql", 1),
+                                dependsOn = listOf("read"),
+                            ).copy(operation = "update", output = NodeOutput.Discard),
                     ),
             )
 

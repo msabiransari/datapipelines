@@ -55,6 +55,9 @@ class PromotionInventoryService(
             parameterSets = parameterSetEntries(workspaceId),
             visualizations = artifactEntries(visualizations.currentVersions(workspaceId)),
             dashboards = artifactEntries(dashboards.currentVersions(workspaceId)),
+            // #1040 — this build imports method-bearing routes exactly pinned; the advertisement is a property of
+            // the binary (what it can store faithfully), never of the mutations-enabled serving switch.
+            endpointCapabilities = EndpointPromotion.CAPABILITIES,
         )
     }
 

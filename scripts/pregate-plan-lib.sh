@@ -50,8 +50,8 @@ pgplan::build() {
   # gate.sh/gradle.properties do not.
   # -Pdp.test.heap=2g (#1058, DEVELOPMENT.md §9.5): the pregate runs ONE test JVM at a time, so
   # its ceiling is not multiplied by forks; at the 1g default the web suite's one JVM ran out of
-  # heap. Suites that name their own heap (integration-tests 6g) keep it; Gate A, CI and
-  # gradle.properties keep 1g. pregate-safety-test.sh asserts every stage carries it.
+  # heap. Suites that name their own heap (integration-tests 6g, web 1536m) keep it; Gate A,
+  # CI and gradle.properties keep their 1g property default. pregate-safety-test.sh pins the argument.
   # All appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
   PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -Pdp.test.heap=2g -PversionLifecycle.sequences=200 --build-cache)
   declare -gA PG_SELECTIONS=()
@@ -222,6 +222,7 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.dashboards.runtime.DashboardAudit
 GUARDS[":modules:web"]+=" co.datapipelines.web.dependencies.DependencyFamilyTransportTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.dependencies.DependencyTreeProjectionTest"  # inventory 995: reads modules/dependency-contract/src/main/resources${}
 GUARDS[":modules:web"]+=" co.datapipelines.web.endpoints.EndpointAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
+GUARDS[":modules:web"]+=" co.datapipelines.web.endpoints.ExecutionCaptureAuditEventsSpecDriftTest"  # #1043: reads docs/enums.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.parameters.ParameterSetAuditEventsSpecDriftTest"  # inventory 995: reads docs/enums.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.pipelines.EndpointPromotionImportReachabilityTest"  # inventory 995: walks the tree (git ls-files)
 GUARDS[":modules:web"]+=" co.datapipelines.web.release.ReleaseCodeSwitchGuardTest"  # inventory 995: walks the tree (git ls-files)
@@ -246,6 +247,8 @@ GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceAuditEv
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.DatasourceErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ManagedLakeErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ReadOnlyEnforcementSpecDriftTest"  # inventory 995: reads docs/dag-executor.md
+GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.LocalWriteQualificationSpecDriftTest"  # 1036: reads docs/dag-executor.md
+GUARDS[":modules:dag"]="co.datapipelines.executor.StaleSweepCommitEvidenceIntegrationTest"  # reads the Flyway migrations under modules/app (1035 r2): the sweep classifies on the real schema
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.ShippedMigrationsTest"  # inventory 995: reads README.md modules/app/src/main/resources/db/migration
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.LearnedFactKindSpecDriftTest"  # inventory 995: reads docs/enums.md modules/app/src/main/resources/db/migration/V25__learned_facts.sql
 GUARDS[":modules:datasources"]+=" co.datapipelines.datasources.semantics.SemanticsErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
@@ -268,6 +271,8 @@ GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteEngineFactsGuardTest"
 GUARDS[":modules:web"]+=" co.datapipelines.web.ui.site.SiteFaqCitationTest"  # inventory 995: reads docs docs/[A-Za-z0-9._/-]+\.md
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.OrderedTestAnnotationGuardTest"  # inventory 995: reads modules modules/pipeline-contract
 GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.ScratchDatabaseOnceGuardTest"  # inventory 995: reads modules modules/pipeline-contract
+GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.PublishedMethodDowngradeBarrierIntegrationTest"  # #1037: reads docs/metadata-db.md modules/app/src/main/resources/db/migration modules/app/src/main/resources/db/downgrade-barrier
+GUARDS[":tests:integration-tests"]+=" co.datapipelines.integration.LocalWriteCompatibilityPackagedIntegrationTest"  # 1036 r2: reads modules/app/build/libs/datapipelines-app.jar modules/app/src/main/resources/db/migration scripts/local-write-compatibility-report.sh
 # buildSrc (#1004, owner ruling 2026-11-15): each buildSrc test class that reads the repository
 # beyond buildSrc and starts no nested build runs in EVERY lane check. Found by reading each class
 # (lane 1004's evidence, A.1) and by PregateGuardInventoryTest, which scans buildSrc's tests too.

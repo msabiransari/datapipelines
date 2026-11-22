@@ -66,6 +66,16 @@ class RunContext private constructor(
     /** An immutable copy — what the snapshot persisted at the end of the run is taken from. */
     fun snapshot(): Map<String, Any?> = synchronized(lock) { LinkedHashMap(store) }
 
+    /** What the Context held when the run began — its inputs: org config, platform keys and the bound parameters. */
+    private val inputs: Map<String, Any?> = LinkedHashMap(initial)
+
+    /**
+     * #1043: the run's INPUTS as they were at its start ([inputs]) — what a run whose node values are private
+     * (`ExecuteRequest.privateNodeValues`) may put into ordinary history. No value a node wrote appears in it, not even
+     * under a key the inputs already held.
+     */
+    fun inputSnapshot(): Map<String, Any?> = LinkedHashMap(inputs)
+
     override val size: Int get() = synchronized(lock) { store.size }
     override val entries: Set<Map.Entry<String, Any?>> get() = snapshot().entries
     override val keys: Set<String> get() = snapshot().keys
@@ -111,7 +121,7 @@ class RunContext private constructor(
             // carry each node's key set, and a proper subset is refused here, BEFORE any node
             // runs, with the same rejected-bind shape as an ill-typed parameter.
             val calculatorOutputs = pipeline.calculatorOutputs(kinds)
-            val scriptKeys = pipeline.scriptOutputKeys()
+            val scriptKeys = pipeline.callerScriptKeys()
             val bound =
                 ParameterBinder(pipeline.parameters, calculatorOutputs, pipeline.calculatorOutputGroups(kinds), scriptKeys)
                     .bindOrThrow(inputs)

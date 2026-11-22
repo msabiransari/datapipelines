@@ -66,7 +66,10 @@ class PromotionEndpointKeysTest {
     private val bindings = mockk<EndpointKeyBindingRepository>()
     private val pipelines = mockk<PipelineRepository>()
 
-    private val promotion = EndpointPromotion(publishing, importer, endpointKeys, endpoints, bindings, apiKeys, pipelines)
+    // #1040: a GET-only batch never reads a pin; strict so a regression that did would fail here.
+    private val pins = mockk<co.datapipelines.application.endpoints.EndpointPinValidator>()
+
+    private val promotion = EndpointPromotion(publishing, importer, endpointKeys, endpoints, bindings, apiKeys, pipelines, pins)
 
     private val service =
         PromotionReceiveService(
@@ -191,6 +194,61 @@ class PromotionEndpointKeysTest {
             { verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") } },
             { verify(exactly = 1) { endpointKeys.bind(any(), "dpk_BBBBBBBBBBBB", "/lending/home") } },
         )
+    }
+
+    @Test
+    fun `a batch entry naming a non-GET method is refused whole, before anything is imported or bound`() {
+        // #1037, #1040: a POST entry without its exact pin (the shape a #1037-era entry would
+        // have) cannot be imported exactly; importing it would reinterpret the route, so the
+        // batch is refused instead — even though its key exists, so the key check would pass.
+        stubContext()
+        every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
+        every { publishing.get(any(), any()) } returns null
+        val entries =
+            listOf(
+                PromotionWire.EndpointEntry(
+                    path = "/lending/home",
+                    pipeline = "lending_home",
+                    timeoutSeconds = 30,
+                    bindings = listOf("ci-lending"),
+                ),
+                PromotionWire.EndpointEntry(
+                    path = "/lending/applications",
+                    pipeline = "lending_apply",
+                    timeoutSeconds = 30,
+                    bindings = listOf("ci-lending"),
+                    method = "POST",
+                ),
+            )
+
+        val refused = shouldThrow<DatapipelinesException> { service.apply(batch("dev", entries), peer) }
+
+        assertAll(
+            { refused.code shouldBe PipelineErrorCodes.Endpoint.PROMOTION_METHOD_UNSUPPORTED },
+            { refused.details["unsupported_routes"] shouldBe listOf(mapOf("path" to "/lending/applications")) },
+        )
+        verify(exactly = 0) { importer.importPromoted(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { endpointKeys.bind(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an entry naming GET explicitly is the legacy GET entry`() {
+        stubContext()
+        every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
+        every { publishing.get(any(), any()) } returns null
+        val entry =
+            PromotionWire.EndpointEntry(
+                path = "/lending/home",
+                pipeline = "lending_home",
+                timeoutSeconds = 30,
+                bindings = listOf("ci-lending"),
+                method = "GET",
+            )
+
+        service.apply(batch("dev", listOf(entry)), peer)
+
+        verify(exactly = 1) { importer.importPromoted(WORKSPACE_ID, ACTOR, "/lending/home", "lending_home", 30, "") }
+        verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") }
     }
 
     private fun stubContext() {

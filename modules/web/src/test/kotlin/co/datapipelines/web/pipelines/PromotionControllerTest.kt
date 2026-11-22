@@ -84,4 +84,33 @@ class PromotionControllerTest {
         // received rows are attributed to.
         verify(exactly = 1) { receiveService.apply(batch, peer) }
     }
+
+    @Test
+    fun `push keeps a method-carrying endpoint entry's method for the receiver to judge`() {
+        // #1037: the batch and its entries are `ignoreUnknown` (a cross-version wire), so an
+        // undeclared `method` would be DROPPED here and the entry read as a plain GET entry. The
+        // field is declared, so what reaches the receive service still says POST — and the receive
+        // service refuses it (PromotionEndpointKeysTest, EndpointPromotionMethodRefusalTest).
+        val tree =
+            StrictRequestBodies.MAPPER.readTree(
+                """
+                {"workspace": "acme", "source_env": "staging", "key_fingerprint": "sha256:abc",
+                 "endpoints": [{"path": "/finance/v1/payments", "method": "POST", "pipeline": "payments", "bindings": []}]}
+                """.trimIndent(),
+            )
+        every { receiveService.apply(any(), peer) } returns
+            PromotionWire.Applied(workspace = "acme", sourceEnv = "staging", templates = 0, pipelines = 0)
+        SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(peer, null, emptyList())
+
+        controller.push(tree)
+
+        verify(exactly = 1) { receiveService.apply(match { it.endpoints.single().method == "POST" }, peer) }
+    }
+
+    @Test
+    fun `this build's sender writes no method key, so the wire stays byte-identical for older receivers`() {
+        val entry = PromotionWire.EndpointEntry(path = "/finance/v1/revenue", pipeline = "revenue")
+
+        StrictRequestBodies.MAPPER.valueToTree<com.fasterxml.jackson.databind.JsonNode>(entry).has("method") shouldBe false
+    }
 }

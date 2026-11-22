@@ -298,6 +298,10 @@ class SubPipelineExecutionRunner(
         // its invoker runs, so its datasource resolution scopes identically (025 A5).
         workspaceId = ctx.workspaceId,
         parameters = resolveParameters(node, child, ctx),
+        // #1038: a child of a body execution keeps the parent's bounded diagnostics.
+        inheritedBoundedDiagnostics = ctx.boundedDiagnostics,
+        // #1043: a published mutation's child keeps node values out of ordinary history too; it records no capture.
+        privateNodeValues = ctx.privateNodeValues,
         triggeredVia = ExecutionTrigger.PIPELINE,
         executionId = childExecutionId,
         directSink = sinkFor(node, ctx, outcome),
@@ -318,6 +322,9 @@ class SubPipelineExecutionRunner(
         // #463: a read-only parent's children read only too; a writable parent's stay writable.
         readOnly = ctx.readOnly,
         pipelineAdmission = ctx.pipelineAdmission,
+        // (write-transactions §3.3) The family's local write transaction is inherited, never
+        // created: the root's plan already walked THIS child's nodes, and only the root settles.
+        localWriteTransaction = ctx.localWriteTransaction,
     )
 
     /**
@@ -428,7 +435,7 @@ class SubPipelineExecutionRunner(
         child: Pipeline,
         ctx: NodeExecutionContext,
     ): Map<String, JsonNode> {
-        val childOutputKeys = child.calculatorOutputs() + child.scriptOutputKeys().associateWith { null }
+        val childOutputKeys = child.calculatorOutputs() + child.callerScriptKeys().associateWith { null }
         return node.parameters.orEmpty().mapValues { (key, value) ->
             val reference =
                 value.takeIf { it.isTextual }?.asText()?.let(PARAMETER_REFERENCE::matchEntire)
@@ -572,7 +579,9 @@ class SubPipelineExecutionRunner(
         outcome: SinkOutcome,
     ): DirectResultSink? =
         when (val output = node.output) {
-            null -> {
+            // `discard` is a DML target only (§12.4 refuses it on a PIPELINE node at save and at
+            // run admission); were it reached, it delivers nothing, like an absent output.
+            null, NodeOutput.Discard -> {
                 null
             }
 
@@ -629,7 +638,11 @@ class SubPipelineExecutionRunner(
             is NodeOutput.Datasource -> {
                 DirectResultSink { schema, rows ->
                     val op = ctx.operations.observerFor(node.id)
-                    outcome.rowsOut = writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId, op)
+                    // (write-transactions §3.3) When the target is the family's registration the
+                    // rows land as a participant span — the root settles; the span is reentrant
+                    // with the child's own read span on the same connection.
+                    outcome.rowsOut =
+                        writebackRunner.writebackRows(schema, rows, output, ctx.workspaceId, op, ctx.localWriteTransaction)
                     outcome.delivered = true
                 }
             }

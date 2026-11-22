@@ -36,7 +36,7 @@ class EndpointPromotionLegacyOmissionTest {
     private val endpoints = mockk<PublishedEndpointRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val bindings = mockk<EndpointKeyBindingRepository> { every { findByWorkspace(WORKSPACE_ID) } returns emptyList() }
-    private val promotion = EndpointPromotion(mockk(), mockk(), mockk(), endpoints, bindings, mockk(), pipelines)
+    private val promotion = EndpointPromotion(mockk(), mockk(), mockk(), endpoints, bindings, mockk(), pipelines, mockk())
 
     private val logger = LoggerFactory.getLogger(EndpointPromotion::class.java) as Logger
 

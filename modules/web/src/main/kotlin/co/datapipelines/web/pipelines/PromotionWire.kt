@@ -1,6 +1,8 @@
 package co.datapipelines.web.pipelines
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.JsonNode
 
@@ -58,6 +60,17 @@ object PromotionWire {
          */
         @field:JsonProperty("dashboards") @get:JsonProperty("dashboards") @param:JsonProperty("dashboards")
         val dashboards: List<Entry> = emptyList(),
+        /**
+         * #1040 — what this receiver can import of a method-bearing API route (published-mutation-apis §7: "receiver-
+         * advertised support for method, request-body mode and method-specific binding fields"). Null from a receiver
+         * that predates it — and a sender then refuses, before building a batch, to send any POST, PUT or DELETE route:
+         * a receiver that does not advertise the method would import it as GET (pre-#1037) or refuse it (#1037).
+         */
+        @field:JsonProperty("endpoint_capabilities")
+        @get:JsonProperty("endpoint_capabilities")
+        @param:JsonProperty("endpoint_capabilities")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val endpointCapabilities: EndpointCapabilities? = null,
     ) {
         /** Pipelines by name; a pipeline the target does not have counts as version 0 (§10.2). */
         fun pipelineByName(): Map<String, Entry> = pipelines.associateBy { it.name }
@@ -73,6 +86,32 @@ object PromotionWire {
 
         /** Dashboards by name (L1c). */
         fun dashboardByName(): Map<String, Entry> = dashboards.associateBy { it.name }
+    }
+
+    /**
+     * #1040 — the receiver's advertisement for method-bearing routes. Every field must hold for a sender to send one:
+     * [methods] names the route methods it imports; [exactPin] that a method entry is pinned to the sender's exact
+     * pipeline version and hash, never retargeted; [requestBodyModes] the body modes it understands (`none`, `optional`,
+     * `required`); [methodGrants] that it binds an entry's `grants` as exact method grants on that one route.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class EndpointCapabilities(
+        @field:JsonProperty("methods") @get:JsonProperty("methods") @param:JsonProperty("methods")
+        val methods: List<String> = emptyList(),
+        @field:JsonProperty("exact_pin") @get:JsonProperty("exact_pin") @param:JsonProperty("exact_pin")
+        val exactPin: Boolean = false,
+        @field:JsonProperty("request_body_modes")
+        @get:JsonProperty("request_body_modes")
+        @param:JsonProperty("request_body_modes")
+        val requestBodyModes: List<String> = emptyList(),
+        @field:JsonProperty("method_grants") @get:JsonProperty("method_grants") @param:JsonProperty("method_grants")
+        val methodGrants: Boolean = false,
+    ) {
+        /** Whether a route of [method] with body mode [bodyMode] can be imported exactly as sent. */
+        fun admits(
+            method: String,
+            bodyMode: String,
+        ): Boolean = exactPin && methodGrants && method in methods && bodyMode in requestBodyModes
     }
 
     /** One inventory row: the identity, the version the target serves, and its content hash. */
@@ -172,7 +211,41 @@ object PromotionWire {
         /** The names of the API keys bound at this endpoint's own path node. */
         @field:JsonProperty("bindings") @get:JsonProperty("bindings") @param:JsonProperty("bindings")
         val bindings: List<String> = emptyList(),
-    )
+        /**
+         * #1037/#1040 — the route's method, written only for POST, PUT and DELETE (null for GET, and `NON_NULL` keeps a
+         * GET entry byte-identical to every earlier sender's). A method entry also carries its exact pin
+         * ([pipelineVersion], [pipelineBodyHash]), its [requestBody] mode and its [grants], and never [bindings]: GET
+         * tree grants belong to GET routes. A receiver refuses a method entry missing any of them.
+         */
+        @field:JsonProperty("method") @get:JsonProperty("method") @param:JsonProperty("method")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val method: String? = null,
+        /** #1040 — a method entry's EXACT pinned pipeline version (the API's current version's pin on the sender). */
+        @field:JsonProperty("pipeline_version") @get:JsonProperty("pipeline_version") @param:JsonProperty("pipeline_version")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val pipelineVersion: Int? = null,
+        /** #1040 — the sender's body hash of that exact pipeline version; the receiver's version must match it. */
+        @field:JsonProperty("pipeline_body_hash")
+        @get:JsonProperty("pipeline_body_hash")
+        @param:JsonProperty("pipeline_body_hash")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val pipelineBodyHash: String? = null,
+        /** #1040 — the pinned version's request-body mode (`none`, `optional`, `required`), checked against the capability. */
+        @field:JsonProperty("request_body") @get:JsonProperty("request_body") @param:JsonProperty("request_body")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val requestBody: String? = null,
+        /**
+         * #1040 — the names of the API keys holding an exact grant of [method] on this one route. Keys stay
+         * environment-local and travel by name, as [bindings] do; a missing name refuses the batch before anything lands.
+         */
+        @field:JsonProperty("grants") @get:JsonProperty("grants") @param:JsonProperty("grants")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        val grants: List<String>? = null,
+    ) {
+        /** True for a POST, PUT or DELETE entry — anything but an absent or explicit `GET` method. Never on the wire. */
+        @get:JsonIgnore
+        val isMethodEntry: Boolean get() = method != null && method != "GET"
+    }
 
     /** What the receiver reports back: what it stored, per kind. */
     @JsonIgnoreProperties(ignoreUnknown = true)

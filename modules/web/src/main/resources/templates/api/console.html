@@ -43,10 +43,10 @@
         <tbody>
         <tr th:each="e : ${endpoints}">
           <td>
-            <!-- Always GET: PublishedEndpointController refuses every other method with
-                 `Allow: GET`, so the tag is a fact about the surface, not a column that
-                 could vary. -->
-            <span class="app-method">GET</span>
+            <!-- #1037: the route's method, half of its identity — a GET and a POST at one
+                 pattern are two rows, each granted separately. Pre-#1037 this was a
+                 hard-coded GET. -->
+            <span class="app-method" th:text="${e.method}">GET</span>
             <!-- #786: the path opens the API's versions page (every version, its exact pin, the lifecycle verbs). -->
             <a class="ds-mono" th:href="@{'/api-console/endpoints/{id}'(id=${e.id})}" th:text="${e.url}"
                data-api-versions-link>/api/nyc/v1/mobility/briefing</a>
@@ -84,7 +84,7 @@
       <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
         <div class="app-empty">
           <b>No published endpoints</b>
-          A published endpoint turns one pipeline into a GET URL under <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>.
+          A published endpoint turns one pipeline into an HTTP route &mdash; a GET read, or a POST, PUT or DELETE write &mdash; under <span class="ds-mono">/api/&lt;category&gt;/&lt;version&gt;/…</span>.
           Publish one with the <span class="ds-mono">endpoints_create</span> MCP tool or
           <span class="ds-mono">POST /api/v1/endpoints</span>.
         </div>

@@ -6,18 +6,21 @@ import java.util.UUID
 
 /**
  * One row of `published_endpoints` (published-endpoints design §4, dependency-graph record §24) — an API ENTITY served
- * as `GET /api{pathPattern}` (R-EP5: the stored pattern is the part after `/api`, and its first segment is the
- * engineer's category).
+ * at `METHOD /api{pathPattern}` (R-EP5: the stored pattern is the part after `/api`, and its first segment is the
+ * engineer's category). Since #1037 the method is half of the route's identity (published-mutation-apis §3.1): it is
+ * IMMUTABLE like the path, `GET` is the legacy default every pre-#1037 row carries, and separate entities within one
+ * workspace may share a path across methods (`GET` and `POST` at one path are two entities).
  *
  * Since #786 the entity pins NO pipeline: it owns versions (`published_endpoint_versions`, [PublishedEndpointVersion])
  * and a runtime pointer, [current]. Each version pins an EXACT pipeline version by name and number, so moving a
  * pipeline's current version never changes what an API serves — releasing a new API version, or switching the API's
  * own pointer, does. (This corrects the pre-#786 comment that the row pins a pipeline and serves its latest RELEASED
- * version, record §2 F5.) The §4.2 read-only rule is still re-checked on every serve, against the pinned version.
+ * version, record §2 F5.) The §4.2 read-only rule is still re-checked on every serve, against the pinned version —
+ * of a `GET` entity; a mutation entity's pin admits a writing pipeline (published-mutation-apis §3.1).
  *
- * The identity ([id], [workspaceId], the immutable [pathPattern]) and the operational [isEnabled] are entity-level;
- * none of them is a body-hash input. [current] is the version the pointer names, as read with the row — a listing's
- * view; the serve path re-reads the pointer and its row per request.
+ * The identity ([id], [workspaceId], [method], the immutable [pathPattern]) and the operational [isEnabled] are
+ * entity-level; none of them is a body-hash input. [current] is the version the pointer names, as read with the
+ * row — a listing's view; the serve path re-reads the pointer and its row per request.
  *
  * [parsed] is the §4.1 parse of [pathPattern], carried on the row so the matcher, the ambiguity check and the tree
  * screen share one parse. A row whose stored pattern no longer parses cannot be constructed — [PublishedEndpoint.of]
@@ -35,6 +38,7 @@ data class PublishedEndpoint(
     val updatedAt: Instant,
     val parsed: EndpointPath.Parsed,
     val current: CurrentVersion? = null,
+    val method: EndpointMethod = EndpointMethod.GET,
 ) {
     /** The declared parameter names this endpoint's path binds, in order (§4.2). */
     val pathVariables: List<String> get() = parsed.variableNames
@@ -58,6 +62,7 @@ data class PublishedEndpoint(
             createdAt: Instant,
             updatedAt: Instant,
             current: CurrentVersion? = null,
+            method: EndpointMethod = EndpointMethod.GET,
         ): PublishedEndpoint =
             PublishedEndpoint(
                 id = id,
@@ -69,6 +74,7 @@ data class PublishedEndpoint(
                 updatedAt = updatedAt,
                 parsed = EndpointPath.parse(pathPattern).getOrThrow(),
                 current = current,
+                method = method,
             )
     }
 }
@@ -91,12 +97,21 @@ data class LegacyEndpointColumns(
 )
 
 /**
- * One row of `endpoint_key_bindings` (§4) — an API key bound at a NODE of the endpoint tree.
+ * One row of `endpoint_key_bindings` (§4; published-mutation-apis §2 since #1037) — a key's grant,
+ * of one of two shapes the columns tell apart by [method].
  *
- * [pathPrefix] is a tree node, not a pattern: `/lending` authorises every endpoint beneath it
+ * A **GET binding** ([method] `GET`, [endpointId] null) is the tree-node grant that always existed:
+ * [pathPrefix] is a node, not a pattern — `/lending` authorises every GET endpoint beneath it
  * until a deeper node carries a binding of its own, which REPLACES the inherited one for that
  * subtree (ruling R-EP2). It is stored normalised — a leading `/`, no trailing slash — so the
  * §5.2 ancestor walk can compare strings rather than re-parse.
+ *
+ * A **mutation grant** ([method] `POST`/`PUT`/`DELETE`) names exactly ONE route entity, by its
+ * [endpointId]: [pathPrefix] is that entity's full path pattern, and the grant authorises that
+ * method on that entity and nothing else — never a sibling method on the same path, never a
+ * recreated route that later reuses the pattern (the grant follows the entity's id, and dies with
+ * it). It can never shadow an inherited GET grant, and no later GET binding widens it: the two
+ * grant shapes are resolved by method, never against each other (published-mutation-apis §2).
  */
 data class EndpointKeyBinding(
     val pathPrefix: String,
@@ -104,4 +119,6 @@ data class EndpointKeyBinding(
     val workspaceId: UUID,
     val createdBy: UUID,
     val createdAt: Instant,
+    val method: EndpointMethod = EndpointMethod.GET,
+    val endpointId: UUID? = null,
 )

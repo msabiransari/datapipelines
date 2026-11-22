@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.243
+**Status:** v1.245
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-11-15
+**Last updated:** 2026-11-22
 ---
 
 ## 1. Purpose
@@ -2244,9 +2244,38 @@ service's guard and a POST that re-runs it and answers `HX-Redirect` with an `ap
 The draft dialog's picker lists the chosen pipeline's live versions with status and eligibility; an ineligible version is
 listed and disabled, never hidden. Design tokens and the vendored lucide sprite only. Guard: `ApiVersionsBrowserTest`.
 
-**Dependencies (#876 G6, record §13).** A third card, between the version card and the API card and only when a version is selected: the SELECTED version's dependencies (never implicitly the current pointer's) in the shared pane (§4.4's Graph/List and tables). Unlike the two cards around it, it is a `<details>` CLOSED by default that sends nothing until it is first opened, then one §15 tree read naming the API's stored path and the viewed version (`/api/v1/dependencies/api_endpoint?name=/<path>&version=<n>`). It shows the API version with its lifecycle and the entity's enabled/disabled, and its one **Pipeline** edge to the exact pipeline version that version pins. The page has no tab strip and none is added; another version is another page load (`?version=n`), so the pane never changes version in place. Enabling and key bindings stay in the API card. Guards: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`.
+**A route's method and body (#1040).** The page is one ROUTE — `(method, path)` — so the header names its method, and the
+version card adds **Request body** (`none` / `optional` / `required`, derived from the selected version's EXACT pin, never
+stored; "unknown (the pinned version is gone)" when the pin no longer resolves) and **Body read by** (one chip per SCRIPT
+transformer that reads the body, `node (template@version)`, or `—`). The API card's key list is labelled by method: a GET
+route lists "API keys bound at this path:", a POST, PUT or DELETE route "API keys granted <METHOD> on this route:" — the keys
+holding an exact grant of that method on this one route. The draft dialog shows the method as fixed ("fixed for this
+route": a draft changes the pin only) and every pipeline-version option names its body mode and readers beside its
+status, including the readers' exact template pins, so the body a caller must send is visible before the draft is saved.
+For PUT and DELETE, both the version page and draft dialog remind the author to preserve the intended business effect
+of identical requests under different request keys; a new key starts a new execution. Creating a route stays a REST/MCP action
+(rest-api [§19.5a](rest-api.md#195a-authoring-a-mutation-route-1040)). Guards: `EndpointVersionsPageModelTest`,
+`PublishedMutationAuthoringBrowserTest`.
+
+**Dependencies (#876 G6, record §13).** A third card, between the version card and the API card and only when a version is selected: the SELECTED version's dependencies (never implicitly the current pointer's) in the shared pane (§4.4's Graph/List and tables). Unlike the two cards around it, it is a `<details>` CLOSED by default that sends nothing until it is first opened, then one §15 tree read naming the API's route key and the viewed version (`/api/v1/dependencies/api_endpoint?name=/<path>&version=<n>` for a GET route, `name=POST+/<path>` for a mutation route, #1037 — the page heading shows the route's method, `data-api-method`, and the pane reads THIS route's tree, never a sibling method's at the same path). It shows the API version with its lifecycle and the entity's enabled/disabled, and its one **Pipeline** edge to the exact pipeline version that version pins. The page has no tab strip and none is added; another version is another page load (`?version=n`), so the pane never changes version in place. Enabling and key bindings stay in the API card. Guards: `EndpointVersionsPageRenderTest`, `DependenciesApiEndpointBrowserTest`.
 
 ---
+
+### 4.18c Runtime capture card on the API versions page (#1043)
+
+The versions page (§4.18b) of a published `POST`, `PUT` or `DELETE` route shows a **Runtime capture** card to a caller holding `execution.capture.manage` in the selected workspace (a workspace administrator or super admin, interactive session — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)); a `GET` route, and every other role, renders no card and no placeholder. The card (`partials/endpoint-capture.html`, `ExecutionCaptureUiController`) loads itself with `hx-get /partials/endpoints/{id}/capture` on page load and replaces itself on every action (`hx-target="#api-capture"`, `outerHTML`); every partial answers `Cache-Control: no-store`.
+
+| State | What the card shows |
+|---|---|
+| disabled (no open window) | a `disabled` status chip; a one-line warning that a capture keeps this API's declared transformer outputs — which can contain personal data — privately for the configured retention; an optional **Correlation ID** text field (one UUID: only the request carrying that `DP-Correlation-Id` is captured); **Start capture** (`hx-post`, the session's CSRF token) |
+| active | an `active` chip, the remaining time (`14 min`, `45 s`), the filter or "every request", and **Stop** (`hx-post …/capture/{captureId}/stop` — the window's own id, so a stale card can never stop a newer window) |
+| refused | the catalogued refusal's message inside the re-rendered card (`409 execution.capture.already_active`, `400 execution.capture.invalid`, `404`), the card's state re-read |
+
+Below the controls, the recent windows (newest first, ten at most) list their start, end and end reason (`stopped`, `expired`) and the executions each captured; each execution links to its diagnostic view (§4.18d). The window length and the detail retention come from configuration (§3.22 of [Configuration](configuration.md#322-published-endpoints)) and are stated on the card. Selectors: `[data-api-capture-card]`, `[data-capture-state]`, `[data-api-capture-warning]`, `[data-api-capture-history]`, `[data-api-capture-run]`.
+
+### 4.18d Captured execution diagnostic view (#1043)
+
+`GET /executions/{id}/capture` (`execution.capture.read`; `executions/capture.html`) — the private detail of one captured execution, reached from the card's history (§4.18c), readable until its expiry even after the window stopped. The page opens with a warning that the values are the declared outputs of the API's transformers and may contain personal data, then the execution's status, the capture status (`recording`, `complete`, `incomplete` — [REST API §26.4](rest-api.md#264-read-a-captured-execution)), the admission and expiry instants, and the counts (captured, omitted, store failures, bytes). The values table lists node, output key and the stored JSON text, each value in a `<pre>` rendered as escaped TEXT (never as markup, never re-parsed); an omitted value shows an `omitted` chip and its reason with no preview. An execution whose finished run kept no value shows "The run finished without writing any declared value output.", never an empty table that could mean data was lost. An uncaptured, foreign or unknown execution renders the application's 404 page; an expired one its 410 page. The response is `Cache-Control: no-store`, and each view is audited (`execution.capture.inspected`, no values). Selectors: `[data-capture-warning]`, `[data-capture-status]`, `[data-capture-execution-status]`, `[data-capture-summary]`, `[data-capture-values]`, `[data-capture-value]`, `[data-capture-omitted]`, `[data-capture-empty]`.
 
 ### 4.19 API keys (keys v2 — the ONE creation path for every kind)
 
@@ -2305,10 +2334,21 @@ hover, like every table here. Deleted and expired keys keep their row and lose t
   its OWN disclosure — **Edit dashboard folders** — posting to its own route with the FOLDER
   picker (the workspace's dashboard-name folders, root first), never a branch inside the
   endpoint form; the route is `dashboard.key.bind`.
+- **Method grants (#1040)** — under the endpoint picker, one checkbox per published POST, PUT
+  or DELETE ROUTE (`METHOD /path`, "exactly one route each"): a grant names that route and
+  method, never a tree node and never a sibling method at the same path, and a GET node above
+  never grants it. Save posts the same `api_key.bind` route ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative));
+  each rendered route travels as `grantsOffered`, so the service changes only the grants the
+  form SHOWED (a grant added elsewhere since the page loaded is kept). A hand-crafted grant
+  naming `GET`, an unknown method or no path is `400 endpoint.method_invalid`, and one naming
+  no published route of that method is `endpoint.path_invalid`. Unticking a grant answers that
+  route `405` with an `Allow` naming what the key still holds; deleting the key answers `401`.
 
 **One fragment, three renders.** The page, the post-create refresh and the rows a delete or
 association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from one row model
-(`ApiKeyRows`).
+(`ApiKeyRows`); since #1040 the create and delete redraws fill the same pickers (endpoint
+nodes, method routes, dashboard folders) as the page, so a key minted or deleted without a
+reload can still be associated.
 
 ### 4.20 Schedules
 
@@ -3204,6 +3244,8 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.245 | 1043 (#1043, runtime capture) | New **§4.18c** the API versions page's Runtime capture card (administrators, mutation routes only: disabled/active, remaining time, optional exact correlation UUID, start, stop by window id, the personal-data warning, recent windows with their captured executions) and **§4.18d** the captured execution diagnostic view (escaped text values, omission chips, capture status, no-store, audited). |
+| 2026-11-22 | v1.244 | 1040 (#1040, authoring published mutations) | **§4.18b:** the versions page names its route's method; the version card shows the selected version's request-body mode and reading transformers; the key list is labelled by method; the draft dialog shows the method as fixed and each option's body. **§4.19:** method grants on the Keys page (one checkbox per POST/PUT/DELETE route, offered-only delta on `api_key.bind`); the create and delete redraws fill the same pickers as the page. No route or permission added. |
 | 2026-11-15 | v1.243 | 990 (#990, js-rendered F6) | **§4.21, §4.22, §4.24** the JS rows: the chart interaction layer `datapipelines-chart-interactions.js` loads directly before the chart adapter (dashboards §6.3). |
 | 2026-11-15 | v1.242 | 987 (#987, js-rendered F3) | **§3.4** the prepared-navigation paragraph, **§4.21** (the Design primitives, JS, htmx and "Grid rows" rows, the shell-loader paragraph and the guards; Grid rows: a small chart body, the chart's padding and the 2-row slot's compact level replace the Plotly body and `automargin`), **§4.22** (Design primitives, JS), **§4.24** (the panel's loader sentence, the Overview tab, Design primitives, JS, htmx and the guards): the pages load the product's own chart engine's files from one list (dashboards §6.4) instead of a chart library bundle, its converter and its stylesheet; the board's glue passes no `charts` option; the Overview names the renderer without a bundle. |
 | 2026-11-13 | v1.241 | #943 the resource browser's rows take the explorer tree's look | **§3.4** the row paragraph, the icon bullet and the Resource row table row: 8px vertical / 4px horizontal row padding and 8px in-row gaps (the explorer's, replacing #701/#739's 12px / 8px / 4px), rows touching (replacing #604's 4px rhythm) so the guides read as one stroke, a rotating `chevron-right` before a folder's glyph, a leaf's empty 20px chevron slot keeping the glyph column, ticks of 6px to a chevron and 26px to a leaf glyph; #784's 12px indent and 280px floor stand; below a 320px browser the chevron and the slot retract together (owner ruling 2026-11-13: with them a depth-ten three-badge leaf left the rail by 18px at the floor). |

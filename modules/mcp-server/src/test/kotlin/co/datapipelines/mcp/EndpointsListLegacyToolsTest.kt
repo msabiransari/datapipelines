@@ -1,6 +1,8 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.endpoints.CurrentVersion
+import co.datapipelines.application.endpoints.EndpointBodyContract
+import co.datapipelines.application.endpoints.EndpointMethod
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
@@ -19,8 +21,8 @@ import java.util.UUID
  * stored `enabled`, and no parse-derived fields. The assertion is about the agent's and the
  * operator's problem — a row that predates the current grammar must be VISIBLE and actionable
  * (`endpoints_delete` removes it), never a silent mystery or a boot-killing throw. The list
- * shape is pinned row for row: a valid row stays byte-identical to the shape before #274, and
- * the legacy row is distinguishable by its `legacy` key alone.
+ * shape is pinned row for row: a valid row is the shape before #274 plus #1037's `method` key,
+ * and the legacy row is distinguishable by its `legacy` key alone.
  */
 class EndpointsListLegacyToolsTest {
     private val publishing = mockk<EndpointPublishService>()
@@ -31,20 +33,26 @@ class EndpointsListLegacyToolsTest {
     fun `a legacy row is listed last, flagged with legacy true and its reason`() {
         every { publishing.list(any()) } returns listOf(validEndpoint())
         every { publishing.listLegacy(any()) } returns listOf(legacyRow())
+        every { publishing.bodyContract(any()) } returns EndpointBodyContract(EndpointBodyContract.Mode.NONE, emptyList())
 
         @Suppress("UNCHECKED_CAST")
         val endpoints = tool.call(McpArguments(emptyMap()), ctx).asMap()["endpoints"] as List<Map<String, Any?>>
 
         endpoints.size shouldBe 2
 
-        // The valid row: exactly the pre-#274 shape — no `legacy` key at all. #786 changed assertion: `pipeline` is the
+        // The valid row: the pre-#274 shape plus `method` (#1037 — a route is a (method, path)
+        // pair) — no `legacy` key at all. #786 changed assertion: `pipeline` is the
         // current version's pinned name, read from the row itself (before: a pipeline lookup by the legacy id, null here).
+        // #1040 changed assertion: the row adds its exact pin and its pinned version's body contract.
         endpoints[0] shouldBe
             mapOf(
+                "method" to "GET",
                 "path" to "/nyc/v1/revenue/{borough}",
                 "pipeline" to "test/pipeline",
+                "pipeline_version" to 1,
                 "timeout_seconds" to 30,
                 "description" to "",
+                "request_body" to mapOf("mode" to "none", "readers" to emptyList<Any>()),
                 "enabled" to true,
                 "path_variables" to listOf("borough"),
                 "url" to "/api/nyc/v1/revenue/{borough}",
@@ -60,6 +68,42 @@ class EndpointsListLegacyToolsTest {
                 "reason" to REASON,
                 "url" to "/api/nyc/revenue-by-borough",
             )
+    }
+
+    @Test
+    fun `a GET and a POST at one pattern list as two routes, each with its own pin and body contract`() {
+        // #1040: the authored identity round-trips through the listing — the POST route beside the default GET one,
+        // each with its exact pin and the body mode and readers of THAT pin.
+        val get = validEndpoint()
+        val post =
+            PublishedEndpoint.of(
+                id = UUID.nameUUIDFromBytes("POST /nyc/v1/revenue/{borough}".toByteArray()),
+                workspaceId = WORKSPACE,
+                pathPattern = "/nyc/v1/revenue/{borough}",
+                isEnabled = true,
+                createdBy = UUID.randomUUID(),
+                createdAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+                current = CurrentVersion(2, PipelineVersionStatus.RELEASED, EndpointVersionBody("test/write", 5, 30, "")),
+                method = EndpointMethod.POST,
+            )
+        every { publishing.list(any()) } returns listOf(get, post)
+        every { publishing.listLegacy(any()) } returns emptyList()
+        every { publishing.bodyContract(get) } returns EndpointBodyContract(EndpointBodyContract.Mode.OPTIONAL, emptyList())
+        every { publishing.bodyContract(post) } returns
+            EndpointBodyContract(EndpointBodyContract.Mode.REQUIRED, listOf(EndpointBodyContract.Reader("shape", "nyc/shape.py@1")))
+
+        @Suppress("UNCHECKED_CAST")
+        val endpoints = tool.call(McpArguments(emptyMap()), ctx).asMap()["endpoints"] as List<Map<String, Any?>>
+
+        endpoints.map { listOf(it["method"], it["path"], it["pipeline"], it["pipeline_version"]) } shouldBe
+            listOf(
+                listOf("GET", "/nyc/v1/revenue/{borough}", "test/pipeline", 1),
+                listOf("POST", "/nyc/v1/revenue/{borough}", "test/write", 5),
+            )
+        endpoints[0]["request_body"] shouldBe mapOf("mode" to "optional", "readers" to emptyList<Any>())
+        endpoints[1]["request_body"] shouldBe
+            mapOf("mode" to "required", "readers" to listOf(mapOf("node_id" to "shape", "template" to "nyc/shape.py@1")))
     }
 
     @Test

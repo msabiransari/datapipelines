@@ -100,4 +100,18 @@ class SqlBindTranslatorTest {
 
         verify(exactly = 0) { statement.setObject(any(), any()) }
     }
+
+    @Test
+    fun `parameterNames lists the references in order, duplicates kept, literals ignored`() {
+        SqlBindTranslator.parameterNames("INSERT INTO t (a, b, c) VALUES (:id, ':lit', :customer) -- :x\n, :id") shouldBe
+            listOf("id", "customer", "id")
+    }
+
+    @Test
+    fun `translateForRowScope binds row-only names as null and keeps declared values (#1034)`() {
+        val bound = SqlBindTranslator.translateForRowScope("INSERT INTO t VALUES (:id, :customer, :run)", mapOf("run" to 7))
+
+        bound.sql shouldNotContain ":"
+        bound.bindValues shouldBe listOf(null, null, 7)
+    }
 }

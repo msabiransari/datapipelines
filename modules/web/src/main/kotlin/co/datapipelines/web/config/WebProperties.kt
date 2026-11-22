@@ -4,8 +4,10 @@ import co.datapipelines.executor.ErrorDetail
 import co.datapipelines.pipeline.OrgContext
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.body.StructuredBodyLimits
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
+import java.time.Instant
 
 /**
  * The `datapipelines.sse.*` keys ([Configuration §3.6](../../../../../../../docs/configuration.md)).
@@ -139,17 +141,64 @@ data class EndpointsProperties(
      * published only when a budget stands behind them).
      */
     val keyRequestBudget: KeyRequestBudget = KeyRequestBudget(),
+    /**
+     * `mutations-enabled` (#1037/#1039, published-mutation-apis §7, configuration.md §3.22) —
+     * whether the serve path may ADMIT a fresh non-GET request. Default OFF: a fresh mutation is
+     * refused `503 endpoint.mutations_disabled` BEFORE any reservation or business work. It never
+     * withholds an identical retry of an already admitted request or its polling, and never the
+     * identity checks: route resolution, grants and the 404/405 discipline answer the same either way.
+     */
+    val mutationsEnabled: Boolean = false,
+    /**
+     * `mutation-start-window-seconds` (#1039, published-mutation-apis §4) — how long a published
+     * mutation's reservation may stand with no execution row before an identical retry takes its
+     * start claim over and starts the ORIGINAL pin under the original id (the admitting replica
+     * died between reserving and recording). The execution row's primary key fences the run, so
+     * this bounds only how long such a request waits, never whether it can run twice.
+     */
+    val mutationStartWindowSeconds: Long = 60,
+    /**
+     * `body-max-bytes` (#1038, published-mutation-apis §5, configuration.md §3.22) — the structured
+     * request body's byte cap: the received entity's UTF-8 bytes on a published route (counted while
+     * reading, chunked bodies included) and a fixture's canonical encoding on framework execute and
+     * `pipelines_execute`. Independent of the `/api/v1` and `/mcp` request caps.
+     */
+    val bodyMaxBytes: Long = StructuredBodyLimits.DEFAULT_MAX_BYTES,
+    /** `body-max-depth` (#1038) — the body's nesting cap, 1..64, the root container counting 1. */
+    val bodyMaxDepth: Int = StructuredBodyLimits.DEFAULT_MAX_DEPTH,
+    /**
+     * `capture-window-seconds` (#1043, published-mutation-apis §6, configuration.md §3.22) — how long a runtime capture
+     * window an administrator opens admits new executions, unless stopped early. A positive integer; the deadline is
+     * fixed when the window opens, so a later change never extends an open window.
+     */
+    val captureWindowSeconds: Int = CaptureDurations.DEFAULT_WINDOW_SECONDS,
+    /**
+     * `capture-detail-retention-hours` (#1043) — how long a captured execution's private details live, from its
+     * ADMISSION. A positive integer; the expiry is fixed at admission, so a later change never extends it.
+     */
+    val captureDetailRetentionHours: Int = CaptureDurations.DEFAULT_RETENTION_HOURS,
 ) {
     init {
+        CaptureDurations.problems(captureWindowSeconds.toLong(), captureDetailRetentionHours.toLong()).firstOrNull()?.let {
+            throw IllegalArgumentException(it)
+        }
+        require(bodyMaxBytes > 0) { "datapipelines.endpoints.body-max-bytes must be > 0" }
+        require(bodyMaxDepth in 1..StructuredBodyLimits.MAX_DEPTH) {
+            "datapipelines.endpoints.body-max-depth must be in 1..${StructuredBodyLimits.MAX_DEPTH}"
+        }
         // configuration.md §7 — the validator asserts exactly this ordering at startup.
         require(timeoutMinSeconds <= timeoutDefaultSeconds && timeoutDefaultSeconds <= timeoutMaxSeconds) {
             "datapipelines.endpoints: timeout-min-seconds <= timeout-default-seconds <= timeout-max-seconds must hold"
         }
         require(timeoutMinSeconds > 0) { "datapipelines.endpoints.timeout-min-seconds must be > 0" }
+        require(mutationStartWindowSeconds > 0) { "datapipelines.endpoints.mutation-start-window-seconds must be > 0" }
     }
 
     /** The §5.5 clamp a publish applies to a requested timeout. */
     fun clampTimeout(requested: Int): Int = requested.coerceIn(timeoutMinSeconds, timeoutMaxSeconds)
+
+    /** The structured request-body bounds every body-accepting surface decodes with (#1038). */
+    fun bodyLimits(): StructuredBodyLimits = StructuredBodyLimits(maxBytes = bodyMaxBytes, maxDepth = bodyMaxDepth)
 
     /** True when the serve path's per-key budget is active (`max-requests` > 0). */
     val keyRequestBudgetActive: Boolean get() = keyRequestBudget.maxRequests > 0
@@ -531,4 +580,69 @@ data class ScriptProperties(
     private companion object {
         const val ISOLATE_HEADROOM_MB = 256L
     }
+}
+
+/**
+ * #1043 — the capture window and detail retention rules, ONE copy for the binder ([EndpointsProperties]) and the startup
+ * validator (configuration.md §7): each a positive integer, and each deadline it produces representable — no later than
+ * [MAX_DEADLINE], the last instant every surface (ISO-8601 text, PostgreSQL `timestamptz`, the browser) renders.
+ */
+object CaptureDurations {
+    const val WINDOW_KEY = "datapipelines.endpoints.capture-window-seconds"
+    const val RETENTION_KEY = "datapipelines.endpoints.capture-detail-retention-hours"
+    const val DEFAULT_WINDOW_SECONDS = 900
+    const val DEFAULT_RETENTION_HOURS = 24
+
+    /** The latest deadline either key may produce. */
+    val MAX_DEADLINE: Instant = Instant.parse("9999-12-31T23:59:59Z")
+
+    private const val SECONDS_PER_HOUR = 3_600L
+
+    /** Every rule [windowSeconds] and [retentionHours] break as of [now], each naming its key; empty when both hold. */
+    fun problems(
+        windowSeconds: Long,
+        retentionHours: Long,
+        now: Instant = Instant.now(),
+    ): List<String> =
+        listOfNotNull(
+            problem(WINDOW_KEY, windowSeconds, windowSeconds, now),
+            problem(RETENTION_KEY, retentionHours, retentionHours.coerceAtMost(Long.MAX_VALUE / SECONDS_PER_HOUR) * SECONDS_PER_HOUR, now),
+        )
+
+    /**
+     * The rule [raw] breaks as the text of [key], or null — for the startup validator, which reads the raw value so an
+     * integer overflow is named as the key's own violation rather than a binder stack trace.
+     */
+    fun problemOfText(
+        key: String,
+        raw: String,
+        now: Instant = Instant.now(),
+    ): String? {
+        val value =
+            raw.trim().toIntOrNull() ?: return "$key ('${raw.take(MAX_ECHO)}') must be a positive integer of at most ${Int.MAX_VALUE}"
+        val seconds = if (key == RETENTION_KEY) value.toLong() * SECONDS_PER_HOUR else value.toLong()
+        return problem(key, value.toLong(), seconds, now)
+    }
+
+    private fun problem(
+        key: String,
+        value: Long,
+        seconds: Long,
+        now: Instant,
+    ): String? =
+        when {
+            value <= 0 -> {
+                "$key ($value) must be a positive integer"
+            }
+
+            seconds > Duration.between(now, MAX_DEADLINE).seconds -> {
+                "$key ($value) produces a deadline after $MAX_DEADLINE, which is not representable"
+            }
+
+            else -> {
+                null
+            }
+        }
+
+    private const val MAX_ECHO = 32
 }

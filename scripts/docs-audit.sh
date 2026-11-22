@@ -278,6 +278,11 @@ catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # as the defining list, so codes defined there join the catalog.
 catalog |= {c for c in re.findall(CODE_RE, texts.get("docs/datasources.md", ""))
             if c.startswith("datasource.validation.")}
+# `execution` codes join in #1043 (pipeline-contract §13.27, `execution.capture.*`) — but NOT the CODE_RE
+# alternation: prose names `execution.*` permissions and log events everywhere, so only a §13 catalog ROW (a
+# table line whose first cell is the backticked code) defines one. Every backticked `execution.*` citation is
+# still checked: `execution` is a permission family, so the permission scan below demands it be defined.
+catalog |= set(re.findall(r"^\| `(execution\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)` \|", texts["docs/pipeline-contract.md"], re.M))
 # audit events (enums §15) are events, not error codes — extract only from §15.
 # `pipeline` and `template` joined the event extraction in 101: the version-lifecycle
 # audit events (`pipeline.version.discarded`, `template.purged`, …) live in §15's
@@ -296,7 +301,9 @@ sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
 # member_flags_changed, deactivated, reactivated) — enums.md §15 remains the authority that
 # has to DEFINE one before any doc may cite it. `lake` joins with delivery events (#799);
 # its definition events previously happened to share names with structured logs.
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard|parameter_set|lake)\.[a-z_]+(?:\.[a-z_]+)*",
+# `execution` joins in #1043 for the runtime capture audit events (`execution.capture.started` / `.stopped` /
+# `.inspected`), defined in §15 like every other family.
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule|visualization|dashboard|parameter_set|lake|execution)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))

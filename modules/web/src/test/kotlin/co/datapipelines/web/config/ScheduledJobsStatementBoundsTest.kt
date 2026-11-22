@@ -104,9 +104,9 @@ class ScheduledJobsStatementBoundsTest {
         executions.sweepStaleRunning(Instant.now(), Instant.now())
         executions.heartbeat(UUID.randomUUID())
 
-        recording.timeoutOf("UPDATE pipeline_executions\n   SET status = 'ABORTED'") shouldBe SWEEP_BOUND
+        recording.timeoutOf("UPDATE pipeline_executions\n   SET status = CASE") shouldBe SWEEP_BOUND
         recording.timeoutOf("UPDATE pipeline_executions SET heartbeat_at") shouldBe UNBOUNDED
-        recording.socketTimeoutOf("UPDATE pipeline_executions\n   SET status = 'ABORTED'") shouldBe SWEEP_SOCKET
+        recording.socketTimeoutOf("UPDATE pipeline_executions\n   SET status = CASE") shouldBe SWEEP_SOCKET
         recording.socketTimeoutOf("UPDATE pipeline_executions SET heartbeat_at") shouldBe NO_SOCKET
     }
 

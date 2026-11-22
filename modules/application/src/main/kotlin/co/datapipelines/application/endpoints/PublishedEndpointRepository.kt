@@ -16,10 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * ## Why the ambiguity check takes a lock
  *
- * §4.1 refuses to publish a pattern that could match the same URL as an existing one. The
- * database can enforce EXACT duplication (`UNIQUE (path_pattern)`) and nothing more: "`/a/{x}`
- * overlaps `/a/b`" is not expressible as a constraint over one row. So the check is a read
- * followed by a write, and two concurrent publishes of `/a/{x}` and `/a/b` could each read
+ * §4.1 refuses to publish a pattern that could match the same URL as an existing one on the same
+ * METHOD (#1037: a route is a method+path pair, and the unique constraint is
+ * `UNIQUE (path_pattern, method)`). The database can enforce EXACT duplication and nothing more:
+ * "`/a/{x}` overlaps `/a/b`" is not expressible as a constraint over one row. So the check is a
+ * read followed by a write, and two concurrent publishes of `/a/{x}` and `/a/b` could each read
  * before the other wrote and both land — leaving a URL with two meanings, which is precisely the
  * state the whole matcher design assumes is impossible.
  *
@@ -67,16 +68,28 @@ class PublishedEndpointRepository(
     fun findByWorkspace(workspaceId: UUID): List<PublishedEndpoint> =
         queryRows("$SELECT_COLUMNS WHERE e.workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId)).validEndpoints()
 
-    /** One valid endpoint by its path — the single-form addressing `?path=` the REST surface uses (§6). */
-    fun findByPath(pathPattern: String): PublishedEndpoint? =
-        queryRows("$SELECT_COLUMNS WHERE e.path_pattern = :path", mapOf("path" to pathPattern)).validEndpoints().singleOrNull()
+    /** One valid endpoint by its path and method — the single-form addressing `?path=&method=` the REST surface uses (§6). */
+    fun findByPath(
+        pathPattern: String,
+        method: EndpointMethod = EndpointMethod.GET,
+    ): PublishedEndpoint? =
+        queryRows(
+            "$SELECT_COLUMNS WHERE e.path_pattern = :path AND e.method = :method",
+            mapOf("path" to pathPattern, "method" to method.name),
+        ).validEndpoints().singleOrNull()
 
     /**
-     * The row at [pathPattern], valid or legacy — what unpublishing needs: the fix for a legacy
+     * The row at [pathPattern] for [method], valid or legacy — what unpublishing needs: the fix for a legacy
      * row IS an unpublish, so the write path must see the row every other read skips.
      */
-    fun findRowByPath(pathPattern: String): EndpointRow? =
-        queryRows("$SELECT_COLUMNS WHERE e.path_pattern = :path", mapOf("path" to pathPattern)).singleOrNull()
+    fun findRowByPath(
+        pathPattern: String,
+        method: EndpointMethod = EndpointMethod.GET,
+    ): EndpointRow? =
+        queryRows(
+            "$SELECT_COLUMNS WHERE e.path_pattern = :path AND e.method = :method",
+            mapOf("path" to pathPattern, "method" to method.name),
+        ).singleOrNull()
 
     /**
      * The legacy rows of one workspace. A legacy row is listed, flagged with its reason, and
@@ -120,14 +133,20 @@ class PublishedEndpointRepository(
         ).validEndpoints()
 
     /**
-     * Publishes [endpoint], refusing a pattern that could match the same URL as an existing one.
+     * Publishes [endpoint], refusing a pattern that could match the same URL as an existing one on
+     * the terms of the method era (#1037): the SAME method in the SAME workspace conflicts with a
+     * refusal that may name the other path; ANY method in ANOTHER workspace conflicts with a
+     * refusal that names NOTHING but the caller's own pattern (published-mutation-apis §2 — a
+     * caller must not learn another workspace's routes).
      *
      * MUST be called inside a transaction — the advisory lock is transaction-scoped, and without
      * one it would be released the instant the `SELECT` returned, which is exactly when it is
      * needed. The service layer's `@Transactional` supplies it.
      *
-     * @throws DatapipelinesException `endpoint.path_conflict`, naming the other path.
+     * @throws DatapipelinesException `endpoint.path_conflict` — named for a same-workspace
+     *   same-method conflict, redacted for a cross-workspace one.
      */
+    @Suppress("ThrowsCount") // the named, the redacted and the lock-bypass conflict are each their own refusal
     fun insert(
         endpoint: PublishedEndpoint,
         legacy: LegacyEndpointColumns,
@@ -135,21 +154,28 @@ class PublishedEndpointRepository(
         // `pg_advisory_xact_lock` returns void, so the row is consumed and discarded — the
         // point is the side effect, which lasts until this transaction ends (commit OR rollback).
         jdbc.query("SELECT pg_advisory_xact_lock(:key)", mapOf("key" to REGISTRY_LOCK_KEY), RowCallbackHandler { })
-        conflictWith(endpoint.parsed)?.let { other ->
-            throw pathConflict(endpoint.pathPattern, other.pathPattern)
+        when (val conflict = conflictWith(endpoint.parsed, endpoint.method, endpoint.workspaceId)) {
+            is PathConflict.Named -> throw pathConflict(endpoint.pathPattern, conflict.otherPattern)
+            is PathConflict.Redacted -> throw redactedPathConflict(endpoint.pathPattern)
+            null -> Unit
         }
         try {
             jdbc.update(INSERT_SQL, params(endpoint, legacy))
         } catch (e: DuplicateKeyException) {
-            // Only reachable if a caller published without the lock; translated so the client
-            // cannot tell the two paths apart.
-            throw pathConflict(endpoint.pathPattern, endpoint.pathPattern, e)
+            // Only reachable if a caller published without the lock; classified by what is stored
+            // NOW, so the client cannot tell the two paths apart.
+            throw when (findByPath(endpoint.pathPattern, endpoint.method)?.workspaceId) {
+                endpoint.workspaceId -> pathConflict(endpoint.pathPattern, endpoint.pathPattern, e)
+                else -> redactedPathConflict(endpoint.pathPattern, e)
+            }
         }
         return endpoint
     }
 
     /**
-     * The already-published endpoint whose pattern overlaps [candidate], or null.
+     * The already-published pattern whose overlap with [candidate] conflicts, and in which shape —
+     * or null when every overlap is the legal kind (the same workspace publishing another METHOD
+     * at an overlapping pattern, #1037).
      *
      * Reads the whole registry rather than filtering in SQL: overlap is a property of the parsed
      * segments (§4.1), not of the string, and the registry is small by construction — a
@@ -157,24 +183,48 @@ class PublishedEndpointRepository(
      * of the rule, shared with the publish-time check and the tests, instead of a second one
      * written in SQL that could disagree with it.
      */
-    fun conflictWith(candidate: EndpointPath.Parsed): PublishedEndpoint? =
-        findAll().firstOrNull { EndpointPath.overlaps(candidate, it.parsed) }
+    fun conflictWith(
+        candidate: EndpointPath.Parsed,
+        method: EndpointMethod,
+        workspaceId: UUID,
+    ): PathConflict? {
+        val overlapping = findAll().filter { EndpointPath.overlaps(candidate, it.parsed) }
+        val sameWorkspaceSameMethod = overlapping.firstOrNull { it.workspaceId == workspaceId && it.method == method }
+        val foreign = overlapping.firstOrNull { it.workspaceId != workspaceId }
+        return when {
+            sameWorkspaceSameMethod != null -> PathConflict.Named(sameWorkspaceSameMethod.pathPattern)
 
-    /** Unpublishes by path. Returns whether a row was removed. */
-    fun deleteByPath(pathPattern: String): Boolean =
-        jdbc.update("DELETE FROM published_endpoints WHERE path_pattern = :path", mapOf("path" to pathPattern)) > 0
+            // A cross-workspace overlap conflicts for EVERY method (published-mutation-apis §2):
+            // a URL's meaning is global per method, and a second workspace's route — whatever its
+            // method — is not the caller's to learn about, hence the redacted shape.
+            foreign != null -> PathConflict.Redacted
 
-    /** Deletes one entity by id (its versions cascade) — the sole-draft purge. Whether a row was removed. */
+            else -> null
+        }
+    }
+
+    /** Unpublishes by path and method. Returns whether a row was removed. */
+    fun deleteByPath(
+        pathPattern: String,
+        method: EndpointMethod = EndpointMethod.GET,
+    ): Boolean =
+        jdbc.update(
+            "DELETE FROM published_endpoints WHERE path_pattern = :path AND method = :method",
+            mapOf("path" to pathPattern, "method" to method.name),
+        ) > 0
+
+    /** Deletes one entity by id (its versions cascade, and its mutation grants with them) — the sole-draft purge. */
     fun deleteById(id: UUID): Boolean = jdbc.update("DELETE FROM published_endpoints WHERE id = :id", mapOf("id" to id)) > 0
 
-    /** Enables or disables an endpoint; a disabled one answers `404` exactly like an unknown path (§5.6). */
+    /** Enables or disables one method's entity; a disabled one answers `404` exactly like an unknown path (§5.6). */
     fun setEnabled(
         pathPattern: String,
         enabled: Boolean,
+        method: EndpointMethod = EndpointMethod.GET,
     ): Boolean =
         jdbc.update(
-            "UPDATE published_endpoints SET is_enabled = :enabled, updated_at = NOW() WHERE path_pattern = :path",
-            mapOf("path" to pathPattern, "enabled" to enabled),
+            "UPDATE published_endpoints SET is_enabled = :enabled, updated_at = NOW() WHERE path_pattern = :path AND method = :method",
+            mapOf("path" to pathPattern, "enabled" to enabled, "method" to method.name),
         ) > 0
 
     private fun params(
@@ -185,6 +235,7 @@ class PublishedEndpointRepository(
             "id" to endpoint.id,
             "workspaceId" to endpoint.workspaceId,
             "path" to endpoint.pathPattern,
+            "method" to endpoint.method.name,
             "pipelineId" to legacy.pipelineId,
             "timeoutSeconds" to legacy.timeoutSeconds,
             "description" to legacy.description,
@@ -205,6 +256,23 @@ class PublishedEndpointRepository(
         cause = cause,
     )
 
+    /**
+     * The cross-workspace conflict (#1037): the same status and code, and NOTHING a caller could
+     * learn another workspace's routes from — no other path, no method, no workspace. The caller's
+     * own pattern travels (they supplied it); the deployment's non-disclosure rule does the rest.
+     */
+    private fun redactedPathConflict(
+        candidate: String,
+        cause: Throwable? = null,
+    ) = DatapipelinesException(
+        code = PipelineErrorCodes.Endpoint.PATH_CONFLICT,
+        message =
+            "Path '$candidate' could match the same URL as an endpoint of another workspace on this deployment. " +
+                "Ambiguity is refused rather than resolved by precedence — pick a path that cannot collide.",
+        details = mapOf("path_pattern" to candidate),
+        cause = cause,
+    )
+
     private companion object {
         /**
          * The advisory-lock key the registry serialises publishes on. An arbitrary constant, but
@@ -220,7 +288,7 @@ class PublishedEndpointRepository(
          */
         val SELECT_COLUMNS =
             """
-            SELECT e.id, e.workspace_id, e.path_pattern, e.is_enabled, e.created_by, e.created_at, e.updated_at,
+            SELECT e.id, e.workspace_id, e.path_pattern, e.method, e.is_enabled, e.created_by, e.created_at, e.updated_at,
                    e.current_version, v.status AS current_status, v.pipeline_name, v.pipeline_version,
                    v.timeout_seconds, v.description
               FROM published_endpoints e
@@ -230,8 +298,8 @@ class PublishedEndpointRepository(
         val INSERT_SQL =
             """
             INSERT INTO published_endpoints
-                (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description, is_enabled, created_by)
-            VALUES (:id, :workspaceId, :path, :pipelineId, :timeoutSeconds, :description, :isEnabled, :createdBy)
+                (id, workspace_id, path_pattern, method, pipeline_id, timeout_seconds, description, is_enabled, created_by)
+            VALUES (:id, :workspaceId, :path, :method, :pipelineId, :timeoutSeconds, :description, :isEnabled, :createdBy)
             """.trimIndent()
 
         /**
@@ -270,6 +338,10 @@ class PublishedEndpointRepository(
                         updatedAt = rs.getTimestamp("updated_at").toInstant(),
                         parsed = parsed,
                         current = currentOf(rs),
+                        // The CHECK constraint (V65) guarantees a value the enum names — the same
+                        // posture as PipelineVersionStatus.valueOf above: fail loudly on a value
+                        // the application cannot mean, rather than guessing one silently.
+                        method = EndpointMethod.valueOf(rs.getString("method")),
                     ),
                 )
             }
@@ -365,4 +437,23 @@ sealed interface EndpointRow {
         val reason: String,
         override val enabled: Boolean,
     ) : EndpointRow
+}
+
+/**
+ * A publish-time path overlap that must be refused, and WHAT the refusal may say (#1037,
+ * published-mutation-apis §2). The two shapes carry the same status and error code; they differ
+ * only in disclosure: a caller may learn about their OWN workspace's routes, never another's.
+ */
+sealed interface PathConflict {
+    /** A same-workspace, same-method overlap — the refusal may name [otherPattern]. */
+    data class Named(
+        val otherPattern: String,
+    ) : PathConflict
+
+    /**
+     * A cross-workspace overlap (any method) — the refusal carries the caller's own pattern and
+     * nothing else: no other path, no method, no workspace. Constructed WITHOUT fields so a
+     * future edit cannot accidentally widen what it discloses.
+     */
+    data object Redacted : PathConflict
 }

@@ -58,7 +58,7 @@ class PipelinesExecuteNodeTool(
                     "decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. " +
                     "DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history " +
                     "or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, " +
-                    "and so is a SCRIPT node (use templates_evaluate). " +
+                    "and so is a SCRIPT node (use templates_evaluate) and a DML insert whose input is a staged table. " +
                     "Parameters bind through the pipeline's declarations; unsupplied required parameters fall " +
                     "back to sample values and the response names them in sampled_parameters. Absent version " +
                     "runs the DRAFT if one exists, else the current released version; the response states which " +
@@ -200,6 +200,12 @@ class PipelinesExecuteNodeTool(
             // datasource resolution, keeps its blank source from being resolved as one.
             standaloneRefused(resolution.version, node.id, "script_node")
         }
+        if (node.type == NodeType.DML && node.input?.table != null) {
+            // #1034 (record §2): a DML insert reading a STAGED table has no input here — no
+            // ancestor ran and no tempdb exists — so it is refused before the datasource is
+            // resolved and before any SQL, never run with an empty or guessed input.
+            standaloneRefused(resolution.version, node.id, "staged_input")
+        }
 
         val datasourceName = node.source
         val gated = datasources.requireVisible(datasourceName, ctx)
@@ -292,6 +298,11 @@ class PipelinesExecuteNodeTool(
                     "script_node" -> {
                         "Node '$nodeId' is a SCRIPT node — it evaluates a script over staged data " +
                             "and runs no SQL of its own."
+                    }
+
+                    "staged_input" -> {
+                        "Node '$nodeId' is a DML insert whose input is a staged tempdb table, which exists only " +
+                            "inside a full execution — run pipelines_execute."
                     }
 
                     else -> {

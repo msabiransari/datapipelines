@@ -26,6 +26,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import io.modelcontextprotocol.server.McpStatelessSyncServer
 import io.modelcontextprotocol.server.transport.HttpServletStatelessServerTransport
 import org.springframework.beans.factory.ObjectProvider
@@ -181,6 +182,9 @@ class McpServerAutoConfiguration {
         // template family's inverse arms): every guard and listing here reads the same answer REST and the UI read, a
         // set-only or visualization-only pin included. Never constructed here.
         usage: co.datapipelines.application.templates.TemplateUsage,
+        // #1038 — the bounded structured-body decoder `web` publishes from `datapipelines.endpoints.body-max-*`, so
+        // `pipelines_execute`'s `request_body` obeys the configured limits; a provider, as a module slice has none.
+        bodyDecoder: ObjectProvider<StructuredBodyDecoder>,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
@@ -205,6 +209,7 @@ class McpServerAutoConfiguration {
                 runtime.sqlRunner,
                 runtime.tableLearning,
                 pipelines,
+                bodyDecoder.getIfAvailable { StructuredBodyDecoder() },
             ) +
             templateTools(
                 templateService,
@@ -312,6 +317,7 @@ class McpServerAutoConfiguration {
         sqlRunner: co.datapipelines.datasources.SqlRunner,
         tableLearning: TableLearningCheck,
         pipelines: PipelineRepository,
+        bodyDecoder: StructuredBodyDecoder,
     ): List<McpTool> =
         listOf(
             PipelineExecuteTool(
@@ -325,6 +331,7 @@ class McpServerAutoConfiguration {
                 executionRunner = executionRunner.getIfAvailable(),
                 launchAudit = auditSink,
                 renderFreshness = renderFreshness,
+                bodyDecoder = bodyDecoder,
             ),
             PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner, renderFreshness),
             PipelinesCreateTool(pipelineService, pipelines, tableLearning),

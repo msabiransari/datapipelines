@@ -75,6 +75,8 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
         put("error", errorJson?.let { McpTools.readTree(it) })
         put("result_row_count", resultRowCount)
         put("result_size_bytes", resultSizeBytes)
+        // #1035: SUCCESS whose commit is confirmed but whose caller result was never delivered.
+        put("result_unavailable", resultUnavailable)
     }
 
 /**
@@ -106,7 +108,7 @@ class ExecutionsListTool(
                   "type": "object",
                   "properties": {
                     "pipeline_id": {"type": "string", "format": "uuid"},
-                    "status": {"type": "string", "enum": ["RUNNING", "SUCCESS", "FAILED", "ABORTED"]},
+                    "status": {"type": "string", "enum": ["RUNNING", "SUCCESS", "FAILED", "ABORTED", "OUTCOME_UNKNOWN"]},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
