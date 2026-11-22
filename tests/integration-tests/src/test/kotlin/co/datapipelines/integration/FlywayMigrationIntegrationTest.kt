@@ -209,6 +209,9 @@ class FlywayMigrationIntegrationTest {
                 // #1035 (V66) — execution commit outcomes: OUTCOME_UNKNOWN status, the commit attempt/confirmation stamps,
                 // the family settlement flag and the result-unavailable flag (metadata-db §4.6).
                 "66|execution commit outcomes|true",
+                // #1039 (V67) — the durable Idempotency-Key reservation and the origin of every published mutation run
+                // (metadata-db §4.61).
+                "67|published mutation reservations|true",
                 // #1035 — the repeatable downgrade barrier of V66 (repeatables run in description order, so it precedes
                 // #1037's): a binary that does not resolve it refuses to start on V66 metadata (metadata-db §7.5;
                 // ExecutionCommitOutcomeDowngradeBarrierIntegrationTest).
@@ -1942,6 +1945,8 @@ class FlywayMigrationIntegrationTest {
                 // #786 (V58) — one row per API version, the exact pipeline pin (metadata-db §4.13a).
                 "published_endpoint_versions",
                 "published_endpoints",
+                // #1039 (V67) — one row per admitted published mutation: its reservation and origin (metadata-db §4.61).
+                "published_mutation_reservations",
                 // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
                 "template_implements",
                 "template_versions",
@@ -2129,6 +2134,10 @@ class FlywayMigrationIntegrationTest {
                 // #1037 (V65) — one meaning per URL PER METHOD; replaced V11's published_endpoints_path_pattern_key.
                 "published_endpoints.uq_published_endpoints_path_method",
                 "published_endpoints.published_endpoints_pkey",
+                // #1039 (V67) — the PK (the execution id), the live scope digest's UNIQUE and the credential cascade's lookup.
+                "published_mutation_reservations.idx_published_mutation_reservations_key",
+                "published_mutation_reservations.published_mutation_reservations_pkey",
+                "published_mutation_reservations.uq_published_mutation_reservations_scope",
                 // #9 (V38) — db-scheduler's own three indexes (its DDL, verbatim) and its PK.
                 "scheduled_tasks.execution_time_idx",
                 "scheduled_tasks.last_heartbeat_idx",
@@ -2387,6 +2396,10 @@ class FlywayMigrationIntegrationTest {
                 "chk_published_endpoints_current_version",
                 // #1037 (V65) — the closed method list on the route table (metadata-db §4.13).
                 "chk_published_endpoints_method",
+                // #1039 (V67) — a reservation is live (both digests) xor retired (neither), and its closed method list
+                // (metadata-db §4.61); `live` < `method`.
+                "chk_published_mutation_reservations_live",
+                "chk_published_mutation_reservations_method",
                 // #442b (V51) — the outbox's CHECKs (metadata-db §4.39–§4.40): a delivery's state list, its due/sending/
                 // accepted/failure pairings and counts; an event's checkbox list, its event/outcome pairing and sequence.
                 "chk_schedule_notification_deliveries_accepted",

@@ -141,14 +141,21 @@ data class EndpointsProperties(
      */
     val keyRequestBudget: KeyRequestBudget = KeyRequestBudget(),
     /**
-     * `mutations-enabled` (#1037, published-mutation-apis §7, configuration.md §3.22) — whether
-     * the serve path may run an otherwise-authorized non-GET route at all. Default OFF: a
-     * mutation route is refused `503 endpoint.mutations_disabled` BEFORE any durable business
-     * work, so an operator enables it per deployment when the writing side (#1039) is in place.
-     * It gates the run, never the identity checks: route resolution, grants and the 404/405
-     * discipline answer the same whether this is on or off.
+     * `mutations-enabled` (#1037/#1039, published-mutation-apis §7, configuration.md §3.22) —
+     * whether the serve path may ADMIT a fresh non-GET request. Default OFF: a fresh mutation is
+     * refused `503 endpoint.mutations_disabled` BEFORE any reservation or business work. It never
+     * withholds an identical retry of an already admitted request or its polling, and never the
+     * identity checks: route resolution, grants and the 404/405 discipline answer the same either way.
      */
     val mutationsEnabled: Boolean = false,
+    /**
+     * `mutation-start-window-seconds` (#1039, published-mutation-apis §4) — how long a published
+     * mutation's reservation may stand with no execution row before an identical retry takes its
+     * start claim over and starts the ORIGINAL pin under the original id (the admitting replica
+     * died between reserving and recording). The execution row's primary key fences the run, so
+     * this bounds only how long such a request waits, never whether it can run twice.
+     */
+    val mutationStartWindowSeconds: Long = 60,
     /**
      * `body-max-bytes` (#1038, published-mutation-apis §5, configuration.md §3.22) — the structured
      * request body's byte cap: the received entity's UTF-8 bytes on a published route (counted while
@@ -169,6 +176,7 @@ data class EndpointsProperties(
             "datapipelines.endpoints: timeout-min-seconds <= timeout-default-seconds <= timeout-max-seconds must hold"
         }
         require(timeoutMinSeconds > 0) { "datapipelines.endpoints.timeout-min-seconds must be > 0" }
+        require(mutationStartWindowSeconds > 0) { "datapipelines.endpoints.mutation-start-window-seconds must be > 0" }
     }
 
     /** The §5.5 clamp a publish applies to a requested timeout. */

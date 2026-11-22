@@ -45,21 +45,22 @@ import java.util.concurrent.TimeUnit
  *   collapses the rows into one.
  * - **the root-bound key's 405** — the ancestor walk must not authorise a mutation: with the GET
  *   walk feeding every method, POST on a root-bound key would serve, not refuse.
- * - **the 405 to 503 transition** — the ONLY wire-visible difference between "no grant" and
- *   "grant held, build gate" (this build never serves a mutation; the flag is on so the 503 is
- *   the build gate, proving the grant was seen).
+ * - **the 405 to 400 transition** — the wire-visible difference between "no grant" and "grant
+ *   held": since #1039 a granted mutation reaches admission, and a keyless call is refused there
+ *   with the `Idempotency-Key` entry (`400`) before anything is reserved or run — proving the
+ *   grant was seen without writing anything.
  * - **the redacted cross-workspace 409** — the refusal must name NOTHING of the other workspace;
  *   a leaked `conflicting_path` is exactly what the Named shape would print.
  * - **the recreated route's 405** — the grant follows the ENTITY id, not the pattern; a grant
  *   re-derived from the prefix would survive the delete and serve the recreated route.
- * - **pin 503 before mutations 503** — §4.4's order; a gate that ran before the pin check would
- *   answer `mutations_disabled` on a route with nothing servable pinned.
+ * - **the pin 503 for a fresh keyed call** — a route with nothing servable pinned answers
+ *   `pipeline_not_released` and reserves nothing; after restore the pin's own body rule answers.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    // On: the authorized-but-unservable branch of the build gate. The 405s do not depend on it;
-    // the 503s must be the "route and grant are valid" one, not the "operator withheld" one.
+    // On: a fresh keyed mutation reaches the pin (#1039). The 405s and the keyless 400s do not
+    // depend on it; the pin's 503 must not be the "operator withheld" one.
     properties = ["datapipelines.endpoints.mutations-enabled=true"],
 )
 @Suppress("LargeClass") // one route family, one seed; the cases share it rather than re-seeding
@@ -234,18 +235,18 @@ class PublishedMethodIdentityIntegrationTest {
             .statusCode(201)
             .body("data.path_prefix", equalTo("/mix/v1/notes"))
 
-        // The grant was SEEN: the 503 is the build gate ("route and grant are valid"), not the
-        // operator gate — and nothing was written either way.
+        // The grant was SEEN: the call reached admission, which refuses a keyless mutation (#1039)
+        // before anything is reserved or run — a 400, not the 405 an ungranted key gets.
         given()
             .port(port)
             .header(API_KEY_HEADER, rootKey)
             .`when`()
             .post("/api/mix/v1/notes")
             .then()
-            .statusCode(503)
-            .body("error.code", equalTo("endpoint.mutations_disabled"))
-            .body("error.details.method", equalTo("POST"))
-            .body("error.message", containsString("nothing was written"))
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.request.invalid"))
+            .body("error.details.errors[0].code", equalTo("endpoint.request.idempotency_key_invalid"))
+            .body("error.details.errors[0].reason", equalTo("missing"))
 
         // The sibling methods gained nothing — Allow grows by exactly POST.
         given()
@@ -504,7 +505,7 @@ class PublishedMethodIdentityIntegrationTest {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Lifecycle — the grant follows the entity; the pin refusal precedes the build gate
+    // Lifecycle — the grant follows the entity; the pin refusal of a fresh keyed call
     // -----------------------------------------------------------------------------------------
 
     @Test
@@ -561,7 +562,7 @@ class PublishedMethodIdentityIntegrationTest {
             .then()
             // No GET route at this path and no grant on the new entity: nothing is visible to
             // this key, and the refusal is the opaque 404. A grant derived from the PATTERN
-            // would instead answer the build gate's 503 — that difference is the case.
+            // would instead reach admission's keyless 400 — that difference is the case.
             .statusCode(404)
             .body("error.code", equalTo("endpoint.not_found"))
     }
@@ -625,16 +626,19 @@ class PublishedMethodIdentityIntegrationTest {
         given()
             .port(port)
             .header(API_KEY_HEADER, rootKey)
+            .header(IDEMPOTENCY_HEADER, "mi-order-1")
             .`when`()
             .post("/api/mix/v1/order")
             .then()
-            // The pin 503, NOT the mutations 503 — the grant is held, so a gate that ran first
-            // would answer mutations_disabled here.
+            // A fresh, keyed, granted call with nothing servable pinned: the pin 503, and nothing
+            // reserved (the same key is answered the same way again below, not replayed).
             .statusCode(503)
             .body("error.code", equalTo("endpoint.pipeline_not_released"))
+        jdbcCount("SELECT count(*) FROM published_mutation_reservations WHERE endpoint_id = '$order'") shouldBe 0
 
-        // Restore: the pin returns, and the answer returns to the build gate — release, discard
-        // and restore exercised on a POST route with the GET sibling untouched.
+        // Restore: the pin returns, and the pin's OWN rule answers — this route takes no body, so a
+        // body is refused 400 before anything is reserved or run. Release, discard and restore are
+        // exercised on a POST route with the GET sibling untouched.
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
@@ -645,11 +649,16 @@ class PublishedMethodIdentityIntegrationTest {
         given()
             .port(port)
             .header(API_KEY_HEADER, rootKey)
+            .header(IDEMPOTENCY_HEADER, "mi-order-1")
+            .contentType(ContentType.JSON)
+            .body("{}")
             .`when`()
             .post("/api/mix/v1/order")
             .then()
-            .statusCode(503)
-            .body("error.code", equalTo("endpoint.mutations_disabled"))
+            .statusCode(400)
+            .body("error.details.errors[0].code", equalTo("endpoint.request.body_invalid"))
+            .body("error.details.errors[0].reason", equalTo("not_accepted"))
+        jdbcCount("SELECT count(*) FROM published_mutation_reservations WHERE endpoint_id = '$order'") shouldBe 0
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
@@ -716,15 +725,17 @@ class PublishedMethodIdentityIntegrationTest {
             .post("/api/v1/endpoints/bindings")
             .then()
             .statusCode(201)
-        // Sanity while live: the exact grant answers the build gate, not 405.
+        // Sanity while live: the exact grant reaches admission (the keyless 400), not 405.
         given()
             .port(port)
             .header(API_KEY_HEADER, key)
             .`when`()
             .post("/api/mix/v1/notes")
             .then()
-            .statusCode(503)
-            .body("error.code", equalTo("endpoint.mutations_disabled"))
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.request.invalid"))
+            .body("error.details.errors[0].code", equalTo("endpoint.request.idempotency_key_invalid"))
+            .body("error.details.errors[0].reason", equalTo("missing"))
 
         given()
             .port(port)
@@ -1002,8 +1013,10 @@ class PublishedMethodIdentityIntegrationTest {
             .`when`()
             .post("/api/mix/v1/notes")
             .then()
-            .statusCode(503)
-            .body("error.code", equalTo("endpoint.mutations_disabled"))
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.request.invalid"))
+            .body("error.details.errors[0].code", equalTo("endpoint.request.idempotency_key_invalid"))
+            .body("error.details.errors[0].reason", equalTo("missing"))
     }
 
     @Test
@@ -1041,8 +1054,10 @@ class PublishedMethodIdentityIntegrationTest {
             .`when`()
             .put("/api/mix/v1/notes")
             .then()
-            .statusCode(503)
-            .body("error.code", equalTo("endpoint.mutations_disabled"))
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.request.invalid"))
+            .body("error.details.errors[0].code", equalTo("endpoint.request.idempotency_key_invalid"))
+            .body("error.details.errors[0].reason", equalTo("missing"))
         given()
             .port(port)
             .header(API_KEY_HEADER, writer)
@@ -1818,6 +1833,7 @@ class PublishedMethodIdentityIntegrationTest {
 
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
+        private const val IDEMPOTENCY_HEADER = "Idempotency-Key"
         private const val WORKSPACE_HEADER = "DP-Workspace"
         private const val OTHER_WORKSPACE_ID = "defa0000-0000-0000-0000-0000000000ee"
 

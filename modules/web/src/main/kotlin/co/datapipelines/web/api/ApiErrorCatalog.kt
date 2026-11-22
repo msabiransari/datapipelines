@@ -336,6 +336,8 @@ object ApiErrorCatalog {
             // client back-off written against `rate_limit.*` needs no change to honour it.
             PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE to HttpStatus.TOO_MANY_REQUESTS,
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to HttpStatus.CONFLICT,
+            // #1039 — the published mutation's durable reservation could not be read or written: nothing ran (503).
+            PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Workspace.HEADER_FORBIDDEN to HttpStatus.BAD_REQUEST,
             // §13.13 (055) — 409 like the pipeline.promotion family default, wired explicitly
             // so each code owns a row rather than being absorbed by the default (025 A2).
@@ -508,6 +510,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Endpoint.REQUEST_BODY_INCOMPATIBLE to HttpStatus.CONFLICT,
             PipelineErrorCodes.EndpointRequest.TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
             PipelineErrorCodes.EndpointRequest.UNSUPPORTED_MEDIA_TYPE to HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            // #1039 §13.14 — a dependency a published mutation needs before admission was down: a withhold, not the
+            // caller's fault (503). The Idempotency-Key entry takes the request family's 400.
+            PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE to HttpStatus.SERVICE_UNAVAILABLE,
             // #786 §13.14 — an unknown API version is a 404 under the version family's 409; an exact pin the caller's
             // posture does not admit, and an authoring-disabled deployment's API write, are state conflicts (409) under
             // the family's 400. `endpoint.pipeline_version.not_found` keeps the 400: the request names a version that

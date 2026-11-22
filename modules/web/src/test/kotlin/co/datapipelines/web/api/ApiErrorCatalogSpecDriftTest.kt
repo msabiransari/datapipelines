@@ -430,8 +430,13 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.14 gains `endpoint.request_body_incompatible` (409), `endpoint.request.body_invalid`
          * (400), `endpoint.request.too_large` (413) and `endpoint.request.unsupported_media_type`
          * (415), each an explicit catalog row landed in the SAME commit as its constant.
+         *
+         * 533 → 536 with #1039: §13 gains `idempotency.reservation_unavailable` (503, explicit
+         * catalog row), `endpoint.dependency_unavailable` (503, explicit catalog row) and
+         * `endpoint.request.idempotency_key_invalid` (400 through the `endpoint.request.` family
+         * default), landed in the SAME commit as their constants.
          */
-        const val SECTION_13_ROW_COUNT = 533
+        const val SECTION_13_ROW_COUNT = 536
 
         /**
          * §12's distinct validation codes.

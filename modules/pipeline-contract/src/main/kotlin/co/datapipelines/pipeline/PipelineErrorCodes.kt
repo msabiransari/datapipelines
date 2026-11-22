@@ -1251,6 +1251,13 @@ object PipelineErrorCodes {
          */
         const val RATE_LIMIT_UNAVAILABLE = "rate_limit.unavailable"
         const val IDEMPOTENCY_KEY_REUSED = "idempotency.key_reused_for_different_request"
+
+        /**
+         * #1039 (published-mutation-apis §4) — 503: a published mutation's durable reservation could not be read or
+         * recorded, or its state is indeterminate. Refused BEFORE any new business SQL: without a reservation the
+         * platform cannot promise a retry will not run the request twice, so it runs nothing.
+         */
+        const val IDEMPOTENCY_RESERVATION_UNAVAILABLE = "idempotency.reservation_unavailable"
     }
 
     /**
@@ -1565,6 +1572,13 @@ object PipelineErrorCodes {
          */
         const val MUTATIONS_DISABLED = "endpoint.mutations_disabled"
 
+        /**
+         * #1039 (published-mutation-apis §4) — 503: a dependency the published mutation needs before admission was
+         * unavailable and no more specific code applies (the metadata store while the route's pin is resolved, the run's
+         * fail-closed execution record). Nothing ran; the same key may be retried.
+         */
+        const val DEPENDENCY_UNAVAILABLE = "endpoint.dependency_unavailable"
+
         /** §5.3 — an `Accept` this surface cannot satisfy (v1 serves `application/json` only). */
         const val NOT_ACCEPTABLE = "endpoint.not_acceptable"
 
@@ -1716,6 +1730,13 @@ object PipelineErrorCodes {
          * body on a route that takes none. `parameter` is null; `reason` names which; no value is echoed.
          */
         const val BODY_INVALID = "endpoint.request.body_invalid"
+
+        /**
+         * #1039 — one entry of [INVALID]'s `details.errors[]`: a published POST, PUT or DELETE without an
+         * `Idempotency-Key`, or with one outside its grammar (1–128 of `A–Z a–z 0–9 . _ : -`). `parameter` is null;
+         * `reason` is `missing` or `malformed`; the supplied value is never echoed.
+         */
+        const val IDEMPOTENCY_KEY_INVALID = "endpoint.request.idempotency_key_invalid"
 
         /**
          * #1038 — the request body exceeds `body-max-bytes` (counted while reading, chunked included) or `body-max-depth`.
