@@ -97,10 +97,10 @@ const RULING = [
   [[0, 0.0000025, 0.000005, 0.0000075, 0.00001], null, ["0", `2.5e${MINUS}6`, `5e${MINUS}6`, `7.5e${MINUS}6`, `1e${MINUS}5`]],
   [[0, 9e-6], null, ["0", `9e${MINUS}6`]],
   [[0, 9e14, 999e12], null, ["0", "900T", "999T"]],
-  // The middle, unchanged.
+  // The middle, unchanged but for 1.25K (the short form with two digits, lane 1089).
   [[0, 0.0001, 0.0002], null, ["0", "0.0001", "0.0002"]],
   [[0, 250000, 500000, 750000, 1000000], null, ["0", "250K", "500K", "750K", "1M"]],
-  [[0, 1250, 2500], null, ["0", "1,250", "2,500"]],
+  [[0, 1250, 2500], null, ["0", "1.25K", "2.5K"]],
   [[0, 0.25, 0.5], "percent", ["0%", "25%", "50%"]],
 ];
 
@@ -215,12 +215,13 @@ test("A.2 every 1, 2 and 5 times a power of ten a double holds, alone, four form
 // ---------------------------------------------------------------- A.3 every decade, and the ends of the number range
 
 /**
- * The longest label per format, as measured (a change in either direction is read). Both are forms this lane leaves as
- * they were (D7): a tick that needs two digits after the point in the short form is written in full
- * (−1,250,000,000,000, 18 characters: lane 1089's), and a percent has no K M B T, so below 10^15% it is written in full
- * (−100,000,000,000,000%, 21). Before this lane the same sweep's longest label had hundreds of characters.
+ * The longest label per format, as measured (a change in either direction is read). A tick that needs two digits after
+ * the point in the short form was written in full (−1,250,000,000,000, 18 characters) until lane 1089 gave the short
+ * form two digits (−1.25T); the longest is now an e form of the smallest decades (−1.25e−319, 10). A percent has no
+ * K M B T, so below 10^15% it is written in full (−100,000,000,000,000%, 21). Before lane 1059 the same sweep's
+ * longest label had hundreds of characters.
  */
-const LONGEST_NICE = { null: 18, percent: 21, compact: 18, integer: 18 };
+const LONGEST_NICE = { null: 10, percent: 21, compact: 10, integer: 10 };
 
 /** Nice ticks 0, s, 2s, … built by this test: each the double its decimal text reads as (never the engine's scales). */
 function ladder(lead, d, count, sign) {
@@ -522,4 +523,150 @@ test("G6 the distance of ticks more than the largest double apart taken as it co
 test("G0 every plant's anchor occurs once and the engine without a plant is the engine under test (the green direction is each check's own test)", () => {
   for (const edit of [START_POINTS_OFF, HYPHEN, LONE_HELD_TO_ONE, PER_TICK, FAR_AS_IT_COMES]) textOf(edit);
   assert.deepEqual(rulingFailures(textOf(combine())), []);
+});
+
+// ================================================================ lane 1089: the short form with two digits (1.25B)
+// Lane 1089 (#1089; record §4.7 and its note of 2026-11-22 "Numbers outside an axis, the short form with two digits, a
+// stack beyond the number range"): the short form (K, M, B, T) of a tick may carry two digits after the point, tried
+// before plain grouped digits at each count of digits; a percent axis and the e form do not change. The base's rule is
+// a COPY of the base's loop planted into an engine (BASE_RULE), never a parameter of the code under test.
+
+/** [values, format, the labels the ruling writes]: the owner's row, every unit, both signs, and the rows that keep their bytes. */
+const SHORT_ROWS = [
+  [[0, 250000000, 500000000, 750000000, 1000000000, 1250000000], null, ["0", "250M", "500M", "750M", "1B", "1.25B"]],
+  [[0, 1250000, 2500000, 3750000, 5000000], null, ["0", "1.25M", "2.5M", "3.75M", "5M"]],
+  [[-1250000000, -1000000000, 0], null, [MINUS + "1.25B", MINUS + "1B", "0"]],
+  [[0, 1250, 2500], null, ["0", "1.25K", "2.5K"]],
+  [[-1.25e12, 0], null, [MINUS + "1.25T", "0"]],
+  // Unchanged: one digit suffices; plain digits where the short form would lose a digit; never three digits (D1).
+  [[0, 1500, 3000], null, ["0", "1.5K", "3K"]],
+  [[0, 1250.5, 2501], null, ["0", "1,250.5", "2,501"]],
+  [[975000000, 1000000000, 1025000000], null, ["975,000,000", "1,000,000,000", "1,025,000,000"]],
+  [[1125000000], null, ["1,125,000,000"]],
+  [[0, 0.125, 0.25], "percent", ["0%", "12.5%", "25%"]],
+  [[0, 5e17, 1e18], null, ["0", "5e17", "1e18"]],
+  [[-2790.96, 2311.28], null, [MINUS + "2,790.96", "2,311.28"]],
+  // D2's row by the two ends bar/corner-production-balance_by_partner--real_window_balance itself hands the tick writer
+  // (12 of its 183 frames): plain digits at two digits, before any third digit. The rounded pair above is no gate.
+  [[-2790.9621305348655, 2311.2831141308657], "decimal(2)", [MINUS + "2,790.96", "2,311.28"]],
+];
+
+function shortFailures(TX) {
+  const out = [];
+  for (const [values, format, want] of SHORT_ROWS) {
+    let got;
+    try {
+      got = [...TX.ticks(values, format)];
+    } catch (e) {
+      got = ["THROWS " + e.message];
+    }
+    if (JSON.stringify(got) !== JSON.stringify(want)) out.push(`${values.join(", ")} (${format}): ${got.join(" | ")}, the ruling writes ${want.join(" | ")}`);
+  }
+  return out;
+}
+
+test("1089 A.1 the ruling's texts: 0 | 250M | … | 1B | 1.25B, every unit with two digits, never three, D2's row by its inputs", () => {
+  assert.deepEqual(shortFailures(T), []);
+});
+
+/** The base's loop (before lane 1089), byte for byte, planted over the lane's loop: the oracle of A.2's "never longer". */
+const LOOP_FROM = "    var last = Math.max(most, SHORT_DIGITS);\n";
+const LOOP_TO = "    throw noDigits(values);\n  }\n";
+const BASE_LOOP = `    var last = Math.max(most, 1);
+    for (var digits = 0; digits <= last + 1; digits++) {
+      var plainOnly = digits > last, d = plainOnly ? most : digits;
+      var out = [];
+      var exact = true;
+      for (var k = 0; k < values.length; k++) {
+        var v = values[k], a = v < 0 ? -v : v, label;
+        if (pct) label = percent(v, d);
+        else label = plainOnly || a < 1000 || d > 1 ? fixed(v, 0, d) : compact(v, d);
+        out.push(label);
+        var back = readLabel(label) - v;
+        if (!(back <= step * 1e-6 && back >= -step * 1e-6)) exact = false;
+      }
+      if (exact) return out;
+    }
+`;
+const BASE_RULE = (s) => {
+  const src = s[FILE], from = src.indexOf(LOOP_FROM);
+  assert.equal(src.split(LOOP_FROM).length, 2, "the base plant's start anchor occurs once");
+  const to = src.indexOf(LOOP_TO, from);
+  assert.ok(from >= 0 && to > from, "the base plant's end anchor follows its start");
+  s[FILE] = src.slice(0, from) + BASE_LOOP + src.slice(to);
+};
+const BASE_T = engine(BASE_RULE).text;
+
+/** Nice ticks i × lead × 10^d built by the test from decimal text (lead 1.25 is 125e(d−2)): each the double its text reads as. */
+function shortLadder(lead, d, count, sign) {
+  const digits = String(lead).replace(".", ""), shift = digits.length - 1, out = [];
+  for (let i = 0; i <= count; i++) out.push(Number(sign * i * Number(digits) + "e" + (d - shift)) + 0);
+  return sign < 0 ? out.reverse() : out;
+}
+
+/** A.2's sweep: each label exactly its tick (this file's reader), never longer in total than the base, percent byte for byte. */
+function shortSweep(TX, BX) {
+  const s = { axes: 0, changed: 0, percentAxes: 0, failures: [] };
+  const fail = (x) => s.failures.length < 60 && s.failures.push(x);
+  // Every decade the short form covers (10^3 to below 10^15) and, beyond the brief's floor, the decades below it down
+  // to 10^-6, where a percent axis needs three and more digits (G2's throw) and plain digits meet the short form.
+  for (let d = -6; d <= 14; d++) {
+    for (const lead of [1, 1.25, 1.5, 2, 2.5, 5, 7.5]) {
+      for (const count of [2, 4, 5, 10]) {
+        for (const sign of [1, -1]) {
+          const ticks = shortLadder(lead, d, count, sign);
+          for (const f of [null, "integer", "compact", "percent"]) {
+            let got, base;
+            try {
+              got = [...TX.ticks(ticks, f)];
+            } catch (e) {
+              fail(`${ticks.join(", ")} (${f}): THROWS ${e.message}`);
+              continue;
+            }
+            base = [...BX.ticks(ticks, f)];
+            s.axes++;
+            got.forEach((l, i) => {
+              const x = exact(l);
+              if (x === null || minus(x, exact(ticks[i])).n !== 0n) fail(`${l} is not ${ticks[i]} (${f}): ${got.join(" | ")}`);
+            });
+            if (f === "percent") {
+              s.percentAxes++;
+              if (got.join("|") !== base.join("|")) fail(`a percent axis changed (${ticks.join(", ")}): ${got.join(" | ")}, the base writes ${base.join(" | ")}`);
+            } else if (got.join("|") !== base.join("|")) {
+              s.changed++;
+              if (got.join("").length > base.join("").length) fail(`longer than the base (${f}): ${got.join(" | ")}, the base writes ${base.join(" | ")}`);
+            }
+          }
+        }
+      }
+    }
+  }
+  return s;
+}
+
+test("1089 A.2 nice ticks of every decade, four formats: each label IS its tick, never longer than the base, percent unchanged (floors 2,000 axes, 50 changed)", () => {
+  assert.deepEqual([...BASE_T.ticks([0, 1250, 2500])], ["0", "1,250", "2,500"], "the base's copy is the base");
+  const s = shortSweep(T, BASE_T);
+  console.log("1089 A.2 axes", s.axes, "changed", s.changed, "percent axes", s.percentAxes, "failures", s.failures.length);
+  assert.deepEqual(s.failures.slice(0, 10), [], s.failures.length + " failures");
+  assert.ok(s.axes >= 2000 && s.changed >= 50, `floors: ${s.axes} axes, ${s.changed} changed`);
+});
+
+// ---------------------------------------------------------------- lane 1089's gates
+
+/** G1 (D2): plain digits only from three digits on. G2 (D3): the short form's skip without its percent condition. */
+const PLAIN_FROM_THREE = plant("if (!shortForm && (pct || (!plainOnly && d < 2))) continue;", "if (!shortForm && (pct || (!plainOnly && d < 3))) continue;");
+const SHORT_FOR_PERCENT = plant("if (shortForm && !pct && (plainOnly || d > SHORT_DIGITS)) continue;", "if (shortForm && (plainOnly || d > SHORT_DIGITS)) continue;");
+
+test("1089 G1 plain digits tried only from three digits on: A.1 goes red on D2's row of the unrounded ends, and only there", () => {
+  const a1 = shortFailures(textOf(PLAIN_FROM_THREE));
+  console.log("1089 G1 planted: A.1", a1.length, "rows red:", a1.join(" / "));
+  assert.equal(a1.length, 1, JSON.stringify(a1));
+  red(a1, /^-2790\.9621305348655, 2311\.2831141308657 \(decimal\(2\)\): −2,790\.962 \| 2,311\.283, the ruling writes −2,790\.96 \| 2,311\.28$/, "A.1 D2's row");
+});
+
+test("1089 G2 the short form's skip without its percent condition: A.2 goes red (a small percent axis throws)", () => {
+  const a2 = shortSweep(textOf(SHORT_FOR_PERCENT), BASE_T).failures;
+  console.log("1089 G2 planted: A.2", a2.length, "failures, first:", a2[0]);
+  red(a2, /\(percent\): THROWS ticks: no fraction digits write every tick as its own value: /, "A.2 a small percent axis");
 });

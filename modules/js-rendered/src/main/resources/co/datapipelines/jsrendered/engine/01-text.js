@@ -245,13 +245,17 @@
     return x.d === "0" ? 0 : Math.max(0, x.d.length - (x.p + shift));
   }
 
+  /** The most fraction digits the short form (K, M, B, T) of a tick carries: 1.25B (owner 2026-11-22, #1089). */
+  var SHORT_DIGITS = 2;
+
   /**
    * Axis tick labels with the fewest fraction digits at which every label, read back, IS its tick (lane 972's rule,
    * within a millionth of the smallest tick gap, so each label keeps its tick's value and no two ticks share a text).
    * The search starts at 0 digits and ends at the digits that write every tick exactly, where the read-back is exact
    * by construction; it never returns labels that lost a value (#985 R2: a fixed limit of 3 digits wrote 0, 0.0001,
    * 0.0002 as "0", "0", "0"). A percent axis writes percentages; any other axis writes plain digits below 1,000 and the
-   * compact form at or above it while one fraction digit suffices (§4.7), plain grouped digits otherwise.
+   * compact form at or above it while at most SHORT_DIGITS fraction digits suffice (§4.7; 1.25B, #1089), plain grouped
+   * digits otherwise.
    */
   function ticks(values, format) {
     var pct = format === "percent";
@@ -289,22 +293,29 @@
       }
       throw noDigits(values);
     }
-    // Each count of digits up to `most` (at least 1, the compact form's one fraction digit: 2.5K), then plain digits
-    // at `most` (a compact attempt above 1,000 can miss where plain grouped digits are exact: 1,250 is not 1.2K).
-    var last = Math.max(most, 1);
+    // Each count of digits up to `most` (at least SHORT_DIGITS, the short form's digits: 1.25K), then plain digits at
+    // `most` (a short attempt above 1,000 can miss where plain grouped digits are exact: 1,125 is not 1.13K).
+    var last = Math.max(most, SHORT_DIGITS);
     for (var digits = 0; digits <= last + 1; digits++) {
       var plainOnly = digits > last, d = plainOnly ? most : digits;
-      var out = [];
-      var exact = true;
-      for (var k = 0; k < values.length; k++) {
-        var v = values[k], a = v < 0 ? -v : v, label;
-        if (pct) label = percent(v, d);
-        else label = plainOnly || a < 1000 || d > 1 ? fixed(v, 0, d) : compact(v, d);
-        out.push(label);
-        var back = readLabel(label) - v;
-        if (!(back <= step * 1e-6 && back >= -step * 1e-6)) exact = false;
+      // At each count of digits: the short form first, while it has at most SHORT_DIGITS digits (1.25B, #1089), then
+      // plain digits from two digits on, as before (2,311.28 stays where 2.31K is not its tick). A percent has one form.
+      for (var form = 0; form < 2; form++) {
+        var shortForm = form === 0;
+        if (shortForm && !pct && (plainOnly || d > SHORT_DIGITS)) continue;
+        if (!shortForm && (pct || (!plainOnly && d < 2))) continue;
+        var out = [];
+        var exact = true;
+        for (var k = 0; k < values.length; k++) {
+          var v = values[k], a = v < 0 ? -v : v, label;
+          if (pct) label = percent(v, d);
+          else label = shortForm && a >= 1000 ? compact(v, d) : fixed(v, 0, d);
+          out.push(label);
+          var back = readLabel(label) - v;
+          if (!(back <= step * 1e-6 && back >= -step * 1e-6)) exact = false;
+        }
+        if (exact) return out;
       }
-      if (exact) return out;
     }
     throw noDigits(values);
   }
