@@ -602,12 +602,12 @@ internal object CssText {
     }
 
     /**
-     * [text] with [transform] applied to each run of it outside strings and `url(…)` tokens; a string and a `url(…)`
+     * [text] with [convert] applied to each run of it outside strings and `url(…)` tokens; a string and a `url(…)`
      * token (its address quoted or not; an unquoted one ends at its `)`) are copied byte for byte.
      */
     fun mapOutsideText(
         text: String,
-        transform: (String) -> String,
+        convert: (String) -> String,
     ): String {
         val out = StringBuilder(text.length)
         var start = 0
@@ -624,12 +624,12 @@ internal object CssText {
                 i += 1
             } else {
                 val stop = end.coerceAtMost(text.length)
-                out.append(transform(text.substring(start, i))).append(text, i, stop)
+                out.append(convert(text.substring(start, i))).append(text, i, stop)
                 start = stop
                 i = stop
             }
         }
-        return out.append(transform(text.substring(start))).toString()
+        return out.append(convert(text.substring(start))).toString()
     }
 
     /** The index just after the `)` that closes a `url(` whose content starts at [from] (a string or an escape skipped). */
