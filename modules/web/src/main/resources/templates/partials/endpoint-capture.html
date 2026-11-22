@@ -44,26 +44,28 @@
   <th:block th:if="${not #lists.isEmpty(cap.recent)}">
     <h3 class="ds-title u-mb-xs">Recent captures</h3>
     <div class="dt-frame dt-flush">
-      <table class="ds-table" data-api-capture-history>
-        <thead>
-        <tr>
-          <th>Started</th>
-          <th>Ended</th>
-          <th>Captured runs</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="w : ${cap.recent}" th:attr="data-capture-id=${w.session.id}">
-          <td class="u-mono" th:text="${w.session.startedAt}">2026-11-22T10:00:00Z</td>
-          <td class="u-mono" th:text="${w.session.activeAt(cap.now)} ? 'active' : ${w.session.endedAt}">—</td>
-          <td>
-            <span th:if="${#lists.isEmpty(w.executions)}" class="u-secondary">none</span>
-            <a th:each="e : ${w.executions}" class="app-chip app-chip-mono" data-api-capture-run
-               th:href="@{'/executions/{id}/capture'(id=${e})}" th:text="${e}">run</a>
-          </td>
-        </tr>
-        </tbody>
-      </table>
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-api-capture-history>
+          <thead>
+          <tr>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Captured runs</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="w : ${cap.recent}" th:attr="data-capture-id=${w.session.id}">
+            <td class="u-mono" th:text="${w.session.startedAt}">2026-11-22T10:00:00Z</td>
+            <td class="u-mono" th:text="${w.session.activeAt(cap.now)} ? 'active' : ${w.session.endedAt}">—</td>
+            <td>
+              <span th:if="${#lists.isEmpty(w.executions)}" class="u-secondary">none</span>
+              <a th:each="e : ${w.executions}" class="app-chip app-chip-mono" data-api-capture-run
+                 th:href="@{'/executions/{id}/capture'(id=${e})}" th:text="${e}">run</a>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </th:block>
 </div>

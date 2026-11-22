@@ -46,26 +46,28 @@
       <h2 class="ds-title">Declared outputs</h2>
     </div>
     <div class="dt-frame dt-flush">
-      <table class="ds-table" data-capture-values>
-        <thead>
-        <tr>
-          <th>Node</th>
-          <th>Output</th>
-          <th>Value</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="v : ${detail.values}" th:attr="data-capture-node=${v.nodeId}">
-          <td class="u-mono" th:text="${v.nodeId}">node</td>
-          <td class="u-mono" th:text="${v.outputKey}">key</td>
-          <td>
-            <pre class="u-mono u-m0" th:if="${v.valueJson != null}" data-capture-value th:text="${v.valueJson}">{}</pre>
-            <span class="app-chip app-chip-warn" th:if="${v.valueJson == null}" data-capture-omitted
-                  th:text="'omitted: ' + ${v.omittedReason}">omitted</span>
-          </td>
-        </tr>
-        </tbody>
-      </table>
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-capture-values>
+          <thead>
+          <tr>
+            <th>Node</th>
+            <th>Output</th>
+            <th>Value</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="v : ${detail.values}" th:attr="data-capture-node=${v.nodeId}">
+            <td class="u-mono" th:text="${v.nodeId}">node</td>
+            <td class="u-mono" th:text="${v.outputKey}">key</td>
+            <td>
+              <pre class="u-mono u-m0" th:if="${v.valueJson != null}" data-capture-value th:text="${v.valueJson}">{}</pre>
+              <span class="app-chip app-chip-warn" th:if="${v.valueJson == null}" data-capture-omitted
+                    th:text="'omitted: ' + ${v.omittedReason}">omitted</span>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </th:block>
