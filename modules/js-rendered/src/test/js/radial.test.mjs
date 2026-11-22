@@ -46,6 +46,14 @@ function plant(file, from, to) {
 
 const R = eng();
 const CLEAN = engineWith([TYPE]);
+/**
+ * #1059 (D9): an axis writes 5e99 where it wrote 134 digits, so no fixture reaches condition (a) any more. The rule
+ * stays the frame's and is read on a copy whose e-form start points are planted out of reach, built for the engine
+ * under test (LONG) and for this test's own oracle (LONG_ORACLE), where extent-1e100 writes its 134 characters again.
+ */
+const LONG_TEXTS = plant("01-text.js", "var SCI_FROM = 15, SCI_BELOW = -5;", "var SCI_FROM = 400, SCI_BELOW = -400;");
+const LONG = eng(LONG_TEXTS);
+const LONG_ORACLE = engine(LONG_TEXTS);
 const FX = typeFixtures(TYPE);
 const fx = (name) => FX.find((f) => f.name === name).fixture;
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -83,8 +91,8 @@ function parts(prims) {
 }
 
 /** The ring values the test expects: the value axis's ticks above 0 for twice the radius, and hi where it is no tick. */
-function ringValues(f, hand) {
-  const rd = reading(f), ax = PRISTINE.axes.valueAxis(hand.level, [0, rd.hi], rd.domain, 2 * hand.radius, rd.format, 0);
+function ringValues(f, hand, oracle = PRISTINE) {
+  const rd = reading(f), ax = oracle.axes.valueAxis(hand.level, [0, rd.hi], rd.domain, 2 * hand.radius, rd.format, 0);
   const vals = ax.ticks.filter((t) => t > 0 && t < ax.hi).map((t) => ({ v: t, text: ax.texts[ax.ticks.indexOf(t)] }));
   vals.push({ v: ax.hi, text: null });
   return { ax, vals };
@@ -93,9 +101,9 @@ function ringValues(f, hand) {
 // ---------------------------------------------------------------- A.1 the frame, the scale, the rings and the spokes
 
 /** A.1's failures for one picture at full or compact: [] when every ring, spoke and order rule holds. */
-function ringFailures(f, d) {
+function ringFailures(f, d, oracle) {
   const out = [], { r, hand, scale } = d, n = hand.angles.length, c = hand.centre, P = parts(r.primitives);
-  const { ax, vals } = ringValues(f, hand);
+  const { ax, vals } = ringValues(f, hand, oracle);
   if (JSON.stringify(hand.r.ticks) !== JSON.stringify(ax.ticks)) out.push("ticks " + JSON.stringify(hand.r.ticks) + " are not the value axis's " + JSON.stringify(ax.ticks));
   if (hand.r.lo !== 0 || hand.r.hi !== ax.hi) out.push("r.lo/hi " + hand.r.lo + "/" + hand.r.hi);
   if (scale(0) !== 0) out.push("r.scale(0) is " + scale(0) + ", not 0");
@@ -147,9 +155,9 @@ const boxOf = (t) => {
  * the test's own midpoint of the ring's first edge, and the first of the four conditions it fails (a: inside the plot,
  * b: no drawn name, c: no plate placed, d: not over the centre) or null when the number must be drawn.
  */
-function expectedNumbers(f, d) {
+function expectedNumbers(f, d, oracle) {
   const { r, hand, scale } = d, n = hand.angles.length, c = hand.centre, plot = hand.plot;
-  const names = parts(r.primitives).names.map(boxOf), vals = ringValues(f, hand).vals, plates = [], out = [];
+  const names = parts(r.primitives).names.map(boxOf), vals = ringValues(f, hand, oracle).vals, plates = [], out = [];
   for (let i = vals.length - 2; i >= 0; i--) {
     const D = scale(vals[i].v), a = at(c.x, c.y, D, 0), b = at(c.x, c.y, D, 360 / n);
     const exact = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, mid = { x: round2(exact.x), y: round2(exact.y) }, w = width(vals[i].text, SMALL), bh = boxH(SMALL);
@@ -166,8 +174,8 @@ function expectedNumbers(f, d) {
 }
 
 /** A.2's failures for one picture at full or compact: the drawn numbers are exactly the test's, each on its plate. */
-function numberFailures(f, d) {
-  const out = [], P = parts(d.r.primitives), want = expectedNumbers(f, d).filter((e) => e.why === null);
+function numberFailures(f, d, oracle) {
+  const out = [], P = parts(d.r.primitives), want = expectedNumbers(f, d, oracle).filter((e) => e.why === null);
   const got = P.numbers.map((t) => t.text);
   if (JSON.stringify(got) !== JSON.stringify(want.map((e) => e.text))) out.push("numbers " + JSON.stringify(got) + ", the fit rule wants " + JSON.stringify(want.map((e) => e.text)));
   if (P.plates.length !== P.numbers.length) out.push(P.plates.length + " plates for " + P.numbers.length + " numbers");
@@ -282,7 +290,19 @@ test("A.6: the sweep is not vacuous (floors, after it), both outcomes of the rul
   console.log("radial rule of no room at full and compact: names " + seen.room.names + ", none " + seen.room.none);
   console.log("radial ring numbers drawn at 1600 x 480: " + JSON.stringify(seen.largest));
   for (const k of ["a", "b", "c", "d"]) console.log("radial number absent by condition " + k + ": " + (seen.reasons[k] || "no fixture and frame reached it"));
-  for (const k of ["a", "b", "c", "d"]) assert.ok(seen.reasons[k] !== undefined, "condition " + k + " is the reason in some fixture and frame");
+  for (const k of ["c", "d"]) assert.ok(seen.reasons[k] !== undefined, "condition " + k + " is the reason in some fixture and frame");
+  // Conditions (a) and (b) were reached only by extent-1e100's ring number of 118 characters; with the e form (#1059)
+  // its 5e99 fits, so both are read on the copy with the start points out of reach (D9), over the sweep's frames.
+  const copy = {};
+  for (const w of WIDTHS) {
+    for (const h of HEIGHTS) {
+      const d = draw(LONG, fx("extent-1e100"), w, h);
+      if (d.r.state !== "rendered" || d.r.level === "minimal") continue;
+      for (const e of expectedNumbers(fx("extent-1e100"), d, LONG_ORACLE)) if (e.why !== null && copy[e.why] === undefined) copy[e.why] = `extent-1e100 at ${w}x${h}, start points out of reach: ${e.text.length} characters`;
+    }
+  }
+  for (const k of ["a", "b"]) console.log("radial number absent by condition " + k + " on the copy: " + copy[k]);
+  for (const k of ["a", "b"]) assert.ok(copy[k] !== undefined, "condition " + k + " is the reason in some frame of extent-1e100 with the start points out of reach");
 });
 
 // ---------------------------------------------------------------- A.1 to A.3 at named frames
@@ -297,16 +317,30 @@ test("A.1: the domain fixture has a ring at hi = 115 that is no tick, in --chart
   assert.equal(P.rings.length, d.hand.r.ticks.filter((t) => t > 0).length + 1);
 });
 
-test("A.2: the extent 0 to 1e100 at 360 x 240: no number and no plate, the ring is there (D5's example)", () => {
+test("A.2: the extent 0 to 1e100 at 360 x 240: the ring number 5e99 is drawn on its plate (#1059: the e form fits)", () => {
   const d = draw(R, fx("extent-1e100"), 360, 240), P = parts(d.r.primitives);
+  assert.deepEqual(d.hand.r.ticks, [0, 5e99, 1e100]);
+  const e = expectedNumbers(fx("extent-1e100"), d);
+  assert.deepEqual(e.map((x) => [x.text, x.why]), [["5e99", null]], "the test's own rule draws 5e99");
+  assert.deepEqual([...P.numbers].map((t) => t.text), ["5e99"]);
+  assert.equal(P.plates.length, 1);
+  assert.equal(P.rings.length, 2);
+  assert.deepEqual(numberFailures(fx("extent-1e100"), d), []);
+});
+
+test("A.2: with the start points out of reach (D9's copy), the extent 0 to 1e100 at 360 x 240: no number and no plate, the ring is there (D5's example)", () => {
+  const d = draw(LONG, fx("extent-1e100"), 360, 240), P = parts(d.r.primitives);
   assert.deepEqual(d.hand.r.ticks, [0, 5e99, 1e100]);
   assert.equal(P.numbers.length, 0);
   assert.equal(P.plates.length, 0);
   assert.equal(P.rings.length, 2);
-  const e = expectedNumbers(fx("extent-1e100"), d);
+  const e = expectedNumbers(fx("extent-1e100"), d, LONG_ORACLE);
   assert.equal(e.length, 1);
   assert.equal(e[0].why, "a");
-  console.log("radial 1e100 at 360 x 240: the ring number's text is " + width(e[0].text, SMALL).toFixed(1) + " px wide, the plot " + d.hand.plot.w + " px");
+  // The fixture's format is compact: 5,000,…,000T, the base's text, wider than the plot.
+  assert.equal(e[0].text.length, 118);
+  assert.ok(width(e[0].text, SMALL) > d.hand.plot.w, "wider than the plot");
+  console.log("radial 1e100 at 360 x 240 on the copy: the ring number's text is " + width(e[0].text, SMALL).toFixed(1) + " px wide, the plot " + d.hand.plot.w + " px");
 });
 
 test("A.3: the name with < and & is escaped in the string writer's output, with as many elements as its twin without them", () => {
@@ -383,15 +417,15 @@ test("A.5: a wrong layout part throws naming its member: 2 spokes, 13 spokes, an
 
 // ---------------------------------------------------------------- the gates G1 to G6 (falsified at birth)
 
-/** Every failure of A.1 to A.3, I1 to I5 for a fixture over the frames given, in an engine. */
-function failures(E, name, frames) {
+/** Every failure of A.1 to A.3, I1 to I5 for a fixture over the frames given, in an engine (the oracle: its text module's twin). */
+function failures(E, name, frames, oracle) {
   const out = [], f = fx(name);
   for (const [w, h] of frames) {
     const d = draw(E, f, w, h);
     for (const x of violations(d.r.primitives, w, h).violations) out.push(`${x.inv} ${w}x${h}: ${x.what}`);
     if (d.r.state !== "rendered" || d.r.level === "minimal") continue;
-    for (const x of ringFailures(f, d)) out.push(`A.1 ${w}x${h}: ${x}`);
-    for (const x of numberFailures(f, d)) out.push(`A.2 ${w}x${h}: ${x}`);
+    for (const x of ringFailures(f, d, oracle)) out.push(`A.1 ${w}x${h}: ${x}`);
+    for (const x of numberFailures(f, d, oracle)) out.push(`A.2 ${w}x${h}: ${x}`);
     for (const x of nameFailures(f, d)) out.push(`A.3 ${w}x${h}: ${x}`);
   }
   return out;
@@ -401,6 +435,7 @@ const red = (list, re, what) => assert.ok(list.some((x) => re.test(x)), what + "
 
 test("G0: every gate's fixtures are green without a plant (the other direction of each gate below)", () => {
   for (const name of ["five-spokes-two-series", "extent-1e100", "thousands-two-series", "least-forty", "twelve-spokes-six-series-long-names"]) assert.deepEqual(failures(R, name, FRAMES), [], name);
+  assert.deepEqual(failures(LONG, "extent-1e100", FRAMES, LONG_ORACLE), [], "extent-1e100 on the copy with the start points out of reach (G4's condition a)");
 });
 
 test("G1: the angles counted the other way turn the clockwise test red; the first spoke at 90 degrees the straight-above test", () => {
@@ -432,10 +467,15 @@ test("G4: the plate left out, the plate after its number, condition (a) removed,
   red(failures(none, "thousands-two-series", [[960, 540]]), /has no plate directly before it/, "plate left out");
   const after = eng(plant(FILE, PLATE + NUMBER, NUMBER + PLATE));
   red(failures(after, "thousands-two-series", [[960, 540]]), /has no plate directly before it/, "plate after its number");
-  const noA = eng(plant(FILE, "      if (plate.x0 < plot.x || plate.y0 < plot.y || plate.x1 > plot.x + plot.w || plate.y1 > plot.y + plot.h) continue;\n", ""));
+  const NO_A = plant(FILE, "      if (plate.x0 < plot.x || plate.y0 < plot.y || plate.x1 > plot.x + plot.w || plate.y1 > plot.y + plot.h) continue;\n", "");
+  // Read on the copy with the e form's start points out of reach (#1059, D9), where extent-1e100 writes 134 digits.
   // At 360 x 240 a name and the centre also refuse the number (conditions b and d), so the plant is read at 360 x 480,
   // where condition (a) alone keeps the 645 px text out.
-  const a = failures(noA, "extent-1e100", [[360, 480]]);
+  const noA = eng((s) => {
+    LONG_TEXTS(s);
+    NO_A(s);
+  });
+  const a = failures(noA, "extent-1e100", [[360, 480]], LONG_ORACLE);
   red(a, /^A\.2 .*the fit rule wants \[\]/, "condition (a): a number the test's rule forbids");
   red(a, /^I2 .*leaves the frame/, "condition (a): a text outside the frame");
   const noC = eng(plant(FILE, "      for (var q = 0; q < plates.length && !meets; q++) meets = A.overlaps(plate, plates[q]);\n", ""));

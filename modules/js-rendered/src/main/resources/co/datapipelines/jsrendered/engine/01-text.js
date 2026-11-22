@@ -188,10 +188,35 @@
         }
       }
     }
-    if (!/^-?[0-9]+(\.[0-9]+)?$/.test(t)) return NaN;
+    var m = /^(-?[0-9]+(?:\.[0-9]+)?)(?:e(-?[0-9]+))?$/.exec(t);
+    if (!m || (m[2] !== undefined && unit > 0)) return NaN;
     // The scale goes into the decimal text's own exponent, which every runtime parses correctly rounded: a label that
     // carries all of a value's digits reads back as that very value (n / 100 could miss it by one unit in the last place).
-    return Number(t + (pct ? "e-2" : unit > 0 ? "e" + 3 * unit : ""));
+    var ex = (m[2] === undefined ? 0 : Number(m[2])) + (pct ? -2 : 3 * unit);
+    return Number(m[1] + (ex !== 0 ? "e" + ex : ""));
+  }
+
+  /** An axis writes its ticks in the e form when one of them is 10^15 or more, or below 10^-5 and not zero (owner 2026-11-21, #1059). */
+  var SCI_FROM = 15, SCI_BELOW = -5;
+
+  /**
+   * The e form of a tick: one digit, at most `digits` fraction digits (half to even, trailing zeros dropped), "e", the
+   * power of ten with the true minus sign: 2.5e18, 7.5e−10; zero is 0. A percent axis writes the percentage, then %.
+   */
+  function scientific(v, digits, pct) {
+    var x = decimal(v);
+    if (x.d === "0") return pct ? "0%" : "0";
+    var m = round({ neg: x.neg, d: x.d, p: 1 }, digits), power = x.p - 1 + (pct ? 2 : 0);
+    if (m.p === 2) {
+      m = { neg: m.neg, d: m.d, p: 1 };
+      power++;
+    }
+    return plain(m, 0) + "e" + (power < 0 ? MINUS + -power : String(power)) + (pct ? "%" : "");
+  }
+
+  /** The refusal of `ticks` when no count of digits writes every tick as its own value (one message, read by tests). */
+  function noDigits(values) {
+    return new Error("ticks: no fraction digits write every tick as its own value: " + values.join(", "));
   }
 
   /** The fraction digits a value needs to be written exactly: those of String(v) (shifted two places for a percent). */
@@ -210,15 +235,40 @@
    */
   function ticks(values, format) {
     var pct = format === "percent";
-    var step = 0, most = 0;
+    var step = 0, most = 0, least = 0, sci = false, mostSci = 0;
     for (var i = 0; i < values.length; i++) {
       most = Math.max(most, exactDigits(values[i], pct ? 2 : 0));
+      var x = decimal(values[i]), a0 = values[i] < 0 ? -values[i] : values[i];
+      if (x.d !== "0") {
+        // The power of ten of the number as written (a percent is written a hundred times its value).
+        var power = x.p - 1 + (pct ? 2 : 0);
+        if (power >= SCI_FROM || power < SCI_BELOW) sci = true;
+        mostSci = Math.max(mostSci, x.d.length - 1);
+        if (least === 0 || a0 < least) least = a0;
+      }
       if (i === 0) continue;
       var gap = values[i] - values[i - 1];
       if (gap < 0) gap = -gap;
+      // Two finite ticks can stand more than the largest double apart: their distance is then the largest double.
+      if (gap === Infinity) gap = Number.MAX_VALUE;
       if (gap > 0 && (step === 0 || gap < step)) step = gap;
     }
-    if (step === 0) step = 1;
+    // Values with no gap between them (one tick: a log axis writes each tick alone) are held to their own size, so a
+    // tick below a millionth is not written as 0; a value of 1 or more keeps the tolerance it had.
+    if (step === 0) step = least > 0 && least < 1 ? least : 1;
+    if (sci) {
+      for (var sd = 0; sd <= mostSci; sd++) {
+        var so = [], sx = true;
+        for (var j = 0; j < values.length; j++) {
+          var sl = scientific(values[j], sd, pct);
+          so.push(sl);
+          var sr = readLabel(sl), sb = sr - values[j];
+          if (!(sr - sr === 0) || !(sb <= step * 1e-6 && sb >= -step * 1e-6)) sx = false;
+        }
+        if (sx) return so;
+      }
+      throw noDigits(values);
+    }
     // Each count of digits up to `most` (at least 1, the compact form's one fraction digit: 2.5K), then plain digits
     // at `most` (a compact attempt above 1,000 can miss where plain grouped digits are exact: 1,250 is not 1.2K).
     var last = Math.max(most, 1);
@@ -236,7 +286,7 @@
       }
       if (exact) return out;
     }
-    throw new Error("ticks: no fraction digits write every tick as its own value: " + values.join(", "));
+    throw noDigits(values);
   }
 
   // ---- dates: UTC, from the wire string's own digits (no Date object, no clock, no zone) ----
