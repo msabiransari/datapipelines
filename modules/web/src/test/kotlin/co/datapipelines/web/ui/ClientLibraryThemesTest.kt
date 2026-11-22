@@ -67,7 +67,11 @@ class ClientLibraryThemesTest {
                 val expected = ScopedStylesheet.scope(vendor, ".dp-scope[data-theme=\"$name\"]").text.toByteArray(Charsets.UTF_8)
                 val response = get(path).shouldNotBeNull()
                 val etag = "\"" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(expected)) + "\""
-                println("1065|A3|handler|$path|status=${response.status} bytes=${response.contentAsByteArray.size} etag=${response.getHeader("ETag")}")
+                println(
+                    "1065|A3|handler|$path|status=${response.status} bytes=${response.contentAsByteArray.size} etag=${response.getHeader(
+                        "ETag",
+                    )}",
+                )
                 withClue(path) {
                     response.status shouldBe 200
                     response.contentAsByteArray.contentEquals(expected) shouldBe true

@@ -40,7 +40,10 @@ class ClientLibraryTest {
     fun `the served stylesheet is the six sheets in the example's order, each followed by one newline, scoped under dp-scope`() {
         val joined = SHEETS.joinToString("") { TestRepoFiles.read("$STATIC_DIR/$it") + "\n" }
         val expected = ScopedStylesheet.scope(joined, ".dp-scope").text.toByteArray(Charsets.UTF_8)
-        println("1064|A1|stylesheet|sheets=${SHEETS.size} joined=${joined.toByteArray().size} bytes=${ClientLibraryConfig.library.stylesheet.size}")
+        println(
+            "1064|A1|stylesheet|sheets=${SHEETS.size} joined=${joined.toByteArray().size} " +
+                "bytes=${ClientLibraryConfig.library.stylesheet.size}",
+        )
         withClue("the served stylesheet is the scoping of the join of the six sheets") {
             ClientLibraryConfig.library.stylesheet.contentEquals(expected) shouldBe true
         }

@@ -125,33 +125,68 @@ class ScopedStylesheetTest {
         private const val SCOPE = ".s"
 
         @JvmStatic
-        fun refusals(): List<Arguments> =
+        fun refusals(): List<Arguments> = REFUSALS
+
+        /** Each refusal of D2 with its input and the words its message must hold (A.1). */
+        private val REFUSALS: List<Arguments> =
             listOf(
                 Arguments.of("@import", "@import url(x.css); .a { b: c }", "@import is refused"),
-                Arguments.of("an unknown at-rule", "@starting-style { .a { b: c } }", "an at-rule this transform does not know: @starting-style"),
-                Arguments.of("@property", "@property --x { syntax: '*'; inherits: false }", "@property is refused (it registers a custom property"),
+                Arguments.of(
+                    "an unknown at-rule",
+                    "@starting-style { .a { b: c } }",
+                    "an at-rule this transform does not know: @starting-style",
+                ),
+                Arguments.of(
+                    "@property",
+                    "@property --x { syntax: '*'; inherits: false }",
+                    "@property is refused (it registers a custom property",
+                ),
                 Arguments.of("@counter-style", "@counter-style x { system: cyclic }", "@counter-style is refused"),
                 Arguments.of("@font-feature-values", "@font-feature-values F { @styleset { a: 1 } }", "@font-feature-values is refused"),
                 Arguments.of("@-webkit-keyframes", "@-webkit-keyframes k { from { b: c } }", "@-webkit-keyframes is refused"),
                 Arguments.of("an at-rule without a block", "@layer a, b;", "an at-rule without a block: @layer a, b"),
                 Arguments.of("a root form not at the start", ".a :root { b: c }", "a root selector this transform does not know: .a :root"),
-                Arguments.of(":root + sibling", ":root + .outside { color: red }", "selects a sibling of the container (combinator +): :root + .outside"),
+                Arguments.of(
+                    ":root + sibling",
+                    ":root + .outside { color: red }",
+                    "selects a sibling of the container (combinator +): :root + .outside",
+                ),
                 Arguments.of("html.x ~ sibling", "html.x ~ .outside { color: red }", "(combinator ~): html.x ~ .outside"),
-                Arguments.of("body:not() + sibling, no spaces", "body:not(.a)+.outside { color: red }", "(combinator +): body:not(.a)+.outside"),
+                Arguments.of(
+                    "body:not() + sibling, no spaces",
+                    "body:not(.a)+.outside { color: red }",
+                    "(combinator +): body:not(.a)+.outside",
+                ),
                 Arguments.of(
                     ":root[data-theme] ~ p",
                     ":root[data-theme=\"dark\"] ~ p { color: red }",
                     "(combinator ~): :root[data-theme=\"dark\"] ~ p",
                 ),
                 Arguments.of(":root:has() || td", ":root:has(.x) || td { color: red }", "(combinator ||): :root:has(.x) || td"),
-                Arguments.of("a nested source rule", ".a { color: red; .b { color: blue } }", "a source rule already nests (a rule inside its block): .a"),
+                Arguments.of(
+                    "a nested source rule",
+                    ".a { color: red; .b { color: blue } }",
+                    "a source rule already nests (a rule inside its block): .a",
+                ),
                 Arguments.of("& in a source", "& .a { color: red }", "a source rule already nests (it holds &): & .a"),
                 Arguments.of("an unclassified body declaration", "body { margin: 0 }", "neither carried nor dropped: body { margin: 0 }"),
-                Arguments.of("html beside another selector", "html, .a { color: red }", "html or body listed beside another selector: html, .a"),
+                Arguments.of(
+                    "html beside another selector",
+                    "html, .a { color: red }",
+                    "html or body listed beside another selector: html, .a",
+                ),
                 Arguments.of("an unbalanced brace (stray)", ".a { b: c } }", "an unbalanced brace: a stray }"),
                 Arguments.of("an unbalanced brace (unclosed)", ".a { b: c", "an unbalanced brace: the block after .a is not closed"),
-                Arguments.of("@font-face inside @media", "@media print { @font-face { font-family: F } }", "@font-face inside a group rule"),
-                Arguments.of("@keyframes inside @supports", "@supports (x: y) { @keyframes k { from { b: c } } }", "@keyframes inside a group rule"),
+                Arguments.of(
+                    "@font-face inside @media",
+                    "@media print { @font-face { font-family: F } }",
+                    "@font-face inside a group rule",
+                ),
+                Arguments.of(
+                    "@keyframes inside @supports",
+                    "@supports (x: y) { @keyframes k { from { b: c } } }",
+                    "@keyframes inside a group rule",
+                ),
                 Arguments.of("an unterminated comment", ".a { b: c } /* open", "an unterminated comment"),
             )
     }

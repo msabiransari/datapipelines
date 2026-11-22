@@ -495,7 +495,13 @@ class StaticCacheHeadersE2eTest {
         scope: String,
     ): ByteArray {
         val type = Class.forName("co.datapipelines.web.ui.ScopedStylesheet")
-        val result = type.getMethod("scope", String::class.java, String::class.java).invoke(type.getField("INSTANCE").get(null), source, scope)
+        val result =
+            type
+                .getMethod(
+                    "scope",
+                    String::class.java,
+                    String::class.java,
+                ).invoke(type.getField("INSTANCE").get(null), source, scope)
         return (result.javaClass.getMethod("getText").invoke(result) as String).toByteArray(Charsets.UTF_8)
     }
 

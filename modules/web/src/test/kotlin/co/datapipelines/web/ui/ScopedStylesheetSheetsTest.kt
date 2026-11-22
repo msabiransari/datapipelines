@@ -69,8 +69,10 @@ class ScopedStylesheetSheetsTest {
                 val scope = ClientLibrary.themeScope(name)
                 val scoped = ScopedStylesheet.scope(TestRepoFiles.read("$STATIC/vendor/design-system/themes/$name.css"), scope)
                 val read = OutputReader.read(scoped.text, scope)
-                println("1065|A2|theme|$name|scope=$scope rules=${scoped.counts.styleRules} exact=${scoped.counts.rootExact} " +
-                    "groups=${scoped.counts.groups} bytes=${scoped.text.toByteArray().size}|${read.summary()}")
+                println(
+                    "1065|A2|theme|$name|scope=$scope rules=${scoped.counts.styleRules} exact=${scoped.counts.rootExact} " +
+                        "groups=${scoped.counts.groups} bytes=${scoped.text.toByteArray().size}|${read.summary()}",
+                )
                 withClue("themes/$name.css") {
                     scoped.counts.styleRules shouldBeGreaterThanOrEqual 1
                     scoped.counts.rootExact shouldBeGreaterThanOrEqual 1
@@ -148,18 +150,24 @@ class ScopedStylesheetSheetsTest {
                 val counted = mutableMapOf("scopeBlocks" to 0, "selectors" to 0, "rootBeginning" to 0)
                 for ((prelude, body) in blocks(text)) {
                     when {
-                        prelude.startsWith("@font-face") ->
+                        prelude.startsWith("@font-face") -> {
                             FAMILY.find(body)?.let { families += it.groupValues[1].trim().trim('"', '\'') }
                                 ?: problems.add("@font-face without a family")
+                        }
+
                         prelude.startsWith("@keyframes ") -> {
                             frames += prelude.removePrefix("@keyframes ").trim()
                             if (REM.containsMatchIn(body)) problems += "a rem length in $prelude"
                         }
+
                         prelude == scope -> {
                             counted.merge("scopeBlocks", 1, Int::plus)
                             inside(body, problems, counted)
                         }
-                        else -> problems += "a top-level statement that is neither hoisted nor the scope block: ${prelude.take(SHOWN)}"
+
+                        else -> {
+                            problems += "a top-level statement that is neither hoisted nor the scope block: ${prelude.take(SHOWN)}"
+                        }
                     }
                 }
                 if (counted["scopeBlocks"] != 1) problems += "scope blocks: ${counted["scopeBlocks"]}"
@@ -173,22 +181,30 @@ class ScopedStylesheetSheetsTest {
             ) {
                 for ((prelude, inner) in blocks(body)) {
                     if (prelude.startsWith("@")) {
-                        if (!GROUP.containsMatchIn(prelude)) problems += "an at-rule inside the block that is not a group: ${prelude.take(SHOWN)}"
+                        if (!GROUP.containsMatchIn(prelude)) {
+                            problems +=
+                                "an at-rule inside the block that is not a group: ${prelude.take(SHOWN)}"
+                        }
                         inside(inner, problems, counted)
                         continue
                     }
                     if (REM.containsMatchIn(inner)) problems += "a rem length in the declarations of $prelude"
-                    for (selector in splitCommas(prelude)) {
-                        counted.merge("selectors", 1, Int::plus)
-                        if (!selector.startsWith("&")) problems += "a selector without &: $selector"
-                        if (selector.startsWith(ROOT_PART)) {
-                            counted.merge("rootBeginning", 1, Int::plus)
-                            val after = afterCompound(selector.removePrefix(ROOT_PART)).trimStart()
-                            if (after.startsWith("+") || after.startsWith("~") || after.startsWith("||")) {
-                                problems += "a sibling combinator after the root's part: $selector"
-                            }
-                        }
-                    }
+                    splitCommas(prelude).forEach { selector(it, problems, counted) }
+                }
+            }
+
+            /** One selector inside the block: it holds `&`, and after a root part no sibling combinator follows. */
+            private fun selector(
+                selector: String,
+                problems: MutableList<String>,
+                counted: MutableMap<String, Int>,
+            ) {
+                counted.merge("selectors", 1, Int::plus)
+                if (!selector.startsWith("&")) problems += "a selector without &: $selector"
+                if (selector.startsWith(ROOT_PART)) {
+                    counted.merge("rootBeginning", 1, Int::plus)
+                    val after = afterCompound(selector.removePrefix(ROOT_PART)).trimStart()
+                    if (SIBLINGS.any(after::startsWith)) problems += "a sibling combinator after the root's part: $selector"
                 }
             }
 
@@ -205,11 +221,19 @@ class ScopedStylesheetSheetsTest {
                         continue
                     }
                     when (ch) {
-                        '"', '\'' -> quote = ch
-                        '{' -> if (depth++ == 0) open = i
-                        '}' -> if (--depth == 0) {
-                            out += text.substring(start, open).trim() to text.substring(open + 1, i)
-                            start = i + 1
+                        '"', '\'' -> {
+                            quote = ch
+                        }
+
+                        '{' -> {
+                            if (depth++ == 0) open = i
+                        }
+
+                        '}' -> {
+                            if (--depth == 0) {
+                                out += text.substring(start, open).trim() to text.substring(open + 1, i)
+                                start = i + 1
+                            }
                         }
                     }
                 }
@@ -222,11 +246,19 @@ class ScopedStylesheetSheetsTest {
                 var from = 0
                 for ((i, ch) in selectors.withIndex()) {
                     when (ch) {
-                        '(', '[' -> depth++
-                        ')', ']' -> depth--
-                        ',' -> if (depth == 0) {
-                            out += selectors.substring(from, i).trim()
-                            from = i + 1
+                        '(', '[' -> {
+                            depth++
+                        }
+
+                        ')', ']' -> {
+                            depth--
+                        }
+
+                        ',' -> {
+                            if (depth == 0) {
+                                out += selectors.substring(from, i).trim()
+                                from = i + 1
+                            }
                         }
                     }
                 }
@@ -248,6 +280,7 @@ class ScopedStylesheetSheetsTest {
 
             private const val SHOWN = 80
             private const val ROOT_PART = "&:is(&)"
+            private val SIBLINGS = listOf("+", "~", "||")
             private val FAMILY = Regex("""font-family\s*:\s*([^;]+)""")
             private val REM = Regex("""\drem\b""")
             private val GROUP = Regex("""^@(media|supports|container|layer)\b""")

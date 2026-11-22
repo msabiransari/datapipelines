@@ -178,7 +178,11 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         visit.settle("the host page at the page's width")
         val before = visit.zoom()
         visit.metrics(ZOOMED_WIDTH, ZOOMED_HEIGHT, ZOOM)
-        val followed = visit.waitFor("each picture redrawn at its host's new width") { visit.call("chartsFit") == true && visit.zoomedFrom(before) }
+        val followed =
+            visit.waitFor("each picture redrawn at its host's new width") {
+                visit.call("chartsFit") == true &&
+                    visit.zoomedFrom(before)
+            }
         val at150 = visit.zoom()
         println("1065|B10|before|$before")
         println("1065|B10|at150|$at150 followed=$followed")
@@ -354,7 +358,11 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
 
     /** The dark `--chart-tip-shadow` as the served stylesheet declares it (its rule on the dark attribute). */
     private fun darkTipShadow(visit: Visit): String {
-        val text = visit.page.request().get("$libraryOrigin/css/datapipelines.css").text()
+        val text =
+            visit.page
+                .request()
+                .get("$libraryOrigin/css/datapipelines.css")
+                .text()
         val rule = requireNotNull(DARK_SHADOW.find(text)) { "no dark --chart-tip-shadow rule in the served stylesheet" }
         return rule.groupValues[1].trim()
     }
@@ -396,10 +404,16 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         val compared = reference.count { !it["tag"].toString().startsWith("container#") }
         println("1065|$label|inside|compared=$compared floor=$INSIDE_FLOOR differ=${inside.size} ${inside.take(SHOWN)}")
         println("1065|$label|containers|$onContainers")
-        withClue("$label: elements compared inside the containers (floor $INSIDE_FLOOR)") { compared shouldBeGreaterThanOrEqual INSIDE_FLOOR }
+        withClue(
+            "$label: elements compared inside the containers (floor $INSIDE_FLOOR)",
+        ) { compared shouldBeGreaterThanOrEqual INSIDE_FLOOR }
         withClue("$label: elements inside the containers that differ from the reference") { inside.shouldBeEmpty() }
         withClue("$label: on the two containers only background-color and box-sizing may differ") {
-            onContainers.values.flatten().toSet().filterNot { it in CONTAINER_ONLY }.shouldBeEmpty()
+            onContainers.values
+                .flatten()
+                .toSet()
+                .filterNot { it in CONTAINER_ONLY }
+                .shouldBeEmpty()
         }
     }
 
@@ -463,7 +477,15 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         ): Any? = page.evaluate("(arg) => window.__dp1065.$name(arg)", arg)
 
         fun boot() {
-            val booted = call("boot", mapOf("script" to "$libraryOrigin/js/datapipelines.js", "proxyBase" to "${host.origin}$RELAY_PATH", "board" to board))
+            val booted =
+                call(
+                    "boot",
+                    mapOf(
+                        "script" to "$libraryOrigin/js/datapipelines.js",
+                        "proxyBase" to "${host.origin}$RELAY_PATH",
+                        "board" to board,
+                    ),
+                )
             println("1065|boot|$booted relay=$relayed")
             check(booted == "ready") { "the dashboard did not boot: $booted; relay $relayed; console $consoleErrors" }
         }
@@ -524,7 +546,13 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
             val method = route.request().method()
             if (RUNTIME_ROUTES.none { (m, pattern) -> m == method && pattern.matches(path) }) {
                 relayed += "$method $path=404(not relayed)"
-                route.fulfill(Route.FulfillOptions().setStatus(NOT_FOUND).setContentType("application/json").setBody(NOT_RELAYED))
+                route.fulfill(
+                    Route
+                        .FulfillOptions()
+                        .setStatus(NOT_FOUND)
+                        .setContentType("application/json")
+                        .setBody(NOT_RELAYED),
+                )
                 return
             }
             val forwarded = route.request().headers().filterKeys { it.lowercase() in FORWARDED_HEADERS } + ("DP-API-Key" to key)
@@ -667,7 +695,9 @@ class ScopedStylesheetBrowserTest : DashboardBrowserSuite() {
         val PROBE: String by lazy { String(resource("probe.js"), Charsets.UTF_8) }
 
         fun resource(name: String): ByteArray =
-            requireNotNull(ScopedStylesheetBrowserTest::class.java.getResource("/scoped-stylesheet/$name")) { "no resource $name" }.readBytes()
+            requireNotNull(
+                ScopedStylesheetBrowserTest::class.java.getResource("/scoped-stylesheet/$name"),
+            ) { "no resource $name" }.readBytes()
 
         @Suppress("UNCHECKED_CAST")
         fun Any?.asSnapshot(): List<Map<String, Any?>> = (this as List<Map<String, Any?>>).also { it.shouldNotBeEmpty() }

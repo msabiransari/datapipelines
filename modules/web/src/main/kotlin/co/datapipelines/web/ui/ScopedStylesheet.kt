@@ -135,6 +135,7 @@ object ScopedStylesheet {
             return inner to lifted
         }
 
+        @Suppress("ThrowsCount") // each refusal of D2 is its own statement and names the rule it refuses
         private fun atRule(
             statement: CssText.Statement,
             top: Boolean,
@@ -142,17 +143,32 @@ object ScopedStylesheet {
             lifted: MutableList<String>,
         ) {
             val prelude = statement.prelude
-            val name = AT_NAME.find(prelude)?.groupValues?.get(1)?.lowercase() ?: throw Refusal("an at-rule without a name: $prelude")
+            val name =
+                AT_NAME
+                    .find(prelude)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.lowercase()
+                    ?: throw Refusal("an at-rule without a name: $prelude")
             REFUSED[name]?.let { throw Refusal("the at-rule @$name is refused ($it): ${prelude.take(PRELUDE_SHOWN)}") }
             val body = statement.body
             when {
-                name !in HOISTED && name !in GROUPS -> throw Refusal("an at-rule this transform does not know: ${prelude.take(PRELUDE_SHOWN)}")
-                body == null -> throw Refusal("an at-rule without a block: ${prelude.take(PRELUDE_SHOWN)}")
+                name !in HOISTED && name !in GROUPS -> {
+                    throw Refusal(
+                        "an at-rule this transform does not know: ${prelude.take(PRELUDE_SHOWN)}",
+                    )
+                }
+
+                body == null -> {
+                    throw Refusal("an at-rule without a block: ${prelude.take(PRELUDE_SHOWN)}")
+                }
+
                 name in HOISTED -> {
                     if (!top) throw Refusal("@$name inside a group rule (it would be hoisted out of its condition): $prelude")
                     hoisted.merge(name, 1, Int::plus)
                     lifted += "$prelude {${if (name == "keyframes") px(body) else body}}"
                 }
+
                 else -> {
                     groups.merge(name, 1, Int::plus)
                     inner += "$prelude {\n" + rules(body, top = false).first.joinToString("\n") + "\n}"
@@ -183,17 +199,26 @@ object ScopedStylesheet {
             for (declaration in CssText.splitTopLevel(body, ';').map(String::trim).filter(String::isNotEmpty)) {
                 val property = declaration.substringBefore(':').trim().lowercase()
                 when (property) {
-                    in DROPPED -> dropped += 1
+                    in DROPPED -> {
+                        dropped += 1
+                    }
+
                     in CARRIED -> {
                         carried += 1
                         kept += declaration
                     }
-                    else -> throw Refusal("a declaration on the page element that is neither carried nor dropped: $prelude { $declaration }")
+
+                    else -> {
+                        throw Refusal(
+                            "a declaration on the page element that is neither carried nor dropped: $prelude { $declaration }",
+                        )
+                    }
                 }
             }
             return kept.joinToString("") { " $it;" } + " "
         }
 
+        @Suppress("ThrowsCount") // each refused selector form of D2 is its own statement and names the selector
         private fun selector(source: String): String {
             selectors += 1
             if (source.lowercase() in ROOT_FORMS) {
@@ -231,14 +256,8 @@ object ScopedStylesheet {
      */
     internal fun firstCombinator(rest: String): String? {
         var i = 0
-        while (i < rest.length) {
-            val c = rest[i]
-            if (c == '[' || c == '(') {
-                i = CssText.closing(rest, i)
-                continue
-            }
-            if (c.isWhitespace() || c in ">+~|") break
-            i += 1
+        while (i < rest.length && !rest[i].isWhitespace() && rest[i] !in ">+~|") {
+            i = if (rest[i] == '[' || rest[i] == '(') CssText.closing(rest, i) else i + 1
         }
         val tail = rest.substring(i).trimStart()
         return when {
@@ -289,17 +308,22 @@ internal object CssText {
                         quote = null
                     }
                 }
+
                 c == '"' || c == '\'' -> {
                     quote = c
                     out.append(c)
                 }
+
                 css.startsWith("/*", i) -> {
                     val end = css.indexOf("*/", i + 2)
                     if (end < 0) throw ScopedStylesheet.Refusal("an unterminated comment at offset $i")
                     out.append(' ')
                     i = end + 1
                 }
-                else -> out.append(c)
+
+                else -> {
+                    out.append(c)
+                }
             }
             i += 1
         }
@@ -310,23 +334,33 @@ internal object CssText {
     /** The top-level statements of a rule list (comments already removed). */
     fun statements(css: String): List<Statement> {
         val out = mutableListOf<Statement>()
-        var i = 0
+        var i = nonSpace(css, 0)
         while (i < css.length) {
-            while (i < css.length && css[i].isWhitespace()) i += 1
-            if (i >= css.length) break
             val start = i
             i = preludeEnd(css, i)
             val prelude = css.substring(start, i).trim()
-            if (css[i] == ';') {
-                out += Statement(prelude, null)
-                i += 1
-                continue
-            }
-            val end = blockEnd(css, i, prelude)
-            out += Statement(prelude, css.substring(i + 1, end))
-            i = end + 1
+            i =
+                if (css[i] == ';') {
+                    out += Statement(prelude, null)
+                    i + 1
+                } else {
+                    val end = blockEnd(css, i, prelude)
+                    out += Statement(prelude, css.substring(i + 1, end))
+                    end + 1
+                }
+            i = nonSpace(css, i)
         }
         return out
+    }
+
+    /** The first index at or after [from] that is not whitespace, or the end of [css]. */
+    private fun nonSpace(
+        css: String,
+        from: Int,
+    ): Int {
+        var i = from
+        while (i < css.length && css[i].isWhitespace()) i += 1
+        return i
     }
 
     /** The index of the `;` or `{` that ends the prelude starting at [from]; a stray `}` or no end is refused. */
@@ -360,8 +394,14 @@ internal object CssText {
         var i = open
         while (i < css.length) {
             when (css[i]) {
-                '"', '\'' -> i = stringEnd(css, i)
-                '{' -> depth += 1
+                '"', '\'' -> {
+                    i = stringEnd(css, i)
+                }
+
+                '{' -> {
+                    depth += 1
+                }
+
                 '}' -> {
                     depth -= 1
                     if (depth == 0) return i
@@ -393,8 +433,14 @@ internal object CssText {
         while (i < text.length) {
             val c = text[i]
             when {
-                c == '"' || c == '\'' -> i = stringEnd(text, i)
-                c == text[open] -> depth += 1
+                c == '"' || c == '\'' -> {
+                    i = stringEnd(text, i)
+                }
+
+                c == text[open] -> {
+                    depth += 1
+                }
+
                 c == close -> {
                     depth -= 1
                     if (depth == 0) return i + 1
@@ -416,11 +462,15 @@ internal object CssText {
         while (i < text.length) {
             val c = text[i]
             when {
-                c == '"' || c == '\'' -> i = stringEnd(text, i)
+                c == '"' || c == '\'' -> {
+                    i = stringEnd(text, i)
+                }
+
                 c == '(' || c == '[' -> {
                     i = closing(text, i)
                     continue
                 }
+
                 c == separator -> {
                     out += text.substring(start, i)
                     start = i + 1
