@@ -4,9 +4,9 @@
 //      authored ends exactly: [1e308, MAX] threw (the inverse of the logarithm overshot the largest double) and
 //      [MIN_VALUE, 1e-322] gave a first tick 0 at position Infinity (the inverse cut a positive end to 0).
 //   The boundary bank: ONE invariant of the second axis run over every ordered pair of the boundary values, as a
-//      domain and as an extent, linear and log, beside each left axis form the second axis accepts. A member that fails
-//      only because of a single-axis limit is on a NAMED, closed list with its issue and the single-axis call that
-//      shows the same result; a listed member that passes is a stale entry and red.
+//      domain and as an extent, linear and log, beside each left axis form the second axis accepts. A failing member
+//      not on the NAMED, closed list is red, and a listed member that passes is a stale entry and red. The list held
+//      260 members that failed by single-axis limits until lane 1063 repaired them; it is empty.
 //   R5 rounding to significant digits is floating arithmetic, not exact decimal rounding: one boundary pinned, and a
 //      bound, with its reason, on how far a result may stand from the exact decimal rounding.
 import { test } from "node:test";
@@ -373,374 +373,38 @@ function broken(E, m) {
   return out;
 }
 
-/** The single axis's result on a member's extent (no domain, the same length and level), or {error} where it throws. */
-function single(E, m) {
-  try {
-    return m.log ? E.axes.logAxis("full", m.pair, null, 200, null) : E.axes.valueAxis("full", m.pair, null, 200, null, 0);
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
-/** The second axis's result on a member, or {error} where it throws. */
-function second(E, m) {
-  try {
-    return E.axes.secondAxis("full", { domain: m.mode === "domain" ? m.pair : null, format: null, log: m.log }, m.pair, m.left, 200);
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
 /**
- * The single-axis calls that show a listed member's result: each is true when the axis without `second` (single(), the
- * same extent) gives the failure AND the second axis gives the same one (the same end, or the same throw).
+ * The named list: every member that fails. Closed: a failing member not on it is red, a member on it that holds is red
+ * (a stale entry), and an entry that is no member is red. Rounds 4 and 5 of brief 1051 listed 260 members, each failing
+ * by a single-axis limit (#1060's collapse and floor, #1061's top); lane 1063 repaired those limits, every entry came
+ * off in the same change (#1061's acceptance), and the list is empty. The excuse rules that read an entry (round 5's
+ * R7: an entry excused one kind of failure and no other) went with the entries, since no line of them ran on an empty
+ * list; a member that ever needs an entry again needs that narrowness again, written with it.
  */
-const SINGLE = {
-  // #1060: a subnormal extent's nice range collapses to one value; the second axis's fallback (c) is that range.
-  "#1060 collapse": (E, m) => {
-    const s = single(E, m), ax = second(E, m);
-    return !m.log && m.mode === "extent" && s.lo === s.hi && ax.lo === s.lo && ax.hi === s.hi;
-  },
-  // #1060: the decade search starts at 10^-323, above the smallest subnormal; the second axis starts at the same power.
-  "#1060 floor": (E, m) => {
-    const s = single(E, m), ax = second(E, m);
-    return m.log && m.mode === "extent" && s.lo > m.pair[0] && ax.lo === s.lo;
-  },
-  // #1061: logNice's ladder stops at 10^308 below the largest value, or writes 2e308 (Infinity) as a tick: the second
-  // axis's fallback (c) has the same top, or throws the same message.
-  "#1061": (E, m) => {
-    const s = single(E, m), ax = second(E, m);
-    if (!m.log || m.mode !== "extent") return false;
-    if (s.error !== undefined) return s.error.endsWith("Infinity") && ax.error === s.error;
-    return s.hi < m.pair[1] && ax.hi === s.hi;
-  },
-};
+const NAMED = {};
 
-/**
- * What each inherited failure excuses, and nothing more (round 5, R7: round 4 excused a listed member whenever SINGLE
- * showed its issue, so a second-axis defect could hide behind the entry). A collapsed range (#1060) excuses the range
- * leaving out the extent, at either end; its positions are not excused but read as `collapsed` (every tick the range's
- * one value). The floor (#1060) excuses the low end only. #1061 excuses the high end only, or an identical inherited
- * throw (there is no returned axis to check). Never excused: `count`, `finite`, `positive`, `ends`, `edge`,
- * `position`, `collapsed`.
- */
-const WAIVES = {
-  "#1060 collapse": new Set(["range-low", "range-high"]),
-  "#1060 floor": new Set(["range-low"]),
-  "#1061": new Set(["range-high", "throws"]),
-};
-
-/**
- * The named list: every member that fails, with the single-axis issue(s) its failure is. Closed: a failing member not on
- * it is red, a member on it that passes is red (a stale entry), and an entry's single-axis call must show the same.
- * Round 4's 67 entries keep their issues; round 5 adds 193, every one an extent, generated from the bank by the stricter
- * rule (each issue shown by SINGLE and excusing one of the member's failures, every failure excused) and read back.
- */
-const NAMED = {
-  // #1060, a linear subnormal extent: the single axis's nice range collapses to 0..0, and case (c) is that range. 14 entries.
-  "linear extent -1e-322..-5e-324 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -1e-322..0 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -1e-322..5e-324 beside two edge ticks": ["#1060 collapse"],
-  "linear extent -1e-322..5e-324 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -1e-322..1e-322 beside two edge ticks": ["#1060 collapse"],
-  "linear extent -1e-322..1e-322 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -5e-324..0 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -5e-324..5e-324 beside two edge ticks": ["#1060 collapse"],
-  "linear extent -5e-324..5e-324 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent -5e-324..1e-322 beside two edge ticks": ["#1060 collapse"],
-  "linear extent -5e-324..1e-322 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent 0..5e-324 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent 0..1e-322 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  "linear extent 5e-324..1e-322 beside log 1, 2, 5, 10": ["#1060 collapse"],
-  // #1060, a log extent from the smallest subnormal: the range starts at 10^-323, above it, as the single axis's does. 4 entries.
-  "log extent 5e-324..1e-322 beside two edge ticks": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside three ticks": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside log 1, 2, 5, 10": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside inset 0.2 to 0.8": ["#1060 floor"],
-  // #1060 and #1061, a log extent from the smallest subnormal to past 10^185: both ends of the single axis's range. 9 entries.
-  "log extent 5e-324..1e+300 beside log 1, 2, 5, 10": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+300 beside inset 0.2 to 0.8": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside three ticks": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside log 1, 2, 5, 10": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside inset 0.2 to 0.8": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside two edge ticks": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside three ticks": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1060 floor", "#1061"],
-  // #1061, a log extent the single axis's ladder cannot reach (its top below the largest value), or 2e308 as a tick (a throw). 40 entries.
-  "log extent 1e-322..1e+300 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-322..1e+300 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e-322..1e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-322..1e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+300 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+300 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e-300..1e+300 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-300..1e+300 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e-300..1e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-300..1e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1..1e+300 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1..1e+300 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1..1e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1..1e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside two edge ticks": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside three ticks": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside log 1, 2, 5, 10": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside inset 0.2 to 0.8": ["#1061"],
-  // Round 5. #1060, a linear subnormal extent beside a round-5 left form (the real producer): the nice range collapses to 0..0, case (c) is that range. 10 entries.
-  "linear extent -1e-322..-5e-324 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -1e-322..0 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -1e-322..5e-324 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -1e-322..1e-322 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -5e-324..0 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -5e-324..5e-324 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent -5e-324..1e-322 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent 0..5e-324 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent 0..1e-322 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  "linear extent 5e-324..1e-322 beside logAxis [0.9999999999,10.0000000001]": ["#1060 collapse"],
-  // Round 5. #1060, a log extent from the smallest subnormal: the range starts at 10^-323, above it, as the single axis's does. Beside round 4's four forms these were hidden by the linear containment tolerance (round 5 reads a log extent in decades); the rest stand beside round 5's forms. 68 entries.
-  "log extent 5e-324..1e-322 beside valueAxis [0,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [1e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [0,0.9999999991]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [9e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [-1,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [-0.9999999999,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [0,9.999999999e+307]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor"],
-  "log extent 5e-324..1e-322 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside two edge ticks": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside three ticks": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside log 1, 2, 5, 10": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside inset 0.2 to 0.8": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [0,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [1e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [0,0.9999999991]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [9e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [-1,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [-0.9999999999,1]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [0,9.999999999e+307]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor"],
-  "log extent 5e-324..2.2250738585072014e-308 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside two edge ticks": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside three ticks": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside log 1, 2, 5, 10": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside inset 0.2 to 0.8": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [0,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [1e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [0,0.9999999991]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [9e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [-1,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [-0.9999999999,1]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [0,9.999999999e+307]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor"],
-  "log extent 5e-324..1e-300 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1 beside two edge ticks": ["#1060 floor"],
-  "log extent 5e-324..1 beside three ticks": ["#1060 floor"],
-  "log extent 5e-324..1 beside log 1, 2, 5, 10": ["#1060 floor"],
-  "log extent 5e-324..1 beside inset 0.2 to 0.8": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [0,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [1e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [0,0.9999999991]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [9e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [-1,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [-0.9999999999,1]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [0,9.999999999e+307]": ["#1060 floor"],
-  "log extent 5e-324..1 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor"],
-  "log extent 5e-324..1 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor"],
-  "log extent 5e-324..1 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside two edge ticks": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside three ticks": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [0,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [1e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [0,0.9999999991]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [9e-10,1]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [-1,0.9999999999]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [-0.9999999999,1]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [0,9.999999999e+307]": ["#1060 floor"],
-  "log extent 5e-324..1e+300 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor"],
-  "log extent 5e-324..1e+308 beside two edge ticks": ["#1060 floor"],
-  // Round 5. #1060 and #1061 beside a round-5 left form: both ends of the single axis's range. 24 entries.
-  "log extent 5e-324..1e+300 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+300 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [0,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [1e-10,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [0,0.9999999991]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [9e-10,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [-1,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [-0.9999999999,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [0,9.999999999e+307]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1060 floor", "#1061"],
-  "log extent 5e-324..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1060 floor", "#1061"],
-  // Round 5. #1061 beside a round-5 left form: the single axis's ladder stops below the high end, or writes 2e308 as a tick (a throw). 91 entries.
-  "log extent 1e-322..1e+300 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-322..1e+300 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1e-322..1e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1e-322..1e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-322..1e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-322..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+300 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+300 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 2.2250738585072014e-308..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e-300..1e+300 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-300..1e+300 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e-300..1e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-300..1e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e-300..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1..1e+300 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1..1e+300 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1..1e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1..1e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e+300..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [1e-10,1]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [1e-10,0.9999999999]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [0,0.9999999991]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [9e-10,1]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [-1,0.9999999999]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [-0.9999999999,1]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [0,9.999999999e+307]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside valueAxis [-9.999999999e+307,0]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside logAxis [0.9999999999,10.0000000001]": ["#1061"],
-  "log extent 1e+308..1.7976931348623157e+308 beside logAxis [1.0000000001,9.9999999999]": ["#1061"],
-};
-
-/**
- * The bank's verdict against a named list: {size, failing, problems: [text]}; problems empty when the bank holds. A
- * listed member passes only when SINGLE shows each of its issues AND every failure it has is one of the kinds a shown
- * issue excuses (WAIVES); each issue must excuse at least one of its failures.
- */
+/** The bank's verdict against a named list: {size, failing, problems: [text]}; problems empty when the bank holds. */
 function audit(E, named) {
   const members = bank(), keys = new Set(members.map((m) => m.key)), problems = [];
   let failing = 0;
   for (const m of members) {
-    const why = broken(E, m), entry = named[m.key], texts = () => why.map((f) => f.text).join("; ");
+    const why = broken(E, m), entry = named[m.key];
     if (why.length) failing++;
-    if (why.length && !entry) problems.push(`not on the named list: ${m.key}: ${texts()}`);
+    if (why.length && !entry) problems.push(`not on the named list: ${m.key}: ${why.map((f) => f.text).join("; ")}`);
     if (!why.length && entry) problems.push(`stale entry (the member holds): ${m.key}`);
-    if (why.length && entry) {
-      const shown = entry.filter((issue) => SINGLE[issue](E, m));
-      for (const issue of entry) if (!shown.includes(issue)) problems.push(`the single axis does not show ${issue}: ${m.key}`);
-      const unexcused = why.filter((f) => !shown.some((issue) => WAIVES[issue].has(f.kind)));
-      if (unexcused.length) problems.push(`a named member fails for more than its issue: ${m.key}: ${unexcused.map((f) => f.text).join("; ")}`);
-      for (const issue of shown) if (!why.some((f) => WAIVES[issue].has(f.kind))) problems.push(`${issue} excuses none of the failures of ${m.key}: ${texts()}`);
-    }
   }
   for (const k of Object.keys(named)) if (!keys.has(k)) problems.push(`a named entry is no member: ${k}`);
   return { size: members.length, failing, problems };
 }
 
-test("the boundary bank: the second axis's invariant over every ordered pair of the boundary values, domain and extent, linear and log, beside round 4's four left forms and round 5's eleven produced ones; failures only on the named list, each excused for its own failure alone", () => {
+test("the boundary bank: the second axis's invariant over every ordered pair of the boundary values, domain and extent, linear and log, beside round 4's four left forms and round 5's eleven produced ones; every member holds, and the closed named list is empty", () => {
   const { size, failing, problems } = audit(R, NAMED);
-  const byIssue = {};
-  for (const issues of Object.values(NAMED)) for (const i of issues) byIssue[i] = (byIssue[i] || 0) + 1;
-  console.log(`boundary bank: ${size} members (floor ${BANK_FLOOR}; round 4: 1312), ${failing} on the named list: ${JSON.stringify(byIssue)}`);
+  console.log(`boundary bank: ${size} members (floor ${BANK_FLOOR}; round 4: 1312), ${failing} failing, ${Object.keys(NAMED).length} on the named list`);
   assert.ok(size >= BANK_FLOOR, `the bank shrank: ${size} < ${BANK_FLOOR}`);
   assert.equal(BANK_FLOOR, 4920);
   assert.deepEqual(problems, []);
-  assert.equal(failing, Object.keys(NAMED).length);
+  assert.equal(failing, 0);
+  assert.equal(Object.keys(NAMED).length, 0);
   // Every authored domain holds the whole invariant beside every left form: none is on the list.
   const members = bank(), authored = members.filter((m) => m.mode === "domain");
   assert.equal(authored.length, BANK_FLOOR / 2);
@@ -760,7 +424,45 @@ test("the boundary bank: the second axis's invariant over every ordered pair of 
   assert.ok(past.below >= 4 && past.above >= 4 && past.most > 8e-10 && past.most < 1.000001e-9, JSON.stringify(past));
 });
 
-test("the boundary bank goes red: on the verdict's inputs with R4's fix taken out, with R6's fix taken out, on a named member taken off the list, on a holding member put on it", () => {
+/**
+ * Lane 1063's fixes, each taken out alone (the plants of brief 1063 D10): the members it repaired, all from the 260
+ * entries the named list held before it, are red as not on the list. `tick` takes out the decimal tick (D1) with the
+ * two checks that also keep a collapsed range from being returned (two ticks that do not rise are one value, D2; a
+ * range that leaves out an end is no range, D5): with any one of the three in place, a subnormal extent's range does not
+ * collapse to 0..0 (measured: the tick alone, or it with one check, turns no member red). The rest take out one line:
+ * the log floor (D6), the ladder that stops below the largest value (D7), the fallback's top as the table gives it
+ * (D7), the second axis's guard below the power table (D9 a). Each with the count of members it turns red and one of
+ * them by name.
+ */
+const SCALES = "07-scales.js";
+const LANE_1063_PLANTS = {
+  tick: {
+    edit: [
+      SCALES,
+      'var t = Number((x.first + i) * parts.m + "e" + parts.e) + 0;\n        if (!(t > -Infinity && t < Infinity)) return null;\n        if (i > 0 && !(t > ticks[i - 1])) return SAME;\n        ticks.push(t);\n      }\n      // The range holds both ends, or it is no nice range (below the normal doubles a decimal step is not a double,\n      // and its multiples can miss an end): the bounded fallback then.\n      if (ticks[0] > min + x.step * 1e-9 || ticks[count] < max - x.step * 1e-9) return null;',
+      "var dp = Math.max(0, 1 - decade(x.step)), sc = pow10(dp > 308 ? 308 : dp), t = Math.round((x.first + i) * x.step * sc) / sc + 0;\n        if (!(t > -Infinity && t < Infinity)) return null;\n        ticks.push(t);\n      }",
+    ],
+    red: 24,
+    member: "linear extent -5e-324..5e-324 beside two edge ticks",
+    text: "the range 0..0 leaves out the low end of -5e-324..5e-324",
+  },
+  floor: { edit: [SCALES, "    if (lo > min) lo = min;\n", ""], red: 105, member: "log extent 5e-324..1e-322 beside two edge ticks", text: "the range 1e-323..1e-322 leaves out the low end of 5e-324..1e-322" },
+  ladder: {
+    edit: [SCALES, "    return null;\n  }\n\n  /** The ticks inside a fixed log domain", "    return out;\n  }\n\n  /** The ticks inside a fixed log domain"],
+    red: 176,
+    member: "log extent 1..1e+300 beside log 1, 2, 5, 10",
+    text: "leaves out the high end of 1..1e+300",
+  },
+  top: {
+    edit: [SCALES, "var kt = decade(max), top = pow10(kt);\n    if (top < max) top = kt < 308 ? pow10(kt + 1) : MAX;\n    if (!(top > lo)) top = MAX;", "var top = pow10(308);"],
+    red: 105,
+    member: "log extent 1e+308..1.7976931348623157e+308 beside three ticks",
+    text: "leaves out the high end of 1e+308..1.7976931348623157e+308",
+  },
+  guard: { edit: ["11-axes.js", "    if (S.pow10(k0) > min) return null;\n", ""], red: 56, member: "log extent 5e-324..1e-322 beside three ticks", text: "leaves out the low end of 5e-324..1e-322" },
+};
+
+test("the boundary bank goes red: on the verdict's inputs with R4's fix taken out, with R6's fix taken out, with each of lane 1063's fixes taken out, on a holding member put on the list", () => {
   // R4's fix out: the log right axis's values from exp10 alone, which cuts below 10^-323 to 0 as round 3's did.
   const old = engineWith([], (s) => {
     plant(s, "11-axes.js", "logLerp(lo, hi, l0, l1, shares[j])", "S.exp10(l0 + shares[j] * (l1 - l0))");
@@ -776,21 +478,30 @@ test("the boundary bank goes red: on the verdict's inputs with R4's fix taken ou
   for (const key of ["linear domain -1.7976931348623157e+308..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]", "linear domain -1.7976931348623157e+308..1.7976931348623157e+308 beside valueAxis [1e-10,1]", "linear domain 1e+308..1.7976931348623157e+308 beside valueAxis [0,0.9999999999]"]) {
     assert.ok(red6.includes("not on the named list: " + key + ": throws"), "red on " + key);
   }
-  const listed = Object.keys(NAMED);
-  assert.ok(listed.length > 0, "the named list has entries to take off");
-  const fewer = { ...NAMED };
-  delete fewer[listed[0]];
-  assert.ok(audit(R, fewer).problems.some((p) => p.startsWith("not on the named list: " + listed[0] + ":")), "red on " + listed[0]);
+  // Lane 1063's fixes out, one at a time: every problem is a failing member not on the (empty) list.
+  const seen = {};
+  for (const [name, p] of Object.entries(LANE_1063_PLANTS)) {
+    const { failing, problems } = audit(engineWith([], (s) => plant(s, ...p.edit)), NAMED);
+    seen[name] = failing;
+    assert.ok(problems.length > 0 && problems.every((x) => x.startsWith("not on the named list: ")), name + ": " + problems.slice(0, 3).join("\n"));
+    const mine = problems.find((x) => x.startsWith("not on the named list: " + p.member + ": "));
+    assert.ok(mine !== undefined && mine.includes(p.text), `${name}: red on ${p.member} with "${p.text}": ${mine}`);
+    assert.equal(failing, p.red, `${name}: members red`);
+  }
+  console.log(`boundary bank: members red with each of lane 1063's fixes out ${JSON.stringify(seen)}`);
+  // A holding member put on the list is a stale entry.
   const holding = "log domain 1..1e+300 beside three ticks";
   assert.equal(broken(R, bank().find((m) => m.key === holding)).length, 0);
   assert.deepEqual(audit(R, { ...NAMED, [holding]: ["#1061"] }).problems, ["stale entry (the member holds): " + holding]);
+  // An entry that is no member is red.
+  assert.deepEqual(audit(R, { ...NAMED, "log extent 1..1e+300 beside no such form": ["#1061"] }).problems, ["a named entry is no member: log extent 1..1e+300 beside no such form"]);
 });
 
 /**
- * The landing verdict's extra plant (1051-r4, R7), kept as a permanent negative control: beside the log left axis 1, 2,
- * 5, 10, the no-domain log extent [1, 1e300] keeps its inherited top (#1061: the ladder stops at 1e248) and gets a
- * second-axis defect of its own, tick 1 moved to the bottom of the range. Round 4's audit excused the member for its
- * issue and missed the tick; the bank must be red on it.
+ * The landing verdict's extra plant (1051-r4, R7), kept as a permanent negative control with three of its kind: beside
+ * the log left axis 1, 2, 5, 10, the no-domain log extent [1, 1e300] gets a second-axis defect of its own, tick 1 moved
+ * to the bottom of the range. Lane 1063 repaired the single-axis top the member once failed for (#1061), so the member
+ * holds and every planted defect is a member not on the (empty) named list.
  */
 const OFF_GRID_PLANT = [
   "11-axes.js",
@@ -798,28 +509,27 @@ const OFF_GRID_PLANT = [
   "var chosen = out !== null ? out : caseC(lvl, S2, ext, length, shares); if (noDomain && S2.log === true && ext[0] === 1 && ext[1] === 1e300 && left.log === true) chosen.ticks[1] = chosen.lo; return chosen;",
 ];
 
-test("R7: a named member is excused for its inherited failure and nothing else (the verdict's off-grid plant on log extent 1..1e300, which keeps #1061's top, makes the bank red)", () => {
+test("R7: a planted second-axis defect is red on its member: the off-grid tick on log extent 1..1e300, a range's high end, a tick off a one-time collapsed range, a tick count", () => {
   const key = "log extent 1..1e+300 beside log 1, 2, 5, 10", m = bank().find((x) => x.key === key);
-  assert.deepEqual(NAMED[key], ["#1061"], "the control's member is a named #1061 entry");
-  const clean = broken(R, m);
-  assert.deepEqual(clean.map((f) => f.kind), ["range-high"], "clean, the member fails for #1061's top alone: " + JSON.stringify(clean));
+  assert.equal(NAMED[key], undefined, "the control's member is on no list");
+  assert.deepEqual(broken(R, m), [], "clean, the member holds");
   const planted = engineWith([], (s) => plant(s, ...OFF_GRID_PLANT));
   const why = broken(planted, m);
-  assert.ok(SINGLE["#1061"](planted, m), "the plant keeps the inherited top, so SINGLE still shows #1061");
-  assert.deepEqual(why.map((f) => f.kind), ["range-high", "position"], JSON.stringify(why));
+  assert.deepEqual(why.map((f) => f.kind), ["position"], JSON.stringify(why));
   const { problems } = audit(planted, NAMED);
-  // The plant's condition (a log left axis) also holds beside round 5's two produced log forms: three named members, each red.
+  // The plant's condition (a log left axis) also holds beside round 5's two produced log forms: three members, each red.
   const hit = ["log 1, 2, 5, 10", "logAxis [0.9999999999,10.0000000001]", "logAxis [1.0000000001,9.9999999999]"].map((l) => "log extent 1..1e+300 beside " + l);
-  assert.deepEqual(problems.map((p) => p.slice(0, p.indexOf(": tick 1 = 1 (rule c) off the share "))), hit.map((k) => "a named member fails for more than its issue: " + k), problems.join("\n"));
-  assert.ok(problems[0].startsWith(`a named member fails for more than its issue: ${key}: tick 1 = 1 (rule c) off the share 0.30102999566398`), problems[0]);
-  // The other excuses are as narrow: a floor member's high end, a collapsed member's ticks, an inherited range's count.
+  assert.deepEqual(problems.map((p) => p.slice(0, p.indexOf(": tick 1 = 1 (rule c) off the share "))), hit.map((k) => "not on the named list: " + k), problems.join("\n"));
+  assert.ok(problems[0].startsWith(`not on the named list: ${key}: tick 1 = 1 (rule c) off the share 0.30102999566398`), problems[0]);
+  // The other defects are as plain: a range's high end, a tick off its position, an inherited range's count.
   const floorKey = "log extent 5e-324..1e-322 beside two edge ticks", collapseKey = "linear extent -5e-324..5e-324 beside two edge ticks";
+  for (const k of [floorKey, collapseKey]) assert.deepEqual(broken(R, bank().find((x) => x.key === k)), [], "clean, the member holds: " + k);
   const floorPlant = engineWith([], (s) => plant(s, ...OFF_GRID_PLANT.slice(0, 2), "var chosen = out !== null ? out : caseC(lvl, S2, ext, length, shares); if (noDomain && S2.log === true && ext[0] === 5e-324 && ext[1] === 1e-322 && n === 2) chosen.hi = chosen.ticks[1] = 2e-323; return chosen;"));
-  assert.ok(audit(floorPlant, NAMED).problems.some((p) => p.startsWith(`a named member fails for more than its issue: ${floorKey}: the range`) && p.includes("high end")), "a floor member's high end is not excused");
+  assert.ok(audit(floorPlant, NAMED).problems.some((p) => p.startsWith(`not on the named list: ${floorKey}: the range`) && p.includes("high end")), "a range's high end");
   const collapsePlant = engineWith([], (s) => plant(s, ...OFF_GRID_PLANT.slice(0, 2), "var chosen = out !== null ? out : caseC(lvl, S2, ext, length, shares); if (noDomain && S2.log !== true && ext[0] === -5e-324 && ext[1] === 5e-324 && n === 2) chosen.ticks[1] = 1; return chosen;"));
-  assert.ok(audit(collapsePlant, NAMED).problems.some((p) => p.startsWith(`a named member fails for more than its issue: ${collapseKey}: tick 1 = 1 on the one-value range`)), "a collapsed member's ticks are not excused");
+  assert.ok(audit(collapsePlant, NAMED).problems.some((p) => p.startsWith(`not on the named list: ${collapseKey}: tick 1 = 1 (rule `) && p.includes(" off the share ")), "a tick off its position on a range that once collapsed");
   const countPlant = engineWith([], (s) => plant(s, ...OFF_GRID_PLANT.slice(0, 2), "var chosen = out !== null ? out : caseC(lvl, S2, ext, length, shares); if (noDomain && S2.log === true && ext[0] === 1 && ext[1] === 1e300 && left.log === true) chosen.ticks.pop(); return chosen;"));
-  assert.ok(audit(countPlant, NAMED).problems.some((p) => p.startsWith(`a named member fails for more than its issue: ${key}: 3 ticks beside 4`)), "a named member's tick count is not excused");
+  assert.ok(audit(countPlant, NAMED).problems.some((p) => p.startsWith(`not on the named list: ${key}: 3 ticks beside 4`)), "a tick count");
 });
 
 // ---- R5: rounding to significant digits is floating arithmetic ----
