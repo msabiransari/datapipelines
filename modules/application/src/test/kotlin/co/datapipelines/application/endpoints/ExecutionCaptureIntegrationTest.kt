@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * #1043 — runtime capture's storage against a real PostgreSQL with the shipped migrations (V68): the one-open-window
- * index, the idempotent session-identified stop, the admission decision taken in the reserving statement (exact and
+ * index, the idempotent session-identified stop, the admission decision taken in the reserving transaction (exact and
  * unfiltered correlation, the half-open deadline, route identity, workspace scope), the database's ordering of a stop
  * against an admission (each side held open in turn), and the private store's own refusals, expiry-bounded reads and
  * batched purge. Each is a property of SQL that a mocked template could never falsify.

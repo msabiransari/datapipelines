@@ -53,8 +53,9 @@ data class PublishedMutationReservation(
 /**
  * Persistence for `published_mutation_reservations` (metadata-db §4.61).
  *
- * Every statement here is a single autocommit statement whose correctness is a property of Postgres, not of a
- * transaction the caller holds: the `ON CONFLICT (scope_digest) DO NOTHING` insert is what makes two replicas racing
+ * Admission uses a metadata transaction to order capture against start/stop and stamp the reservation after its
+ * database waits; the other operations are single autocommit statements. The `ON CONFLICT (scope_digest) DO NOTHING`
+ * insert is what makes two replicas racing
  * one key agree on one execution id; the retire and the start-claim take-over are compare-and-set updates on the value
  * the caller read; the release of an unstarted run is conditional on its execution row being absent. No business SQL
  * ever runs inside a metadata transaction this class opens.

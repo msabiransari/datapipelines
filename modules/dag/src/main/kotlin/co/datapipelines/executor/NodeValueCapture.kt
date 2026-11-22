@@ -85,7 +85,7 @@ data class CaptureSeal(
 
 /**
  * The private diagnostic store (metadata-db §4.63). Implemented over the metadata database by `application`; every
- * statement is its own autocommit statement — never inside a business transaction. A write at or after
+ * write uses its own metadata transaction — never inside a business transaction. A write at or after
  * [CapturedValue.expiresAt] is refused by the store itself (returns false).
  */
 interface CaptureValueStore {
