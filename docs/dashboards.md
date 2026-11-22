@@ -1000,13 +1000,18 @@ An embedding host loads the **client library** from the product's origin instead
 `/js/datapipelines.js`, every engine file in the engine's load order and then the five runtime files of the vendor
 manifest's runtime block (the runtime, the interaction layer, the chart, table and KPI adapters), and
 `/css/datapipelines.css`, the six sheets the product's pages load (`tokens.css`, `themes/light.css`, `base.css`,
-`primitives.css`, `app.css`, `dashboards.css`), each source followed by one newline and nothing else. The application
-joins them from the same classpath sources once per process (`ClientLibraryConfig`; no file is committed or written by
-the build), answers those two names only, and serves them under every script's rule (`no-cache`, the SHA-256 content
+`primitives.css`, `app.css`, `dashboards.css`), each source followed by one newline and nothing else, the stylesheet's
+join then scoped under the class `dp-scope` (#1065, `ScopedStylesheet`: the rules nested in one `.dp-scope` block, the
+two `@font-face` and `@keyframes` kinds hoisted before it, `rem` lengths written in px). The application builds them
+from the same classpath sources once per process (`ClientLibraryConfig`; no file is committed or written by the
+build), answers those names only, and serves them under every script's rule (`no-cache`, the SHA-256 content
 validator, no `Last-Modified`); a new engine file reaches the script with no edit. The stylesheet carries the light
-theme; another theme is that theme's sheet loaded after it, with `data-theme` on `<html>` (every theme sheet sets every
-custom property `light.css` sets). The fonts its `app.css` part names resolve under the same origin's `/vendor/fonts/`,
-whose successful answers carry `Access-Control-Allow-Origin: *` (auth §8.1), so a page of another origin uses them.
+theme and applies only inside the two elements handed to `adapters` (`container`, `parametersContainer`), which the
+runtime marks with `dp-scope`: the host's own elements, fonts and custom properties are untouched. Another theme is
+`/css/datapipelines-theme-<name>.css` (the eight vendor themes but `light`), loaded after it, with `data-theme="<name>"`
+on each of those elements; a theme sheet does nothing without the attribute, and the charts redraw when it changes
+(every theme sheet sets every custom property `light.css` sets). The fonts its `app.css` part names resolve under the
+same origin's `/vendor/fonts/`, whose successful answers carry `Access-Control-Allow-Origin: *` (auth §8.1), so a page of another origin uses them.
 The per-file URLs keep answering; the product's own pages keep loading them. The example is
 `examples/dashboard-embed/`.
 

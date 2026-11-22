@@ -78,7 +78,7 @@ class StaticCacheHeadersE2eTest {
         val css = walk(STATIC_ROOT, "css/").map { "/$it" }
         val js = walk(STATIC_ROOT, "js/").map { "/$it" }
         val vendor = walk(STATIC_ROOT, "vendor/").filterNot { it.startsWith("vendor/fonts/") }.map { "/$it" }
-        val library = LIBRARY_FILES.map { it.first }
+        val library = LIBRARY_FILES.map { it.first } + themes.map { THEME_PREFIX + it + ".css" }
         val engineOnClasspath = walk(engineRoot(), "").toSet()
         val engine = engineNames().map { name -> name.also { check(it in engineOnClasspath) { "engine file $it not on the classpath" } } }
         val enginePaths = engine.map { ENGINE_PREFIX + it }
@@ -87,6 +87,14 @@ class StaticCacheHeadersE2eTest {
                 "library=${library.size} total=${css.size + js.size + vendor.size + enginePaths.size + library.size}",
         )
         css + js + vendor + enginePaths + library
+    }
+
+    /**
+     * The names of the client library's theme sheets (#1065 D5): the vendor theme files on the classpath minus `light`,
+     * read from the walk and not from the class (`ClientLibraryThemesTest` holds the class's closed list equal to them).
+     */
+    private val themes: List<String> by lazy {
+        walk(STATIC_ROOT, THEMES_DIR).map { it.removePrefix(THEMES_DIR).removeSuffix(".css") }.filter { it != "light" }.sorted()
     }
 
     @Test
@@ -392,6 +400,13 @@ class StaticCacheHeadersE2eTest {
                 val sibling = get(kindOf)
                 val parts = sources.getValue(path)
                 val bodies = parts.map { it to get(it).also { r -> check(r.statusCode() == 200) { it } }.body() + NEWLINE }
+                // Since #1065 the stylesheet is the join passed once through the scoping (D1); the script is the join.
+                val expected =
+                    if (path == STYLESHEET) {
+                        listOf("the six sheets' join, scoped" to scoped(String(bodies.flatMap { it.second.toList() }.toByteArray()), SCOPE))
+                    } else {
+                        bodies
+                    }
                 val shown = (CACHE_HEADERS + LIBRARY_HEADERS).joinToString(" ") { "$it=${answer.header(it)}" }
                 println("1064|A2|$path|status=${answer.statusCode()} bytes=${answer.body().size} sources=${parts.size} $shown")
                 withClue("$path through the application, no session") {
@@ -402,7 +417,7 @@ class StaticCacheHeadersE2eTest {
                     answer.header("ETag") shouldBe "\"${sha256(answer.body())}\""
                     answer.header("Last-Modified") shouldBe ""
                     answer.header(ACAO) shouldBe ""
-                    firstDifference(bodies, answer.body()) shouldBe null
+                    firstDifference(expected, answer.body()) shouldBe null
                 }
                 val queried = get("$path?v=2&name=../app.css")
                 withClue("$path with a query string: the same bytes") {
@@ -417,6 +432,77 @@ class StaticCacheHeadersE2eTest {
                 if (path in LIBRARY_NEAR_MISSES) withClue("$path is not one of the two names") { response.statusCode() shouldBe 404 }
             }
         }
+    }
+
+    /**
+     * The theme sheets through the whole application (#1065 A.3, D5, Security): no session; each of the eight names
+     * answers the vendor theme sheet fetched from its own URL, scoped under its attribute, with the stylesheet's
+     * headers; a query string changes no byte; a name of the pattern outside the list and the forms the firewall or
+     * the container refuses answer what the Routes row names, never a stylesheet. The vendor theme paths and the six
+     * source sheets answer their classpath bytes, unchanged.
+     */
+    @Test
+    fun `the theme sheets are each vendor theme scoped under its attribute, and the refused forms keep their answers`() {
+        val sibling = get(STYLESHEET)
+        withClue("theme names (floor $THEME_FLOOR)") { themes.size shouldBeGreaterThanOrEqual THEME_FLOOR }
+        assertSoftly {
+            for (name in themes) {
+                val path = "$THEME_PREFIX$name.css"
+                val vendor = get("/$THEMES_DIR$name.css").also { check(it.statusCode() == 200) { name } }.body()
+                val expected = scoped(String(vendor), "$SCOPE[data-theme=\"$name\"]")
+                val answer = get(path, FOREIGN_ORIGIN)
+                val shown = (CACHE_HEADERS + LIBRARY_HEADERS).joinToString(" ") { "$it=${answer.header(it)}" }
+                println("1065|A3|theme|$path|status=${answer.statusCode()} bytes=${answer.body().size} $shown")
+                withClue("$path through the application, no session") {
+                    answer.statusCode() shouldBe 200
+                    answer.header("Content-Type") shouldBe sibling.header("Content-Type")
+                    answer.header("X-Content-Type-Options") shouldBe "nosniff"
+                    answer.header("Cache-Control") shouldBe RECHECK_HEADER
+                    answer.header("ETag") shouldBe "\"${sha256(answer.body())}\""
+                    answer.header("Last-Modified") shouldBe ""
+                    answer.header(ACAO) shouldBe ""
+                    answer.body().contentEquals(expected) shouldBe true
+                    get(path, "If-None-Match" to answer.header("ETag")).statusCode() shouldBe 304
+                    get("$path?v=2&name=../app.css").body().contentEquals(expected) shouldBe true
+                }
+            }
+            for ((path, status) in THEME_REFUSED) {
+                val response = get(path)
+                println(
+                    "1065|A3|theme-refused|$path|status=${response.statusCode()} type=${response.header("Content-Type")} " +
+                        "bytes=${response.body().size}",
+                )
+                withClue("$path: $status, and no stylesheet") {
+                    response.statusCode() shouldBe status
+                    response.header("Content-Type") shouldNotContain "text/css"
+                }
+            }
+            for (path in themes.map { "/$THEMES_DIR$it.css" } + "/${THEMES_DIR}light.css" + LIBRARY_SHEETS) {
+                val response = get(path)
+                val file = requireNotNull(javaClass.classLoader.getResource("$STATIC_ROOT$path")) { path }.readBytes()
+                println("1065|A3|source-unchanged|$path|status=${response.statusCode()} bytes=${response.body().size} file=${file.size}")
+                withClue("$path answers its classpath bytes") {
+                    response.statusCode() shouldBe 200
+                    response.body().contentEquals(file) shouldBe true
+                }
+            }
+        }
+    }
+
+    /** The scoping the application serves through (`ScopedStylesheet`, read by reflection), as UTF-8 bytes. */
+    private fun scoped(
+        source: String,
+        scope: String,
+    ): ByteArray {
+        val type = Class.forName("co.datapipelines.web.ui.ScopedStylesheet")
+        val result =
+            type
+                .getMethod(
+                    "scope",
+                    String::class.java,
+                    String::class.java,
+                ).invoke(type.getField("INSTANCE").get(null), source, scope)
+        return (result.javaClass.getMethod("getText").invoke(result) as String).toByteArray(Charsets.UTF_8)
     }
 
     /** An MCP key in a workspace of its own, in the shape the key suites seed (`DependencyGuardsE2eTest`). */
@@ -633,6 +719,23 @@ class StaticCacheHeadersE2eTest {
                 "/vendor/design-system/primitives.css",
                 "/css/app.css",
                 "/css/dashboards.css",
+            )
+        const val STYLESHEET = "/css/datapipelines.css"
+
+        /** The scope selector of #1065 D1, written here: the class the runtime sets on the two elements. */
+        const val SCOPE = ".dp-scope"
+        const val THEME_PREFIX = "/css/datapipelines-theme-"
+        const val THEMES_DIR = "vendor/design-system/themes/"
+        const val THEME_FLOOR = 2
+
+        /** The five refused theme paths of #1065's Routes row, each with the status it answers. */
+        val THEME_REFUSED =
+            listOf(
+                "/css/datapipelines-theme-light.css" to 404,
+                "/css/datapipelines-theme-nope.css" to 404,
+                "/css/../css/datapipelines-theme-dark.css" to 400,
+                "/css/%2e%2e/css/datapipelines-theme-dark.css" to 400,
+                "/css/datapipelines-theme-dark.css%2f..%2fapp.css" to 400,
             )
         val LIBRARY_HEADERS = listOf("Content-Type", "X-Content-Type-Options", ACAO)
         val LIBRARY_NEAR_MISSES = listOf("/js/datapipelines.js.map", "/css/datapipelines.min.css")

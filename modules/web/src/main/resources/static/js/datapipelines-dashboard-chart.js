@@ -299,9 +299,25 @@
     var pending = false;
     var disposed = false;
     var observers = [];
+    // #1065 D6 — the theme a host sets with `data-theme` on the element handed to the runtime (its scope root, class
+    // `dp-scope`): the same observer watches that attribute there, beside the document element. The root is looked
+    // for at creation and, when the host is not in a scope yet, once more at the first draw.
+    var themeObserver = null;
+    var scopeLookups = 0;
+
+    function watchScope() {
+      if (themeObserver === null || scopeLookups >= 2 || typeof host.closest !== "function") return;
+      scopeLookups += 1;
+      var scopeRoot = host.closest(".dp-scope");
+      if (!scopeRoot) return;
+      scopeLookups = 2;
+      // The document element is observed for every attribute already; observing it again would narrow that.
+      if (scopeRoot !== doc.documentElement) themeObserver.observe(scopeRoot, { attributes: true, attributeFilter: ["data-theme"] });
+    }
 
     /** One draw from [columns]; returns the runtime's acknowledgement, or throws the refusal / the engine's error. */
     function draw(columns) {
+      watchScope();
       var R = engine();
       var L = interactions();
       var resolved = resolveTheme(svg);
@@ -384,11 +400,12 @@
       });
     }
     if (win && typeof win.MutationObserver === "function" && doc.documentElement) {
-      var themeObserver = new win.MutationObserver(schedule);
+      themeObserver = new win.MutationObserver(schedule);
       themeObserver.observe(doc.documentElement, { attributes: true });
       observers.push(function () {
         themeObserver.disconnect();
       });
+      watchScope();
     }
     if (win && typeof win.matchMedia === "function") {
       var scheme = win.matchMedia("(prefers-color-scheme: dark)");

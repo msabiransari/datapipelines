@@ -1519,3 +1519,34 @@ test("#497 (4): a restore render drops the rejected text", async () => {
     uninstallDom();
   }
 });
+
+// #1065 D4 (A.4) — the client library's stylesheet is scoped under `dp-scope`: the composite marks the two elements it
+// is handed, and its dispose takes the class back from an element only when the composite added it.
+test("#1065 D4: adapters() marks the container and the parameters pane with dp-scope; dispose removes only what it added", () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const classes = (el) => el.className.split(/\s+/).filter(Boolean);
+    const container = fakeElement("div");
+    container.className = "host-board";
+    const panel = fakeElement("aside");
+    const composite = runtime.adapters(container, { parametersContainer: panel });
+    console.log("1065-node A4 after-adapters container=" + container.className + " panel=" + panel.className);
+    assert.deepEqual(classes(container), ["host-board", "dp-scope"], "the container keeps the host's class and gains dp-scope");
+    assert.deepEqual(classes(panel), ["dp-scope"], "the parameters pane gains dp-scope");
+    composite.dispose();
+    console.log("1065-node A4 after-dispose container=" + JSON.stringify(container.className) + " panel=" + JSON.stringify(panel.className));
+    assert.deepEqual(classes(container), ["host-board"], "dispose takes dp-scope back, the host's class stays");
+    assert.deepEqual(classes(panel), [], "dispose takes dp-scope back from the pane");
+
+    const written = fakeElement("div");
+    written.className = "dp-scope host-board";
+    const alone = runtime.adapters(written);
+    assert.deepEqual(classes(written), ["dp-scope", "host-board"], "a class the host wrote is not added twice");
+    alone.dispose();
+    console.log("1065-node A4 host-written after-dispose=" + JSON.stringify(written.className));
+    assert.deepEqual(classes(written), ["dp-scope", "host-board"], "an element that carried dp-scope before keeps it");
+  } finally {
+    uninstallDom();
+  }
+});

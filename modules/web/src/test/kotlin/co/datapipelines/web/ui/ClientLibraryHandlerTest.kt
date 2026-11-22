@@ -35,9 +35,11 @@ class ClientLibraryHandlerTest {
         (registry.mapping() as SimpleUrlHandlerMapping).apply { applicationContext = context }
     }
 
+    /** #1065 D5 adds the theme sheets' pattern, whose names are a closed list (`ClientLibraryThemesTest`). */
     @Test
-    fun `the two patterns name the two files exactly`() {
-        mapping.urlMap.keys.sorted() shouldBe listOf("/css/{name:datapipelines\\.css}", "/js/{name:datapipelines\\.js}")
+    fun `the two patterns name the two files exactly, beside the theme sheets' pattern`() {
+        mapping.urlMap.keys.sorted() shouldBe
+            listOf("/css/{name:datapipelines-theme-[a-z]+\\.css}", "/css/{name:datapipelines\\.css}", "/js/{name:datapipelines\\.js}")
     }
 
     @Test

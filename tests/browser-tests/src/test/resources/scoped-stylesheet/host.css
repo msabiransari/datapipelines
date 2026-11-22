@@ -1,0 +1,11 @@
+/* The host's own look (#1065 A.6). Page-wide rules on html and body; every element rule is scoped to the host's own
+   container, as the skill tells a host to write them. */
+html { overflow-y: scroll; }
+body { font-family: Georgia, "Times New Roman", serif; margin: 24px; color: rgb(34, 34, 34); background-color: rgb(255, 253, 245); }
+#host h1 { font-size: 32px; margin: 0 0 16px; letter-spacing: 0.5px; }
+#host p { margin: 12px 0; line-height: 1.6; }
+#host a { color: rgb(176, 0, 32); text-decoration: underline; }
+#host button { padding: 6px 14px; border: 2px solid rgb(176, 0, 32); background-color: rgb(255, 255, 255); border-radius: 0; }
+#host input, #host select { font-size: 15px; padding: 4px; border: 1px solid rgb(120, 120, 120); }
+#host table { border-collapse: collapse; margin: 12px 0; }
+#host th, #host td { border: 1px solid rgb(200, 200, 200); padding: 4px 8px; }

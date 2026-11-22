@@ -20,8 +20,8 @@ What the page shows: a full-width board container (`#dashboard`) that
 3. `data-dp-dashboard-id` — the dashboard's UUID from `dashboards_get`, never its name
    (placeholder is the all-zero UUID).
 4. the theme — `datapipelines.css` carries the light theme; for another, link
-   `/vendor/design-system/themes/<name>.css` from the same origin AFTER it and
-   set `data-theme="<name>"` on `<html>`.
+   `/css/datapipelines-theme-<name>.css` from the same origin AFTER it and set
+   `data-theme="<name>"` on the two elements (`#dashboard` and `#parameters`).
 
 ## The relay
 

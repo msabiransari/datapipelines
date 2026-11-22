@@ -36,22 +36,29 @@ person releases the dashboard and holds the key.
 Read this before you write the host page.
 
 - One stylesheet, `/css/datapipelines.css`. It carries the light theme and every design token the
-  dashboard reads; the host defines none.
-- Another theme: load that theme's sheet AFTER it, `/vendor/design-system/themes/<name>.css` (the
-  names: `auto`, `dark`, `forest`, `healthcare`, `light`, `minimal`, `ocean`, `professional`,
-  `saas`), and set `data-theme="<name>"` on `<html>`. With the sheet in the page before the
-  dashboard starts, the charts are drawn in the theme from the first draw.
-- Changing the theme while the dashboard is shown: add the theme's sheet, wait for its `load`
-  event, then set `data-theme`. The cards follow the sheet; the charts are drawn pictures and are
-  redrawn when that attribute changes. Without the attribute the dark theme's tooltip shadow stays
-  the light one.
-- The fonts (Noto Sans, JetBrains Mono) are named by the stylesheet and served from the
-  datapipelines origin with the header that lets any page use them: the host hosts no font file. A
-  page with a Content-Security-Policy adds the datapipelines origin to `font-src` beside
-  `script-src` and `style-src`; no `'unsafe-inline'` is needed.
-- The stylesheet styles the WHOLE page it is loaded on — the body's font, size and margins, its
-  colours, headings and form controls — and defines its tokens on the page's root. When the host
-  page has styles of its own, put the dashboard on a page or a frame of its own.
+  dashboard reads; the host defines none. Its rules apply only inside the elements handed to the
+  runtime (`container`, `parametersContainer`), which the runtime marks with the class `dp-scope`:
+  the host's own elements, fonts, margins and custom properties are not touched, and no token is
+  defined outside those elements.
+- Another theme: add `/css/datapipelines-theme-<name>.css` after the library's stylesheet (the
+  names: `auto`, `dark`, `forest`, `healthcare`, `minimal`, `ocean`, `professional`, `saas`) and
+  set `data-theme="<name>"` on EACH element handed to the runtime. The sheet does nothing without
+  the attribute, so the theme changes at run time by changing the attribute alone (load the sheet
+  first; remove the attribute for light): cards and charts follow together. Two dashboards on one
+  page may carry two themes.
+- The container itself takes the theme's background, text colour and font. For your own
+  background, write a rule on your element by its id.
+- Sizes inside the dashboard are in px: your page's root font size does not change it.
+- Your page's rules still reach in where the library sets nothing: a rule on a bare element name
+  (`table`, `td`, `svg`, `span`, `label`, `select`, `input`, `button`) or on `*` also applies inside
+  the dashboard. Scope such rules to your own containers.
+- Two font family names (`Noto Sans`, `JetBrains Mono`) and three animation names
+  (`app-progress-slide`, `app-enter`, `dp-card-busy`) are defined for the whole page; do not reuse
+  them for something else.
+- The fonts are served from the datapipelines origin with the header that lets any page use them:
+  the host hosts no font file. A page with a Content-Security-Policy adds the datapipelines origin
+  to `font-src` beside `script-src` and `style-src`; no `'unsafe-inline'` is needed.
+- Browsers: Chrome 123, Firefox 120, Safari 17.5 or later.
 
 ## The page
 

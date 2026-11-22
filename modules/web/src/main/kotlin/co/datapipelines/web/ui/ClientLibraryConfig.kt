@@ -22,9 +22,12 @@ import java.net.URLStreamHandler
  * Each is the concatenation, in a listed order, of the SAME classpath sources the product's own pages load one by one,
  * each followed by one newline and nothing else ([ClientLibrary.join]): the script is the chart engine's files in the
  * engine's own load order, then the runtime's five files ([ClientLibrary.RUNTIME_FILES]); the stylesheet is the six
- * sheets ([ClientLibrary.STYLESHEETS]), the light theme among them. Nothing is committed and nothing is written by
- * the build: the running application joins the texts once, on the first request, and keeps them ([library]). The
- * product's own pages keep loading the source files, and every per-file path stays served.
+ * sheets ([ClientLibrary.STYLESHEETS]), the light theme among them, joined and then scoped under the class the runtime
+ * sets on the elements it is handed ([ScopedStylesheet], [ClientLibrary.SCOPE]; #1065), so its rules apply inside
+ * those elements only. Each other theme is one more sheet, [ClientLibrary.themePath], the vendor theme scoped under
+ * the class carrying `data-theme="<name>"` ([THEME_PATTERN], [ThemeFiles]; #1065 D5). Nothing is committed and nothing
+ * is written by the build: the running application builds the texts once, on the first request, and keeps them
+ * ([library]). The product's own pages keep loading the source files, and every per-file path stays served.
  *
  * Each name is a resource handler of its own, answering that name only ([OneFile], the pattern of
  * [JsRenderedAssetConfig.EngineFilesOnly]): the pattern's capture admits exactly the one file name, so every other name
@@ -40,6 +43,10 @@ class ClientLibraryConfig : WebMvcConfigurer {
     override fun addResourceHandlers(registry: ResourceHandlerRegistry) {
         serve(registry, ClientLibrary.SCRIPT_PATH) { library.script }
         serve(registry, ClientLibrary.STYLESHEET_PATH) { library.stylesheet }
+        StaticAssetCacheConfig
+            .withCacheRule(registry.addResourceHandler(THEME_PATTERN), StaticAssetCacheConfig.RECHECK_RULE)
+            .resourceChain(false)
+            .addResolver(ThemeFiles { library.theme(it) })
     }
 
     private fun serve(
@@ -51,6 +58,31 @@ class ClientLibraryConfig : WebMvcConfigurer {
             .withCacheRule(registry.addResourceHandler(pattern(path)), StaticAssetCacheConfig.RECHECK_RULE)
             .resourceChain(false)
             .addResolver(OneFile(path, text))
+    }
+
+    /**
+     * A resolver that answers a theme sheet's name (#1065 D5), `datapipelines-theme-<name>.css` for a name of the closed
+     * list [ClientLibrary.THEMES], with [text] of that name; any other name is null, so the handler answers 404. The name
+     * selects from the list and is never joined into a file path.
+     */
+    internal class ThemeFiles(
+        private val text: (String) -> ByteArray,
+    ) : ResourceResolver {
+        override fun resolveResource(
+            request: HttpServletRequest?,
+            requestPath: String,
+            locations: List<Resource>,
+            chain: ResourceResolverChain,
+        ): Resource? = themeOf(requestPath)?.let { JoinedFile.of(ClientLibrary.themePath(it), text(it)) }
+
+        override fun resolveUrlPath(
+            resourcePath: String,
+            locations: List<Resource>,
+            chain: ResourceResolverChain,
+        ): String? = themeOf(resourcePath)?.let { resourcePath }
+
+        private fun themeOf(requestPath: String): String? =
+            ClientLibrary.THEMES.firstOrNull { requestPath == ClientLibrary.themePath(it).substringAfterLast('/') }
     }
 
     /**
@@ -78,6 +110,12 @@ class ClientLibraryConfig : WebMvcConfigurer {
     }
 
     companion object {
+        /**
+         * The theme sheets' handler pattern (#1065 D5): one capture admitting `datapipelines-theme-<lower-case letters>.css`;
+         * [ThemeFiles] answers only the names of [ClientLibrary.THEMES], so every other name is that handler's 404.
+         */
+        const val THEME_PATTERN: String = "/css/{name:datapipelines-theme-[a-z]+\\.css}"
+
         /**
          * The library the application serves: the ONE call that hands the builder the engine's order and texts (D2), so
          * an engine file a type lane adds reaches the script with no edit here. Built on first use, then kept.
@@ -113,8 +151,16 @@ class ClientLibrary(
     /** The script's bytes (UTF-8): the engine's files, then [RUNTIME_FILES]. */
     val script: ByteArray by lazy { script(engineNames, engineSource, staticSource).toByteArray(Charsets.UTF_8) }
 
-    /** The stylesheet's bytes (UTF-8): [STYLESHEETS]. */
+    /** The stylesheet's bytes (UTF-8): [STYLESHEETS], joined, then scoped under [SCOPE] (#1065 D1). */
     val stylesheet: ByteArray by lazy { stylesheet(staticSource).toByteArray(Charsets.UTF_8) }
+
+    /** Each theme sheet's bytes (UTF-8), every name of [THEMES] built on the first read of any of them, then kept. */
+    private val themes: Map<String, ByteArray> by lazy {
+        THEMES.associateWith { themeStylesheet(it, staticSource).toByteArray(Charsets.UTF_8) }
+    }
+
+    /** The theme sheet of [name], one of [THEMES] (#1065 D5); any other name fails. */
+    fun theme(name: String): ByteArray = requireNotNull(themes[name]) { "not a theme sheet of the client library: $name" }
 
     companion object {
         /** Where a page finds the script. */
@@ -159,8 +205,32 @@ class ClientLibrary(
             staticSource: (String) -> String,
         ): String = join(engineNames, engineSource) + join(RUNTIME_FILES, staticSource)
 
-        /** The stylesheet's text: [STYLESHEETS] read by [staticSource]. */
-        fun stylesheet(staticSource: (String) -> String): String = join(STYLESHEETS, staticSource)
+        /**
+         * The class the runtime sets on the elements it is handed (#1065 D4), and so the selector every rule of the
+         * stylesheet is scoped under: the rules apply inside those elements only.
+         */
+        const val SCOPE: String = ".dp-scope"
+
+        /**
+         * The themes a host may add after the stylesheet (#1065 D5), each a vendor sheet under `themes/`: every one of
+         * them but `light`, which the stylesheet carries. A test holds this list equal to that directory's files.
+         */
+        val THEMES: List<String> = listOf("auto", "dark", "forest", "healthcare", "minimal", "ocean", "professional", "saas")
+
+        /** Where a page finds the theme sheet of [name]. */
+        fun themePath(name: String): String = "/css/datapipelines-theme-$name.css"
+
+        /** The selector a theme sheet is scoped under: the scope carrying `data-theme="<name>"`, so it waits for that. */
+        fun themeScope(name: String): String = "$SCOPE[data-theme=\"$name\"]"
+
+        /** The stylesheet's text: [STYLESHEETS] read by [staticSource], joined, then scoped under [SCOPE]. */
+        fun stylesheet(staticSource: (String) -> String): String = ScopedStylesheet.scope(join(STYLESHEETS, staticSource), SCOPE).text
+
+        /** The theme sheet of [name]: the vendor sheet `themes/<name>.css` scoped under [themeScope]. */
+        fun themeStylesheet(
+            name: String,
+            staticSource: (String) -> String,
+        ): String = ScopedStylesheet.scope(staticSource("vendor/design-system/themes/$name.css"), themeScope(name)).text
 
         /** Every name's text in order, each followed by one newline (`JsRenderedEngineFiles.concatenation`'s rule). */
         fun join(

@@ -538,3 +538,81 @@ test("normalization keeps finite shares when their unscaled absolute total overf
     assert.deepEqual(out.index.series.map((s) => s.tip[0][1].split(": ")[1]), expected, String(values));
   }
 });
+
+// #1065 D6 (A.5) — the theme a host sets on the element handed to the runtime: the chart's one MutationObserver also
+// watches `data-theme` on its scope root (`host.closest(".dp-scope")`). The suite's stand-in keeps one target per
+// observer, so this case gives the observer a recording stand-in that delivers a change only to a registration whose
+// options admit it (the platform's `attributeFilter` rule), and the host a `closest`.
+function scopedMount(lookups) {
+  const browser = fakeBrowser();
+  const registrations = [];
+  let observer = null;
+  browser.win.MutationObserver = class {
+    constructor(fn) {
+      this.fn = fn;
+      this.connected = false;
+      observer = this;
+    }
+    observe(target, options) {
+      registrations.push({ target, options });
+      this.connected = true;
+    }
+    disconnect() {
+      this.connected = false;
+    }
+  };
+  const asked = [];
+  browser.host.closest = (selector) => {
+    asked.push(selector);
+    return lookups.shift() || null;
+  };
+  const handle = create({ host: browser.host, occurrence: { name: "sales", display_name: "Sales", description: null, config: BAR, columns: COLUMNS } });
+  /** An attribute change on [target], delivered as the platform would: only through a registration that admits it. */
+  const change = (target, attribute) => {
+    const admitted = registrations.some(
+      (r) => r.target === target && r.options.attributes && (!r.options.attributeFilter || r.options.attributeFilter.includes(attribute)),
+    );
+    if (admitted && observer.connected) observer.fn([{ type: "attributes", target, attributeName: attribute }]);
+  };
+  return { browser, handle, registrations, observer: () => observer, asked, change };
+}
+
+test("#1065 D6: a data-theme change on the scope root redraws once, another attribute none, and dispose disconnects", async () => {
+  const scope = { tagName: "DIV", className: "dp-scope" };
+  const { browser, handle, registrations, observer, asked, change } = scopedMount([scope]);
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  console.log("1065-node A5 registrations=" + JSON.stringify(registrations.map((r) => ({ target: r.target.tagName, options: r.options }))));
+  assert.deepEqual(asked, [".dp-scope"], "the scope root is looked for once when it is found at creation");
+  assert.equal(registrations.length, 2);
+  assert.equal(registrations[0].target, browser.doc.documentElement, "the document element's observation stays (the product's pages)");
+  assert.deepEqual(registrations[0].options, { attributes: true });
+  assert.equal(registrations[1].target, scope);
+  assert.deepEqual(registrations[1].options, { attributes: true, attributeFilter: ["data-theme"] });
+  change(scope, "data-theme");
+  assert.equal(browser.frames.length, 1, "a data-theme change on the scope root schedules one redraw");
+  browser.flushFrames();
+  change(scope, "class");
+  change(scope, "style");
+  assert.equal(browser.frames.length, 0, "another attribute of the scope root schedules none");
+  handle.dispose();
+  assert.equal(observer().connected, false, "dispose disconnects the observer");
+  change(scope, "data-theme");
+  assert.equal(browser.frames.length, 0, "after dispose a theme change schedules nothing");
+});
+
+test("#1065 D6: a host not yet in a scope at creation is looked up once more at the first draw, and never again", async () => {
+  const scope = { tagName: "DIV", className: "dp-scope" };
+  const { browser, handle, registrations, asked, change } = scopedMount([null, scope, scope]);
+  assert.equal(registrations.length, 1, "nothing to watch at creation but the document element");
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  assert.equal(registrations.length, 2, "the first draw found the scope root and watches it");
+  assert.equal(registrations[1].target, scope);
+  browser.flushFrames();
+  handle.resize();
+  browser.flushFrames();
+  await handle.renderData({ name: "sales" }, 2, ROWS);
+  console.log("1065-node A5 late lookups=" + asked.length);
+  assert.deepEqual(asked, [".dp-scope", ".dp-scope"], "at creation and at the first draw, no other time");
+  change(scope, "data-theme");
+  assert.equal(browser.frames.length, 1);
+});

@@ -35,11 +35,18 @@ class ClientLibraryTest {
         firstDifference(sources, ClientLibraryConfig.library.script) shouldBe null
     }
 
+    /** #1065 D1, A.3: the six sheets joined as before, then passed ONCE through the scoping under `.dp-scope`. */
     @Test
-    fun `the served stylesheet is the six sheets in the example's order, each followed by one newline`() {
-        val sources = SHEETS.map { "$STATIC_DIR/$it" to TestRepoFiles.read("$STATIC_DIR/$it") }
-        println("1064|A1|stylesheet|sheets=${sources.size} bytes=${ClientLibraryConfig.library.stylesheet.size}")
-        firstDifference(sources, ClientLibraryConfig.library.stylesheet) shouldBe null
+    fun `the served stylesheet is the six sheets in the example's order, each followed by one newline, scoped under dp-scope`() {
+        val joined = SHEETS.joinToString("") { TestRepoFiles.read("$STATIC_DIR/$it") + "\n" }
+        val expected = ScopedStylesheet.scope(joined, ".dp-scope").text.toByteArray(Charsets.UTF_8)
+        println(
+            "1064|A1|stylesheet|sheets=${SHEETS.size} joined=${joined.toByteArray().size} " +
+                "bytes=${ClientLibraryConfig.library.stylesheet.size}",
+        )
+        withClue("the served stylesheet is the scoping of the join of the six sheets") {
+            ClientLibraryConfig.library.stylesheet.contentEquals(expected) shouldBe true
+        }
     }
 
     @Test
