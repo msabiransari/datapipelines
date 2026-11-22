@@ -1,14 +1,14 @@
 ---
 area: dashboards
 layer: reference
-purpose: Embedding a released dashboard in a host page outside this app — the dashboard key, the proxy, the client runtime, the chart engine's scripts, the stylesheets and the lifecycle.
+purpose: Embedding a released dashboard in a host page outside this app — the dashboard key, the proxy, the client library's one script and one stylesheet, the theme, the fonts and the lifecycle.
 ---
 
 # Embed a dashboard in a page you own
 
-An embedded dashboard is your page hosting the client runtime, the stylesheets and the renderer
-scripts from this app's static assets, while the data flows through a server-side `dashboard` key —
-never through the page. The working example is `examples/dashboard-embed/` (static HTML plus
+An embedded dashboard is your page loading the client library — one script and one stylesheet —
+from this app's origin, while the data flows through a server-side `dashboard` key — never through
+the page. The working example is `examples/dashboard-embed/` (static HTML plus
 `embed.js`); the reference relay is `examples/dashboard-proxy/proxy.mjs`. Embedding is the step
 AFTER a release: the authoring loop ends at "GREEN tests, awaiting review", and nothing here changes
 what you author. The agent writes the dashboard, the host-page files and the proxy's run line; the
@@ -36,29 +36,46 @@ person releases the dashboard and holds the key.
   its own. One key is one budget: the SSE stream cap and the rate limit are shared by every visitor
   behind it, so one key per host application, sized for that traffic.
 
+## Theme and stylesheet
+
+Read this before you write the host page.
+
+- One stylesheet, `/css/datapipelines.css`. It carries the light theme and every design token the
+  dashboard reads; the host defines none.
+- Another theme: load that theme's sheet AFTER it, `/vendor/design-system/themes/<name>.css` (the
+  names: `auto`, `dark`, `forest`, `healthcare`, `light`, `minimal`, `ocean`, `professional`,
+  `saas`), and set `data-theme="<name>"` on `<html>`. With the sheet in the page before the
+  dashboard starts, the charts are drawn in the theme from the first draw.
+- Changing the theme while the dashboard is shown: add the theme's sheet, wait for its `load`
+  event, then set `data-theme`. The cards follow the sheet; the charts are drawn pictures and are
+  redrawn when that attribute changes. Without the attribute the dark theme's tooltip shadow stays
+  the light one.
+- The fonts (Noto Sans, JetBrains Mono) are named by the stylesheet and served from the
+  datapipelines origin with the header that lets any page use them: the host hosts no font file. A
+  page with a Content-Security-Policy adds the datapipelines origin to `font-src` beside
+  `script-src` and `style-src`; no `'unsafe-inline'` is needed.
+- The stylesheet styles the WHOLE page it is loaded on — the body's font, size and margins, its
+  colours, headings and form controls — and defines its tokens on the page's root. When the host
+  page has styles of its own, put the dashboard on a page or a frame of its own.
+
 ## The page
 
-- The scripts, from the datapipelines origin (public `/js/**`, `/css/**`), as plain script tags in
-  this order: first the chart engine's files, `/js/js-rendered/<name>` for every name of the engine's
-  load order — the datapipelines client library that draws every chart; the example page
-  `examples/dashboard-embed/index.html` carries the current list, in order, and the server's own pages
-  load the same files; then the runtime `/js/datapipelines-dashboard.js`; then the charts' interaction
-  layer `/js/datapipelines-chart-interactions.js` (tooltip, highlight, legend switch, keyboard; the
-  chart adapter refuses to draw without it); then the `chart` kind's adapter
-  `/js/datapipelines-dashboard-chart.js` (registers the kind at script load, before init); then
-  the other kinds' adapters your dashboards use: `datapipelines-dashboard-table.js`,
-  `datapipelines-dashboard-kpi.js` (each registers its renderer kind at script load, before init).
+- Two files from the datapipelines origin (public `/js/**`, `/css/**`): the stylesheet
+  `/css/datapipelines.css` in the page's head, and the script `/js/datapipelines.js` as one plain
+  script tag before your boot code. The script is the whole client library: the chart engine that
+  draws every chart, the runtime `DatapipelinesDashboard`, the charts' interaction layer (tooltip,
+  highlight, legend switch, keyboard) and the `chart`, `table` and `kpi` kinds' adapters, each
+  registering its kind at load, before init. A new chart type arrives inside the same file: the
+  page does not change. The example page `examples/dashboard-embed/index.html` is that page. The
+  per-file URLs the app's own pages load (`/js/js-rendered/<name>`, `/js/datapipelines-dashboard.js`
+  and the others) still answer; a host page needs none of them.
   The runtime refuses at bootstrap a renderer no loaded script registered (`renderer.unsupported`)
   and a pinned visualization that needs a different major (`renderer.version_mismatch`).
-- The stylesheets, in this order: `/vendor/design-system/tokens.css`, the theme sheet
-  (`/vendor/design-system/themes/light.css` for the default theme), `/vendor/design-system/base.css`,
-  `/vendor/design-system/primitives.css`, `/css/app.css`, then `/css/dashboards.css`.
-  `dashboards.css` reads dozens of design tokens defined in the design-system sheets, not in
-  itself — an `app.css` + `dashboards.css` pair alone renders half-styled. `app.css` sets the
-  `--chart-*` tokens for every theme. A host that brings its own stylesheet must define at least
-  `--dashboard-row-unit` (the composite's row unit); a `--chart-*` token it leaves undeclared draws
-  its default, and a value that token may not hold draws its default with a `chart.token-refused`
-  warning naming it.
+- A host that does not load `/css/datapipelines.css` at all and brings its own stylesheet must
+  define at least `--dashboard-row-unit` (the composite's row unit); a `--chart-*` token it leaves
+  undeclared draws its default, and a value that token may not hold draws its default with a
+  `chart.token-refused` warning naming it. With the library's stylesheet loaded, a host may set its
+  own `--chart-*` tokens on the board container.
 - Two elements: the board container and — when the dashboard has a parameter set — a parameters
   pane. Build the composite adapter and init:
 
@@ -92,23 +109,25 @@ person releases the dashboard and holds the key.
   `notify` (deliver a notification), `resize` (respond to layout changes), `dispose` (unmount all
   of it). A custom renderer kind registers before init with
   `DatapipelinesDashboard.registerRenderer({ kind, version, create })`.
-- The runtime is DOM-only — one script, no dependencies, a container element. In React, Angular,
+- The client library is DOM-only — one script, no dependencies, a container element. In React, Angular,
   Vue or server-rendered HTML: init when the component mounts, `dispose()` when it unmounts, keep
   the container element stable between the two, and never re-render the container's children
   yourself.
-- A page with a Content-Security-Policy must allow the scripts and stylesheets from the datapipelines
-  origin; nothing else. The chart engine and the runtime write no inline style and no markup string,
-  so no style allowance is needed.
+- A page with a Content-Security-Policy names the datapipelines origin in `script-src`, `style-src`
+  and `font-src`, and your proxy's origin in `connect-src`; nothing else. The library writes no
+  inline style and no markup string, so no `'unsafe-inline'` is needed.
 
 ## What goes wrong
 
 - `init.version_unsupported` — the version is neither `"released"` nor a positive integer.
 - `DashboardAlreadyMounted` — the container already hosts an instance; dispose first.
-- `init.invalid` naming `charts` — remove the option; the chart engine's files draw the charts.
-- `renderer.unsupported` / `renderer.version_mismatch` — fix the script tags, not the code: load the
-  kind's adapter before init.
+- `init.invalid` naming `charts` — remove the option; the client library draws the charts.
+- `renderer.unsupported` / `renderer.version_mismatch` — fix the script tag, not the code: load
+  `/js/datapipelines.js` before init.
 - A chart card in error, with a browser console line saying the chart engine is not loaded — the
-  chart engine's files are missing or out of order; load every `/js/js-rendered/` file, in the example's order, before the runtime.
+  page loads the runtime's own file without the engine; load `/js/datapipelines.js` instead.
+- Text in a fallback font, with a browser console line refusing a font — the page's
+  Content-Security-Policy leaves the datapipelines origin out of `font-src`.
 - A rejected `ready` — the rejection is the runtime's one error type: `code` (the stable reason),
   `message`, `retryable` and `details` (possibly empty); it carries no step field. A bootstrap
   failure is ALSO published as a `bootstrap` notification — `{ scope: "bootstrap"`, `severity`,
@@ -125,7 +144,7 @@ person releases the dashboard and holds the key.
 
 | Side | Does |
 | ---- | ---- |
-| The agent | authors and validates the dashboard, runs its visualization tests to GREEN, writes the host page (the two data attributes, the scripts in order) and the proxy's run line with placeholders, and names the folder to bind. |
+| The agent | authors and validates the dashboard, runs its visualization tests to GREEN, writes the host page (the two data attributes, the library's stylesheet and script) and the proxy's run line with placeholders, and names the folder to bind. |
 | The person | releases the dashboard, mints and binds the `dashboard` key, deploys the proxy with the key in its environment behind their own authentication. |
 
 The agent never calls its own work live.
