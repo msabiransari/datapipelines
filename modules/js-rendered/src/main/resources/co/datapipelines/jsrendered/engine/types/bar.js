@@ -158,6 +158,25 @@
         return { num: r.num, exact: r.exact, text: L.withUnit(T.value(r.exact !== null ? r.exact : r.num, format), s2.unit), aggregate: text };
       });
     });
+    // A stack at zero whose sum, up or down, is beyond float64 is not drawn, as a cell that is not finite is not
+    // (owner 2026-11-22, #1011): decided over every series, shown or hidden, so a legend switch never brings it back.
+    if (stack === "zero") {
+      for (var oc = 0; oc < categories.length; oc++) {
+        var up = 0, down = 0;
+        for (var os = 0; os < cells.length; os++) {
+          var on = cells[os][oc].num;
+          if (on === null) continue;
+          if (on < 0) down += on;
+          else up += on;
+        }
+        if (isFinite(up) && isFinite(down)) continue;
+        for (var ok = 0; ok < cells.length; ok++) {
+          if (cells[ok][oc].num === null) continue;
+          undrawn++;
+          cells[ok][oc] = { num: null, exact: null, text: "", aggregate: null };
+        }
+      }
+    }
     if (undrawn) warnings.push({ code: "chart.rule.non-finite" });
     if (nonPositive) warnings.push({ code: "chart.rule.log-nonpositive" });
     var markCount = 0;
