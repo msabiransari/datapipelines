@@ -2,11 +2,13 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.SecurityHeaders
 import jakarta.servlet.FilterChain
+import jakarta.servlet.ServletOutputStream
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import jakarta.servlet.http.HttpServletResponseWrapper
 import org.springframework.boot.autoconfigure.security.SecurityProperties
 import org.springframework.web.filter.OncePerRequestFilter
+import java.io.PrintWriter
 
 /**
  * An error answer on the font path is not storable (#1023 round 3, #1028).
@@ -29,6 +31,19 @@ import org.springframework.web.filter.OncePerRequestFilter
  * after the chain's header writer skipped its cache headers). Being outside the chain also means a request the
  * firewall refuses under the font prefix is answered with these headers. On the container's error dispatch the
  * request's path is the error page's, so the predicate is false and nothing is wrapped twice.
+ *
+ * ## Any origin may use a font file (#1064 D4)
+ * A page of another origin that loads the client library's stylesheet fetches its fonts from here in CORS mode, and a
+ * browser refuses a font answer without `Access-Control-Allow-Origin` (measured: six of six faces failed). So a
+ * SUCCESSFUL answer of a font file (200, 206, 304; GET or HEAD; with or without an `Origin` on the request) carries
+ * [ALLOW_ORIGIN_HEADER]: [ANY_ORIGIN] ([AnyOriginOnSuccess], inside the wrapper above). An answer of 400 or above never
+ * does — a missing name (404), a range the file cannot satisfy (416), the chain's own refusal (403). The handler sends
+ * 416 AFTER writing its success headers and a servlet response cannot take a header back, so the header is not written
+ * with them: it is written at the moment the outcome is known — when the body starts (the status is final by then),
+ * when the response is flushed, or when the chain returns with nothing committed (a HEAD, a 304) — and only if the
+ * status then is below 400. The star, never an echoed origin: the bytes are public and the same for every visitor,
+ * and the answer is kept a year by any cache, so an echoed origin would be wrong for the next site. No credentials
+ * header, no other path, no preflight (a font fetch sends none).
  */
 class FontErrorCacheFilter : OncePerRequestFilter() {
     override fun doFilterInternal(
@@ -36,7 +51,46 @@ class FontErrorCacheFilter : OncePerRequestFilter() {
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        filterChain.doFilter(request, if (SecurityHeaders.isFontFile(request)) NotStorableOnError(response) else response)
+        if (!SecurityHeaders.isFontFile(request)) {
+            filterChain.doFilter(request, response)
+            return
+        }
+        val anyOrigin = AnyOriginOnSuccess(response)
+        filterChain.doFilter(request, NotStorableOnError(anyOrigin))
+        anyOrigin.chainReturned()
+    }
+
+    /**
+     * A response that sets [ALLOW_ORIGIN_HEADER]: [ANY_ORIGIN] when its outcome is known and is a success: when the
+     * body is first asked for, when it is flushed, or when the chain returns with nothing committed
+     * ([chainReturned]), each only while the status is below [FIRST_ERROR_STATUS] and the response is not committed.
+     */
+    class AnyOriginOnSuccess(
+        response: HttpServletResponse,
+    ) : HttpServletResponseWrapper(response) {
+        override fun getOutputStream(): ServletOutputStream {
+            allowIfSuccess()
+            return super.getOutputStream()
+        }
+
+        override fun getWriter(): PrintWriter {
+            allowIfSuccess()
+            return super.getWriter()
+        }
+
+        override fun flushBuffer() {
+            allowIfSuccess()
+            super.flushBuffer()
+        }
+
+        /** The chain has returned: an answer with no body (a HEAD, a 304) gets the header here, if a success. */
+        fun chainReturned() = allowIfSuccess()
+
+        private fun allowIfSuccess() {
+            if (status < FIRST_ERROR_STATUS && !isCommitted && !containsHeader(ALLOW_ORIGIN_HEADER)) {
+                setHeader(ALLOW_ORIGIN_HEADER, ANY_ORIGIN)
+            }
+        }
     }
 
     /**
@@ -88,5 +142,11 @@ class FontErrorCacheFilter : OncePerRequestFilter() {
 
         /** The security chain's own `Expires`. */
         const val EXPIRES: String = "0"
+
+        /** The header that lets a page of another origin use a font file (#1064 D4). */
+        const val ALLOW_ORIGIN_HEADER: String = "Access-Control-Allow-Origin"
+
+        /** Any origin: the font files are public and identical for every visitor. */
+        const val ANY_ORIGIN: String = "*"
     }
 }

@@ -4,11 +4,10 @@
  *
  * Plain ES2019, one IIFE, no module syntax: it loads in any browser and under
  * `node --test`'s fake DOM via `require`. It expects, in this order:
- *   1. the chart engine's files under /js/js-rendered/, in the engine's load order,
- *   2. /js/datapipelines-dashboard.js (publishes window.DatapipelinesDashboard),
- *   3. the chart kind's adapter, then the table and KPI renderers the dashboard's
- *      kinds need,
- *   4. this file — it mounts every [data-dp-embed] container automatically.
+ *   1. the client library's script, /js/datapipelines.js (the chart engine, the
+ *      runtime publishing window.DatapipelinesDashboard, and the chart, table and
+ *      KPI adapters),
+ *   2. this file — it mounts every [data-dp-embed] container automatically.
  *
  * The host page declares ONE container (and optionally a parameters pane):
  *   <div data-dp-embed
