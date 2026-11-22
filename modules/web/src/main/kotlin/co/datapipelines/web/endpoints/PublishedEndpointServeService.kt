@@ -327,17 +327,29 @@ class PublishedEndpointServeService(
                     MutationPin(pointed.api.version, pointed.api.body.timeoutSeconds, pointed.pipelineId, pointed.executable)
                 }
 
-            @Suppress("ReturnCount") // one early null per link of the resolution chain, in its order
             override fun original(
                 endpoint: PublishedEndpoint,
                 reservation: PublishedMutationReservation,
+            ): MutationPin? = pinOf(endpoint, reservation, servableOnly = true)
+
+            override fun admittedUnder(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+            ): MutationPin? = pinOf(endpoint, reservation, servableOnly = false)
+
+            /** The reservation's exact pin; [servableOnly] applies D63 (to run it), otherwise its rules are enough. */
+            @Suppress("ReturnCount") // one early null per link of the resolution chain, in its order
+            private fun pinOf(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+                servableOnly: Boolean,
             ): MutationPin? {
                 val api = versions.find(endpoint.id, reservation.apiVersion) ?: return null
-                if (!servable(api.status)) return null
+                if (servableOnly && !servable(api.status)) return null
                 val record = pipelineRepository.findById(endpoint.workspaceId, reservation.pipelineId) ?: return null
                 val detail =
                     pipelineRepository.findVersionDetail(endpoint.workspaceId, record.id, reservation.pipelineVersion) ?: return null
-                if (!servable(detail.status)) return null
+                if (servableOnly && !servable(detail.status)) return null
                 val executable = pipelines.findExecutable(endpoint.workspaceId, ReadLens.Everything, record, detail.version) ?: return null
                 return MutationPin(api.version, api.body.timeoutSeconds, record.id, executable)
             }

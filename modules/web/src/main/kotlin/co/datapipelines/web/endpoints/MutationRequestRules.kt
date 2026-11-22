@@ -4,6 +4,8 @@ import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.PublishedIdempotencyKey
 import co.datapipelines.executor.ResultConfig
+import co.datapipelines.pipeline.ParameterBinder
+import co.datapipelines.pipeline.ParameterBindingResult
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.body.StructuredBody
 import co.datapipelines.web.endpoints.PublishedEndpointServeService.Outcome
@@ -42,6 +44,11 @@ class MutationRequestRules(
     sealed interface Validated {
         class Valid(
             val valid: EndpointRequestValidator.Outcome.Valid,
+            /**
+             * Every declared parameter as the pin BINDS it — typed and defaulted ([ParameterBinder]) — the input the
+             * replay fingerprint compares (published-mutation-apis §4: typed path/query, under the original pin).
+             */
+            val typed: Map<String, Any?>,
         ) : Validated
 
         class Refused(
@@ -112,7 +119,32 @@ class MutationRequestRules(
             }
 
             is EndpointRequestValidator.Outcome.Valid -> {
-                if (entries.isEmpty()) Validated.Valid(validated) else Validated.Refused(invalid(entries))
+                if (entries.isNotEmpty()) return Validated.Refused(invalid(entries))
+                when (val bound = ParameterBinder(pipeline.parameters).bind(validated.parameters)) {
+                    is ParameterBindingResult.Bound -> {
+                        Validated.Valid(validated, bound.context.asMap())
+                    }
+
+                    // The validator above ran this same binder over these same values, so this is unreachable; if it
+                    // ever is reached, it is the same 400, never a fingerprint over values the run would refuse.
+                    is ParameterBindingResult.Rejected -> {
+                        val declared = pipeline.parameters.keys
+                        Validated.Refused(
+                            invalid(
+                                bound.failures.map { failure ->
+                                    sanitized(
+                                        EndpointRequestValidator.Defect(
+                                            failure.details["parameter"] as? String,
+                                            failure.code,
+                                            failure.message,
+                                        ),
+                                        declared,
+                                    )
+                                },
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

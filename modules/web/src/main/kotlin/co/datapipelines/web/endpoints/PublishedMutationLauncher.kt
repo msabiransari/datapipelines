@@ -50,6 +50,16 @@ import kotlin.time.Duration.Companion.seconds
  * record) ran no business SQL, so its reservation is released — conditionally: only while it is still this caller's
  * claim and no execution row exists — and the refusal is the answer (`429 pipeline.execution.concurrency_limit`, …).
  * The same key may then be retried. An admitted execution keeps its reservation on failure or abort.
+ *
+ * ## Only confirmed state answers
+ *
+ * The release and the execution-record read each have three outcomes, never two: confirmed yes, confirmed no, and
+ * "the store did not answer". A refused release (the claim is another retry's, or the row exists) is answered from the
+ * persisted row; with no row, another retry holds the claim, which is the `202` any retry of an admitted request gets.
+ * A release or a record read the store did not answer leaves no confirmed execution state, so the answer is
+ * `503 idempotency.reservation_unavailable` (published-mutation-apis §4) — the reservation kept, nothing assumed
+ * running, nothing claimed to be unadmitted, and the same key answers from the real state once the store is back.
+ * A persisted row that DOES answer still gives its normal answer.
  */
 @Suppress("LongParameterList") // one composition root for one start; every collaborator is used
 class PublishedMutationLauncher(
@@ -72,8 +82,29 @@ class PublishedMutationLauncher(
 
         data class Thrown(
             val error: Throwable,
-            val released: Boolean,
+            val release: Release,
         ) : Attempt
+    }
+
+    /** The conditional release's three outcomes. */
+    private enum class Release {
+        /** The store deleted the unstarted reservation: nothing was admitted, the key is free. */
+        RELEASED,
+
+        /** The store answered no: the claim is no longer this caller's, or an execution row exists. */
+        REFUSED,
+
+        /** The store did not answer: the reservation's state is unknown. */
+        UNCONFIRMED,
+    }
+
+    /** The execution-record read: answered (the row, or null for no row), or not answered at all. */
+    private sealed interface Recorded {
+        data class Answered(
+            val record: ExecutionRecord?,
+        ) : Recorded
+
+        data object Unreadable : Recorded
     }
 
     /** Launches [request] for [reservation] (whose id the request carries) and answers within [timeoutSeconds]. */
@@ -100,7 +131,7 @@ class PublishedMutationLauncher(
         val timeout = endpointsProperties.clampTimeout(timeoutSeconds)
         // Cancels the AWAIT, never the run: the Deferred belongs to `scope`. Null is the 202 branch.
         val attempt = runBlocking { withTimeoutOrNull(timeout.seconds) { deferred.await() } }
-        if (attempt is Attempt.Thrown && attempt.released && attempt.error !is ExecutionRecordUnwritableException) {
+        if (attempt is Attempt.Thrown && attempt.release == Release.RELEASED && attempt.error !is ExecutionRecordUnwritableException) {
             // A catalogued refusal of a run that never started (the concurrency limit's 429, the body admission's
             // 400, …) answers exactly as the framework surfaces answer it: the global handler maps its code to the
             // catalogue's status. The reservation is already released, so the same key may be retried.
@@ -126,13 +157,27 @@ class PublishedMutationLauncher(
             // The run may fail with anything its coroutine threw; the reservation decision must be made for every one.
             @Suppress("TooGenericExceptionCaught") e: Throwable,
         ) {
-            val released =
+            val release =
                 withContext(NonCancellable + Dispatchers.IO) {
-                    runCatching { reservations.releaseUnstarted(reservation.executionId, reservation.ownerToken) }
-                        .onFailure { log.warn("event=endpoint.mutation.release_failed execution_id={}", reservation.executionId, it) }
-                        .getOrDefault(false)
+                    try {
+                        if (reservations.releaseUnstarted(reservation.executionId, reservation.ownerToken)) {
+                            Release.RELEASED
+                        } else {
+                            Release.REFUSED
+                        }
+                    } catch (
+                        // Whatever the store threw, the release was not confirmed: the state is unknown, never "released".
+                        @Suppress("TooGenericExceptionCaught") failure: RuntimeException,
+                    ) {
+                        log.warn(
+                            "event=endpoint.mutation.release_failed execution_id={} error={}",
+                            reservation.executionId,
+                            failure.javaClass.simpleName,
+                        )
+                        Release.UNCONFIRMED
+                    }
                 }
-            Attempt.Thrown(e, released)
+            Attempt.Thrown(e, release)
         }
 
     private fun answer(
@@ -150,28 +195,61 @@ class PublishedMutationLauncher(
                 if (result.status == ExecutionStatus.SUCCESS) {
                     answers.fromSuccess(reservation, result.resultUnavailable, result.nodeStats, pageRows) to OUTCOME_COMPLETED
                 } else {
-                    answers.fromRecord(reservation, record(reservation), pageRows) to OUTCOME_FAILED
+                    // The run finished and recorded fail-closed, so its row is the answer; a row that cannot be read
+                    // (or is missing) confirms nothing, and a 202 here would assert a run that has ended.
+                    val row = (record(reservation) as? Recorded.Answered)?.record
+                    row?.let { answers.fromRecord(reservation, it, pageRows) to OUTCOME_FAILED }
+                        ?: (reservationUnavailable() to OUTCOME_RESERVATION_UNAVAILABLE)
                 }
             }
 
             is Attempt.Thrown -> {
-                if (attempt.released) {
-                    unrecorded() to OUTCOME_NOT_STARTED
-                } else {
-                    // The row exists (the run failed after it started) or the release could not be confirmed: the
-                    // persisted state is the answer — a terminal row's 409, or 202 while it is not yet terminal.
-                    answers.fromRecord(reservation, record(reservation), pageRows) to OUTCOME_FAILED
-                }
+                thrownAnswer(attempt.release, reservation, pageRows)
             }
         }
 
-    private fun record(reservation: PublishedMutationReservation): ExecutionRecord? =
-        try {
-            executions.findById(reservation.workspaceId, reservation.executionId)
-        } catch (e: DataAccessException) {
-            log.warn("event=endpoint.mutation.record_unreadable execution_id={}", reservation.executionId, e)
-            null
+    /** The answer of a run that threw, by what the release CONFIRMED (see the class KDoc, "Only confirmed state"). */
+    private fun thrownAnswer(
+        release: Release,
+        reservation: PublishedMutationReservation,
+        pageRows: Int,
+    ): Pair<Outcome, String> {
+        if (release == Release.RELEASED) return unrecorded() to OUTCOME_NOT_STARTED
+        val recorded = record(reservation)
+        val row = (recorded as? Recorded.Answered)?.record
+        return when {
+            // The run failed after it started (or another retry recorded it): the row's terminal 409, or 202 meanwhile.
+            row != null -> {
+                answers.fromRecord(reservation, row, pageRows) to OUTCOME_FAILED
+            }
+
+            // No row, and the store refused the release because the claim is another retry's now: it is starting it.
+            recorded is Recorded.Answered && release == Release.REFUSED -> {
+                answers.running(reservation) to OUTCOME_FAILED
+            }
+
+            // No row and an unconfirmed release, or no answer at all: no execution state is confirmed.
+            else -> {
+                reservationUnavailable() to OUTCOME_RESERVATION_UNAVAILABLE
+            }
         }
+    }
+
+    private fun record(reservation: PublishedMutationReservation): Recorded =
+        try {
+            Recorded.Answered(executions.findById(reservation.workspaceId, reservation.executionId))
+        } catch (e: DataAccessException) {
+            log.warn("event=endpoint.mutation.record_unreadable execution_id={} error={}", reservation.executionId, e.javaClass.simpleName)
+            Recorded.Unreadable
+        }
+
+    /** No confirmed execution state: the reservation-store refusal of §4. The reservation is kept; retry with the key. */
+    private fun reservationUnavailable(): Outcome =
+        Outcome.Refused(
+            HTTP_SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE,
+            "The request's reservation state could not be confirmed, so nothing more was run. Retry with the same key.",
+        )
 
     /** The fail-closed record could not be written, so the run stopped before its first node: the dependency `503`. */
     private fun unrecorded(): Outcome =
@@ -189,6 +267,7 @@ class PublishedMutationLauncher(
         const val OUTCOME_ACCEPTED = "accepted"
         const val OUTCOME_NOT_STARTED = "not_started"
         const val OUTCOME_REPLAYED = "replayed"
+        const val OUTCOME_RESERVATION_UNAVAILABLE = "reservation_unavailable"
 
         /** `datapipelines.endpoints.mutations` — one count per answered mutation, tagged `method` × `outcome`. */
         const val METER = "datapipelines.endpoints.mutations"

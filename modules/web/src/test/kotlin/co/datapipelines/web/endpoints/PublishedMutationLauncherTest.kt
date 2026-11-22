@@ -12,7 +12,10 @@ import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecuteRequest
+import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutionResult
+import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.LimitScope
 import co.datapipelines.executor.PipelineConcurrencyLimitException
@@ -45,8 +48,10 @@ import java.util.UUID
  * #1039 — a published mutation refused BEFORE its run started (published-mutation-apis §4, the reconciled 429/503 rows):
  * the execution-concurrency limit's `429 pipeline.execution.concurrency_limit` and the unwritable record's `503`. Such a
  * run executed no business SQL, so the launcher releases its reservation — only while it is still the caller's claim
- * and no execution row exists — and the same key may be retried. When that release cannot be confirmed, the persisted
- * state answers instead and the refusal is never surfaced as if nothing had been admitted.
+ * and no execution row exists — and the same key may be retried. A release the store REFUSED is answered from the
+ * persisted state; a release or a record read the store did not ANSWER confirms no state at all, so it is
+ * `503 idempotency.reservation_unavailable` with the reservation kept — never an assumed running execution, and never
+ * the refusal surfaced as if nothing had been admitted.
  *
  * The HTTP surface cannot steer a full slot table without starving its sibling cases, so these branches are pinned
  * here. The audit sink and meter registry are REAL recorders: their contract is "this was written".
@@ -153,14 +158,64 @@ class PublishedMutationLauncherTest {
     }
 
     @Test
-    fun `a release the store cannot answer is treated as unconfirmed - the persisted state answers`() {
+    fun `review - a reservation release the store cannot answer is 503, not an assumed running execution`() {
         coEvery { runner.run(request, workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } throws
             PipelineConcurrencyLimitException(LimitScope.PER_USER, 1)
         every { reservations.releaseUnstarted(any(), any()) } throws DataAccessResourceFailureException("down")
         every { executions.findById(workspaceId, reservation.executionId) } returns null
 
-        start().shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe reservation.executionId
+        val refused = start().shouldBeInstanceOf<Outcome.Refused>()
+        refused.status shouldBe 503
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+        // The reservation is kept: one release attempt, nothing retired or re-claimed, nothing reported unadmitted.
+        verify(exactly = 1) { reservations.releaseUnstarted(reservation.executionId, reservation.ownerToken) }
+        audit.outcomes() shouldBe
+            listOf(PublishedMutationLauncher.OUTCOME_STARTED, PublishedMutationLauncher.OUTCOME_RESERVATION_UNAVAILABLE)
         counted(PublishedMutationLauncher.OUTCOME_NOT_STARTED) shouldBe 0.0
+        counted(PublishedMutationLauncher.OUTCOME_RESERVATION_UNAVAILABLE) shouldBe 1.0
+    }
+
+    @Test
+    fun `an unanswered release and an unreadable record are 503 reservation_unavailable`() {
+        coEvery { runner.run(request, workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } throws
+            ExecutionRecordUnwritableException(reservation.executionId)
+        every { reservations.releaseUnstarted(any(), any()) } throws DataAccessResourceFailureException("down")
+        every { executions.findById(workspaceId, reservation.executionId) } throws DataAccessResourceFailureException("down")
+
+        start().shouldBeInstanceOf<Outcome.Refused>().code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+    }
+
+    @Test
+    fun `a refused release whose record cannot be read is 503, not the 202 an absent row would give`() {
+        coEvery { runner.run(request, workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } throws
+            PipelineConcurrencyLimitException(LimitScope.GLOBAL, 1)
+        every { reservations.releaseUnstarted(reservation.executionId, reservation.ownerToken) } returns false
+        every { executions.findById(workspaceId, reservation.executionId) } throws DataAccessResourceFailureException("down")
+
+        start().shouldBeInstanceOf<Outcome.Refused>().code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+    }
+
+    @Test
+    fun `an unanswered release with a CONFIRMED terminal row gives that row's normal answer`() {
+        coEvery { runner.run(request, workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } throws IllegalStateException("late failure")
+        every { reservations.releaseUnstarted(any(), any()) } throws DataAccessResourceFailureException("down")
+        every { executions.findById(workspaceId, reservation.executionId) } returns record(ExecutionStatus.ABORTED)
+
+        val refused = start().shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 409
+        refused.code shouldBe PipelineErrorCodes.Execution.ABORTED
+        refused.details["execution_id"] shouldBe reservation.executionId.toString()
+    }
+
+    @Test
+    fun `a finished run whose record cannot be read is 503, never a 202 for a run that ended`() {
+        coEvery { runner.run(request, workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } returns
+            ExecutionResult(reservation.executionId, ExecutionStatus.FAILED, emptyList(), null, Instant.EPOCH, Instant.EPOCH, 0)
+        every { executions.findById(workspaceId, reservation.executionId) } throws DataAccessResourceFailureException("down")
+
+        start().shouldBeInstanceOf<Outcome.Refused>().code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+        verify(exactly = 0) { reservations.releaseUnstarted(any(), any()) }
     }
 
     @Test
@@ -178,6 +233,17 @@ class PublishedMutationLauncherTest {
     }
 
     private fun start(): Outcome = launcher.start(endpoint, principal, reservation, request, TIMEOUT_S, PAGE_ROWS)
+
+    private fun record(status: ExecutionStatus): ExecutionRecord =
+        ExecutionRecord(
+            executionId = reservation.executionId,
+            pipelineId = reservation.pipelineId,
+            pipelineVersion = 1,
+            status = status,
+            parametersJson = "{}",
+            executedBy = principal.userId,
+            triggeredVia = ExecutionTrigger.ENDPOINT,
+        )
 
     private fun counted(outcome: String): Double =
         meters

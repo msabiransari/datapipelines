@@ -11,6 +11,10 @@ import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -39,9 +43,9 @@ class PublishedMutationDigestsTest {
 
     private fun fingerprint(
         body: StructuredBody = body("""{"a":1,"b":[1,2]}"""),
-        query: Map<String, List<String>> = emptyMap(),
+        parameters: Map<String, Any?> = emptyMap(),
         path: String = "/x/v1/orders",
-    ) = digests.fingerprint(EndpointMethod.POST, path, query, body)
+    ) = digests.fingerprint(EndpointMethod.POST, path, parameters, body)
 
     @Test
     fun `the scope is stable and changes with every one of its facts`() {
@@ -69,13 +73,32 @@ class PublishedMutationDigestsTest {
     }
 
     @Test
-    fun `query names are order-free, repeated values are ordered, and the path counts`() {
-        val q = mapOf("a" to listOf("1"), "b" to listOf("2", "3"))
-        fingerprint(query = q) shouldBe fingerprint(query = linkedMapOf("b" to listOf("2", "3"), "a" to listOf("1")))
-        fingerprint(query = mapOf("a" to listOf("1"), "b" to listOf("3", "2"))) shouldNotBe fingerprint(query = q)
+    fun `parameter names are order-free, typed values decide, and the path counts`() {
+        val p = mapOf("a" to 1, "b" to "x")
+        fingerprint(parameters = p) shouldBe fingerprint(parameters = linkedMapOf("b" to "x", "a" to 1))
+        fingerprint(parameters = mapOf("a" to 2, "b" to "x")) shouldNotBe fingerprint(parameters = p)
+        // The TYPE is part of the value: the INTEGER 1 is not the STRING "1", and a bound null is not the text "null".
+        fingerprint(parameters = mapOf("a" to "1", "b" to "x")) shouldNotBe fingerprint(parameters = p)
+        fingerprint(parameters = mapOf("a" to null)) shouldNotBe fingerprint(parameters = mapOf("a" to "null"))
+        // A declared name bound to null is still a declared name: not the same as a request binding nothing.
+        fingerprint(parameters = mapOf("a" to null)) shouldNotBe fingerprint(parameters = emptyMap())
         // Length-prefixed fields: moving a boundary changes the digest.
-        fingerprint(query = mapOf("ab" to listOf(""))) shouldNotBe fingerprint(query = mapOf("a" to listOf("b")))
+        fingerprint(parameters = mapOf("ab" to "")) shouldNotBe fingerprint(parameters = mapOf("a" to "b"))
         fingerprint(path = "/x/v1/orders/2") shouldNotBe fingerprint()
+    }
+
+    @Test
+    fun `canonical values are equal exactly when the typed values are`() {
+        val instant = Instant.parse("2026-01-01T00:00:00Z")
+        val sameInstant = OffsetDateTime.parse("2026-01-01T01:00:00+01:00").toInstant()
+        fingerprint(parameters = mapOf("t" to instant)) shouldBe fingerprint(parameters = mapOf("t" to sameInstant))
+        fingerprint(parameters = mapOf("b" to byteArrayOf(1, 2))) shouldBe fingerprint(parameters = mapOf("b" to byteArrayOf(1, 2)))
+        fingerprint(parameters = mapOf("b" to byteArrayOf(1, 2))) shouldNotBe fingerprint(parameters = mapOf("b" to byteArrayOf(2, 1)))
+        fingerprint(parameters = mapOf("d" to LocalDate.parse("2026-01-02"))) shouldBe
+            fingerprint(parameters = mapOf("d" to LocalDate.of(2026, 1, 2)))
+        // A DECIMAL keeps its scale: a template may render 1.0 and 1.00 differently, so they are different requests.
+        fingerprint(parameters = mapOf("m" to BigDecimal("1.0"))) shouldNotBe fingerprint(parameters = mapOf("m" to BigDecimal("1.00")))
+        fingerprint(parameters = mapOf("m" to BigDecimal("1.50"))) shouldBe fingerprint(parameters = mapOf("m" to BigDecimal("1.50")))
     }
 
     @Test

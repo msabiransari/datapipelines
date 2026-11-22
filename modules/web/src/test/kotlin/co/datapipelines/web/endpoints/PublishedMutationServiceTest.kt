@@ -90,9 +90,16 @@ class PublishedMutationServiceTest {
             keyRole = KeyRole.API_CALLER,
         )
 
-    /** The pins: v1 is current unless a case says otherwise; v1 is also every reservation's original. */
+    /** The pipeline's declared parameters (JSON); none unless a case declares some. */
+    private var parameterSchema = "{}"
+
+    /**
+     * The pins: v1 is current unless a case says otherwise; v1 is also every reservation's original — [original] the
+     * servable pin a takeover RUNS, [rules] the admitted pin whose rules JUDGE a retry (servable or not).
+     */
     private var current: () -> MutationPin? = { pin(1) }
     private var original: () -> MutationPin? = { pin(1) }
+    private var rules: () -> MutationPin? = { pin(1) }
     private val pins =
         object : MutationPins {
             override fun current(endpoint: PublishedEndpoint): MutationPin? = current()
@@ -101,6 +108,11 @@ class PublishedMutationServiceTest {
                 endpoint: PublishedEndpoint,
                 reservation: PublishedMutationReservation,
             ): MutationPin? = original()
+
+            override fun admittedUnder(
+                endpoint: PublishedEndpoint,
+                reservation: PublishedMutationReservation,
+            ): MutationPin? = rules()
         }
 
     private fun service(mutationsEnabled: Boolean = true): PublishedMutationService {
@@ -341,11 +353,307 @@ class PublishedMutationServiceTest {
         verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
     }
 
+    // ------------------------------------------------------------------------- the round-1 review's contract (R1–R4)
+
+    @Test
+    fun `review - equal typed query values replay the same execution`() {
+        parameterSchema = QUANTITY_INTEGER
+        val one = call(query = mapOf("quantity" to listOf("01")))
+        val two = call(query = mapOf("quantity" to listOf("1")))
+        val validator =
+            EndpointRequestValidator(
+                pin(1).executable.pipeline.parameters,
+                EndpointRequestValidator.Limits(1, 86400, 300, 10000, 1000),
+            )
+        val firstTyped = validator.validate(one.request).shouldBeInstanceOf<EndpointRequestValidator.Outcome.Valid>()
+        val nextTyped = validator.validate(two.request).shouldBeInstanceOf<EndpointRequestValidator.Outcome.Valid>()
+        firstTyped.parameters shouldBe nextTyped.parameters
+        val live = reservationFor(one, createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+        every { executions.findById(workspaceId, live.executionId) } returns null
+        service().serve(two, pins).shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe live.executionId
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `review - a replay still refuses unsupported result negotiation`() {
+        val live = reservationFor(call(), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+        every { executions.findById(workspaceId, live.executionId) } returns null
+        val answer = service().serve(call(accept = "text/plain"), pins).shouldBeInstanceOf<Outcome.Refused>()
+        answer.status shouldBe 406
+    }
+
+    @Test
+    fun `review - original pin dependency outage has the dependency refusal code`() {
+        original = { throw DataAccessResourceFailureException("synthetic outage") }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null
+        every { reservations.takeOver(stranded.executionId, stranded.ownerToken, any()) } returns true
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } returns true
+        val answer = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+        answer.status shouldBe 503
+        answer.code shouldBe PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE
+    }
+
+    @Test
+    fun `review - an unconfirmed takeover release fails closed with the reservation refusal code`() {
+        original = { null }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null
+        every { reservations.takeOver(stranded.executionId, stranded.ownerToken, any()) } returns true
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } throws DataAccessResourceFailureException("synthetic outage")
+        val answer = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+        answer.status shouldBe 503
+        answer.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+    }
+
+    // ------------------------------------------------------------------------- R1: typed comparison, original pin
+
+    @Test
+    fun `a fresh request is fingerprinted over its TYPED parameters, so another spelling of the value matches it`() {
+        parameterSchema = QUANTITY_INTEGER
+        val reserved = slot<PublishedMutationReservation>()
+        every { reservations.findLive(any()) } returns null
+        every { reservations.reserve(capture(reserved)) } returns true
+        every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
+            Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
+        }
+
+        service().serve(call(query = mapOf("quantity" to listOf("01"))), pins)
+
+        reserved.captured.requestFingerprint shouldBe
+            reservationFor(call(query = mapOf("quantity" to listOf("1"))), createdAt = now).requestFingerprint
+    }
+
+    @Test
+    fun `a genuinely different typed value under the same key is 409 and runs nothing`() {
+        parameterSchema = QUANTITY_INTEGER
+        val live = reservationFor(call(query = mapOf("quantity" to listOf("1"))), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+
+        val refused = service().serve(call(query = mapOf("quantity" to listOf("2"))), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 409
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED
+        verify(exactly = 0) { executions.findById(any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an absent optional parameter and its declared default bind the same value, so they are the same request`() {
+        parameterSchema = QUANTITY_DEFAULT_ONE
+        val live = reservationFor(call(), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+        every { executions.findById(workspaceId, live.executionId) } returns null
+
+        service().serve(call(query = mapOf("quantity" to listOf("1"))), pins).shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe
+            live.executionId
+        val refused = service().serve(call(query = mapOf("quantity" to listOf("2"))), pins).shouldBeInstanceOf<Outcome.Refused>()
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a newer current pin with different parameter rules never changes how a retry is judged`() {
+        parameterSchema = QUANTITY_INTEGER
+        // v2 is current and declares quantity a STRING: under it "01" and "1" would differ. The retry is judged by v1.
+        current = { pin(2, QUANTITY_STRING) }
+        val live = reservationFor(call(query = mapOf("quantity" to listOf("01"))), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+        every { executions.findById(workspaceId, live.executionId) } returns null
+
+        val outcome = service().serve(call(query = mapOf("quantity" to listOf("1"))), pins)
+
+        outcome.shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe live.executionId
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a retry the original pin refuses is that pin's 400 and runs nothing`() {
+        parameterSchema = QUANTITY_INTEGER
+        val live = reservationFor(call(query = mapOf("quantity" to listOf("1"))), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+
+        val refused = service().serve(call(query = mapOf("quantity" to listOf("abc"))), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 400
+        refused.code shouldBe PipelineErrorCodes.EndpointRequest.INVALID
+        refused.details.toString().contains("abc") shouldBe false
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    // ------------------------------------------------------------------------- R2: result negotiation on every answer
+
+    @Test
+    fun `an unacceptable first call is 406 before anything is reserved or run`() {
+        every { reservations.findLive(any()) } returns null
+
+        val refused = service().serve(call(accept = "text/plain"), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 406
+        refused.code shouldBe PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE
+        verify(exactly = 0) { reservations.reserve(any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an unacceptable retry is 406 whatever the execution's state - the record is not even read`() {
+        val live = reservationFor(call(), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+
+        val refused = service().serve(call(accept = "text/csv"), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 406
+        refused.code shouldBe PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE
+        verify(exactly = 0) { executions.findById(any(), any()) }
+        verify(exactly = 0) { reservations.retire(any(), any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+        audit.outcomes(live.executionId) shouldBe emptyList()
+    }
+
+    // ------------------------------------------------------------------------- R3: outage is not absence
+
+    @Test
+    fun `a retry whose admitted pin cannot be read is 503 dependency_unavailable and claims nothing`() {
+        rules = { throw DataAccessResourceFailureException("synthetic outage") }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+
+        val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.status shouldBe 503
+        refused.code shouldBe PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE
+        verify(exactly = 0) { reservations.takeOver(any(), any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a retry whose admitted pin no longer exists is 503 pipeline_not_released and claims nothing`() {
+        rules = { null }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+
+        val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.code shouldBe PipelineErrorCodes.Endpoint.PIPELINE_NOT_RELEASED
+        verify(exactly = 0) { reservations.takeOver(any(), any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a takeover after a pin outage hands its claim back, and once the store recovers it runs the original once`() {
+        original = { throw DataAccessResourceFailureException("synthetic outage") }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        val claims = mutableListOf<UUID>()
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null
+        every { reservations.takeOver(stranded.executionId, stranded.ownerToken, capture(claims)) } returns true
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } returns true
+        every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
+            Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
+        }
+
+        service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>().code shouldBe PipelineErrorCodes.Endpoint.DEPENDENCY_UNAVAILABLE
+        verify(exactly = 1) { reservations.releaseUnstarted(stranded.executionId, claims.single()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+
+        original = { pin(1) }
+        current = { pin(2) }
+        service().serve(call(), pins).shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe stranded.executionId
+        verify(exactly = 1) {
+            launcher.start(
+                any(),
+                any(),
+                match { it.executionId == stranded.executionId && it.apiVersion == 1 },
+                any(),
+                ORIGINAL_TIMEOUT,
+                any(),
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------------- R4: only confirmed state answers
+
+    @Test
+    fun `an unconfirmed takeover release keeps the reservation, and a retry after recovery runs the original once`() {
+        original = { null }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null
+        every { reservations.takeOver(stranded.executionId, any(), any()) } returns true
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } throws DataAccessResourceFailureException("synthetic outage")
+        every { launcher.start(any(), any(), any(), any(), any(), any()) } answers {
+            Outcome.Accepted(thirdArg<PublishedMutationReservation>().executionId, emptyMap())
+        }
+
+        val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+        verify(exactly = 0) { reservations.retire(any(), any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+        counted("reservation_unavailable") shouldBe 1.0
+
+        // The store and the pin are back: the same key, the same reservation, the original pin — started once.
+        original = { pin(1) }
+        service().serve(call(), pins).shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe stranded.executionId
+        verify(exactly = 1) { launcher.start(any(), any(), match { it.executionId == stranded.executionId }, any(), any(), any()) }
+    }
+
+    @Test
+    fun `a takeover release the store REFUSED is answered from the persisted state, not from the refusal`() {
+        original = { null }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null
+        every { reservations.takeOver(stranded.executionId, stranded.ownerToken, any()) } returns true
+        // Confirmed: the claim is another retry's now. With no row yet, that retry is starting it.
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } returns false
+
+        val outcome = service().serve(call(), pins)
+
+        outcome.shouldBeInstanceOf<Outcome.Accepted>().executionId shouldBe stranded.executionId
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a takeover release refused while the record cannot be read is 503 reservation_unavailable`() {
+        original = { null }
+        val stranded = reservationFor(call(), createdAt = now.minusSeconds(61))
+        every { reservations.findLive(stranded.scope) } returns stranded
+        every { executions.findById(workspaceId, stranded.executionId) } returns null andThenThrows
+            DataAccessResourceFailureException("synthetic outage")
+        every { reservations.takeOver(stranded.executionId, stranded.ownerToken, any()) } returns true
+        every { reservations.releaseUnstarted(stranded.executionId, any()) } returns false
+
+        val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a retry whose execution record cannot be read is 503 reservation_unavailable, never an assumed 202`() {
+        val live = reservationFor(call(), createdAt = now)
+        every { reservations.findLive(live.scope) } returns live
+        every { executions.findById(workspaceId, live.executionId) } throws DataAccessResourceFailureException("synthetic outage")
+
+        val refused = service().serve(call(), pins).shouldBeInstanceOf<Outcome.Refused>()
+
+        refused.code shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_RESERVATION_UNAVAILABLE
+        verify(exactly = 0) { reservations.retire(any(), any(), any()) }
+        verify(exactly = 0) { launcher.start(any(), any(), any(), any(), any(), any()) }
+    }
+
     // ------------------------------------------------------------------------- fixture
 
     private fun call(
         body: String? = """{"sku":"A"}""",
         key: String? = "k-1",
+        query: Map<String, List<String>> = emptyMap(),
+        accept: String = "application/json",
     ): MutationCall =
         MutationCall(
             endpoint = endpoint,
@@ -356,8 +664,8 @@ class PublishedMutationServiceTest {
             request =
                 EndpointRequestValidator.Request(
                     pathVariables = emptyMap(),
-                    queryParameters = emptyMap(),
-                    accept = "application/json",
+                    queryParameters = query,
+                    accept = accept,
                     resultTtlSecondsHeader = null,
                     resultPageRowsHeader = null,
                 ),
@@ -371,11 +679,15 @@ class PublishedMutationServiceTest {
                 ),
         )
 
-    /** The reservation a previous identical [call] left, digested exactly as the service digests it. */
+    /**
+     * The reservation a previous identical [call] left under [admittedPin], digested exactly as the service digests it:
+     * the fingerprint is taken over the parameters as that pin TYPES them.
+     */
     private fun reservationFor(
         call: MutationCall,
         createdAt: Instant,
         expiresAt: Instant = createdAt.plus(Duration.ofHours(24)),
+        admittedPin: MutationPin = pin(1),
     ): PublishedMutationReservation {
         val body =
             PublishedRequestBodyCodec(StructuredBodyDecoder(StructuredBodyLimits(maxBytes = 4096, maxDepth = 8)))
@@ -387,6 +699,11 @@ class PublishedMutationServiceTest {
                 ).shouldBeInstanceOf<PublishedRequestBodyCodec.Outcome.Admitted>()
                 .body
         call.input.entity.reset()
+        val typed =
+            MutationRequestRules(ResultConfig())
+                .validate(call, admittedPin, body)
+                .shouldBeInstanceOf<MutationRequestRules.Validated.Valid>()
+                .typed
         return PublishedMutationReservation(
             executionId = UUID.randomUUID(),
             workspaceId = workspaceId,
@@ -407,7 +724,7 @@ class PublishedMutationServiceTest {
                     call.path,
                     checkNotNull(call.input.idempotencyKey),
                 ),
-            requestFingerprint = digests.fingerprint(EndpointMethod.POST, call.path, emptyMap(), body),
+            requestFingerprint = digests.fingerprint(EndpointMethod.POST, call.path, typed, body),
             bodyBytes = null,
             ownerToken = UUID.randomUUID(),
             createdAt = createdAt,
@@ -415,17 +732,20 @@ class PublishedMutationServiceTest {
         )
     }
 
-    private fun pin(apiVersion: Int): MutationPin =
+    private fun pin(
+        apiVersion: Int,
+        schema: String = parameterSchema,
+    ): MutationPin =
         MutationPin(
             apiVersion = apiVersion,
             timeoutSeconds = if (apiVersion == 1) ORIGINAL_TIMEOUT else 30,
             pipelineId = pipelineId,
-            executable = executable(),
+            executable = executable(schema),
         )
 
-    private fun executable(): PipelineService.ExecutablePipeline {
+    private fun executable(schema: String): PipelineService.ExecutablePipeline {
         val body =
-            """{"name":"x/orders","display_name":"o","description":"d","parameters":{},"request_body":{"required":false},""" +
+            """{"name":"x/orders","display_name":"o","description":"d","parameters":$schema,"request_body":{"required":false},""" +
                 """"nodes":[{"id":"n","type":"DML","source":"s","template":{"id":"t.sql","version":1},""" +
                 """"operation":"update","output":{"target":"discard"},"depends_on":[]}]}"""
         val record =
@@ -473,5 +793,8 @@ class PublishedMutationServiceTest {
     private companion object {
         const val KEY_ID = "dpk_MUTATION01"
         const val ORIGINAL_TIMEOUT = 7
+        const val QUANTITY_INTEGER = """{"quantity":{"type":"INTEGER","required":false}}"""
+        const val QUANTITY_DEFAULT_ONE = """{"quantity":{"type":"INTEGER","required":false,"default":1}}"""
+        const val QUANTITY_STRING = """{"quantity":{"type":"STRING","required":false}}"""
     }
 }

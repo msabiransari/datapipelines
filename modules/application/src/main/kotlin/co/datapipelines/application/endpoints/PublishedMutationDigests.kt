@@ -1,6 +1,7 @@
 package co.datapipelines.application.endpoints
 
 import co.datapipelines.typesystem.body.StructuredBody
+import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.util.HexFormat
 import java.util.UUID
@@ -17,9 +18,11 @@ import javax.crypto.spec.SecretKeySpec
  *
  * - [scope]: which reservation a request belongs to — workspace, credential, route ENTITY, method, concrete business
  *   path and the client key. A recreated route, a rotated credential or another concrete resource is another scope.
- * - [fingerprint]: whether a request in that scope is the SAME request — method, concrete path, every query parameter
- *   (names sorted, values in order) and the body's canonical form (object member order immaterial, array order
- *   material, an absent body distinct from `{}` and `[]`).
+ * - [fingerprint]: whether a request in that scope is the SAME request — method, concrete path, the TYPED parameter
+ *   values the reservation's original pin binds from the path and query (names sorted; see [canonicalValue]) and the
+ *   body's canonical form (object member order immaterial, array order material, an absent body distinct from `{}` and
+ *   `[]`). Typed, not textual (published-mutation-apis §4): `?quantity=01` and `?quantity=1` bind the same INTEGER and
+ *   are the same request; an absent optional parameter and its declared default bind the same value too.
  */
 class PublishedMutationDigests(
     key: ByteArray,
@@ -46,18 +49,21 @@ class PublishedMutationDigests(
             listOf(workspaceId.toString(), apiKeyId, endpointId.toString(), method.name, businessPath, clientKey),
         )
 
-    /** The request fingerprint compared on every retry in a scope. */
+    /**
+     * The request fingerprint compared on every retry in a scope. [parameters] is the bound context of the declared
+     * parameters — every declared name, its value typed (and defaulted) by the ORIGINAL pin's binding rules — never the
+     * raw URL text, so neither the raw input nor a later release's rules decide what "the same request" is.
+     */
     fun fingerprint(
         method: EndpointMethod,
         businessPath: String,
-        query: Map<String, List<String>>,
+        parameters: Map<String, Any?>,
         body: StructuredBody,
     ): String {
-        val fields = mutableListOf(method.name, businessPath, query.size.toString())
-        query.toSortedMap().forEach { (name, values) ->
+        val fields = mutableListOf(method.name, businessPath, parameters.size.toString())
+        parameters.toSortedMap().forEach { (name, value) ->
             fields += name
-            fields += values.size.toString()
-            fields += values
+            fields += canonicalValue(value)
         }
         val canonical = body.canonical()
         fields += if (canonical == null) BODY_ABSENT else BODY_PRESENT
@@ -81,6 +87,19 @@ class PublishedMutationDigests(
     }
 
     companion object {
+        /**
+         * One bound value as text that is equal exactly when the typed values are: the value's type, then its canonical
+         * form. A `DECIMAL` keeps its scale (`1.0` and `1.00` stay different requests — a template may render either);
+         * a `TIMESTAMP` is an instant (two offsets naming one instant are one value); `BINARY` is its bytes in hex.
+         */
+        internal fun canonicalValue(value: Any?): String =
+            when (value) {
+                null -> NULL_VALUE
+                is ByteArray -> "bytes:" + HexFormat.of().formatHex(value)
+                is BigDecimal -> "decimal:" + value.toPlainString()
+                else -> value.javaClass.name + ":" + value
+            }
+
         /** The `JwtService.deriveSubkey` label of this key — one purpose, one subkey. */
         const val SUBKEY_LABEL = "published-mutation-replay-v1"
 
@@ -90,6 +109,7 @@ class PublishedMutationDigests(
         private const val FINGERPRINT_DOMAIN = "fingerprint"
         private const val BODY_ABSENT = "body:absent"
         private const val BODY_PRESENT = "body:present"
+        private const val NULL_VALUE = "null"
         private val SEPARATOR = byteArrayOf(':'.code.toByte())
     }
 }

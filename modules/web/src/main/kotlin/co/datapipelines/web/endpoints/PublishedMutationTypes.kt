@@ -63,14 +63,28 @@ class MutationPin(
 /**
  * The pins a mutation may run, resolved by the serve service under the posture's eligibility rule (D63): the route's
  * CURRENT version for a fresh request, and the reservation's ORIGINAL pin for a retry that takes over a start claim —
- * a later release never changes what an admitted request runs.
+ * a later release never changes what an admitted request runs, nor how a retry of it is judged.
+ *
+ * Every lookup answers null only for a CONFIRMED absence; a metadata store that does not answer throws (Spring's
+ * `DataAccessException`), so the caller can refuse with the dependency `503` instead of reading an outage as "absent".
  */
 interface MutationPins {
     /** The route's current, servable pin; null when nothing servable is pointed at. */
     fun current(endpoint: PublishedEndpoint): MutationPin?
 
-    /** The exact pin [reservation] was admitted against; null when it is no longer servable. */
+    /** The exact pin [reservation] was admitted against, to RUN it; null when it is no longer servable. */
     fun original(
+        endpoint: PublishedEndpoint,
+        reservation: PublishedMutationReservation,
+    ): MutationPin?
+
+    /**
+     * The exact pin [reservation] was admitted against, servable or not — whose rules JUDGE a retry (result
+     * negotiation, body presence, the parameters' types and defaults). A pinned version's declarations never change,
+     * so a retry is compared by the rules of its first call even after a newer release; null when that version no
+     * longer exists.
+     */
+    fun admittedUnder(
         endpoint: PublishedEndpoint,
         reservation: PublishedMutationReservation,
     ): MutationPin?
