@@ -46,7 +46,7 @@ class JsRenderedValueTextsTest {
     }
 
     @Test
-    fun `the control - one text written with a hyphen for its minus in the sandbox makes the text differ from the snapshot in that character alone`() {
+    fun `the control - one text with a hyphen for its minus in the sandbox differs from the snapshot in that character alone`() {
         val planted = sandbox.evaluate(probes + "\nreturn valueTextProbesPlanted(JsRendered);", null) as String
         planted shouldNotBe node
         planted.split(WAS).size - 1 shouldBe 1
