@@ -48,15 +48,16 @@ class ScopedStylesheetSheetsTest {
                     c.remLengths,
                 ).forEach { it shouldBeGreaterThanOrEqual 1 }
             }
-        }
-        val read = OutputReader.read(scoped.text, ClientLibrary.SCOPE)
-        println("1065|A2|six|read-back|${read.summary()}")
-        read.assertClean(rootBeginningFloor = 1)
-        val sentence = sentenceSix()
-        println("1065|A2|names|hoisted families=${read.fontFamilies} animations=${read.keyframes} sentence6=$sentence")
-        withClue("the names the hoisted rules define for the whole page are the names the skill's sentence 6 gives") {
-            read.fontFamilies shouldBe sentence.first
-            read.keyframes shouldBe sentence.second
+            // In the same soft scope: a short count does not hide what the reader finds in the output.
+            val read = OutputReader.read(scoped.text, ClientLibrary.SCOPE)
+            println("1065|A2|six|read-back|${read.summary()}")
+            read.assertClean(rootBeginningFloor = 1)
+            val sentence = sentenceSix()
+            println("1065|A2|names|hoisted families=${read.fontFamilies} animations=${read.keyframes} sentence6=$sentence")
+            withClue("the names the hoisted rules define for the whole page are the names the skill's sentence 6 gives") {
+                read.fontFamilies shouldBe sentence.first
+                read.keyframes shouldBe sentence.second
+            }
         }
     }
 
