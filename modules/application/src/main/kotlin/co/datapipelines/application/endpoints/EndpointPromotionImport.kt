@@ -14,7 +14,7 @@ import java.util.UUID
  * validation (path grammar, the pin's checks) and the persistence (entity + v1 + `current_version = 1` + the shared
  * hash, in the receiver's one transaction) and skips the capability check by design.
  *
- * The pin is the TARGET pipeline's CURRENT at receive time, and v1's status follows the in-place conversion's rule:
+ * For a legacy GET entry, the pin is the TARGET pipeline's CURRENT at receive time and v1 follows the conversion rule:
  * RELEASED when that pipeline version is RELEASED, DRAFT otherwise — so "promote a pipeline with its APIs" yields what it
  * yielded before #786: the API serves at the target iff it would have served before. No CURRENT refuses the batch with
  * the shape the receiver always answered for an unservable pipeline (`endpoint.pipeline_not_released`), never an
@@ -59,8 +59,7 @@ class EndpointPromotionImport(
                 )
         val current = record.currentVersion ?: throw noCurrent(pipelineName)
         val body = EndpointWrites.bodyOf(pipelineName, current, timeouts.clamp(timeoutSeconds), description)
-        // The promotion wire carries no method (#1037): an imported API is GET — the only method a
-        // legacy batch could have carried — and GET is the entity createWithFirstVersion stores.
+        // This is the legacy GET import: an absent method means GET. Mutation entries go through importExact.
         val resolved = pins.check(workspaceId, parsed, body, EndpointPinValidator.Admission.LIVE, EndpointMethod.GET)
         val status = if (resolved.status == PipelineVersionStatus.RELEASED) PipelineVersionStatus.RELEASED else PipelineVersionStatus.DRAFT
         return writes.createWithFirstVersion(workspaceId, parsed, EndpointMethod.GET, record.id, body, status, actor)

@@ -36,13 +36,12 @@ import java.util.UUID
  * thing this system does. So a binding names the key the target is expected to already have, and
  * a target missing it refuses the WHOLE batch before anything is pushed.
  *
- * ## #786 — what an entry is now
+ * ## GET entries and method entries
  *
- * An API is versioned: the sender reads each API's CURRENT version body (pipeline name, timeout, description) and the
- * wire is unchanged (owner ruling 2026-11-08 (3); exact-pin promotion is follow-up #879). The receiver creates an
- * absent API through [EndpointPromotionImport] — the receiver-only import that pins the target pipeline's CURRENT and
- * needs no authoring capability — never through the native authoring creation, which a receiver refuses by
- * construction.
+ * An API is versioned: the sender reads each route's CURRENT version body. GET keeps its legacy wire and pins the
+ * target pipeline's CURRENT (exact-pin GET promotion is #879). Since #1040 a mutation entry carries its method and
+ * exact pipeline pin, hash, body mode and method grants; an incapable receiver refuses it. Both enter through
+ * [EndpointPromotionImport], which needs no authoring capability, rather than native authoring creation.
  */
 class EndpointPromotion(
     private val publishing: EndpointPublishService,
