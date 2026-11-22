@@ -1193,7 +1193,7 @@ class PublishedMutationCaptureIntegrationTest {
         throw AssertionError("execution $id never reached $status")
     }
 
-    /** Waits until a freshly published route answers on both replicas (the route registry reloads on publish). */
+    /** Waits until a freshly published route answers on the primary replica (the route registry reloads on publish). */
     private fun awaitRoute(path: String) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_S)
         while (System.nanoTime() < deadline) {
@@ -1206,6 +1206,7 @@ class PublishedMutationCaptureIntegrationTest {
             if (probe.statusCode() == 405) return
             Thread.sleep(POLL_MS)
         }
+        throw AssertionError("route $path never became available on the primary replica")
     }
 
     private fun connect(): Connection =
