@@ -11,8 +11,9 @@ import org.junit.jupiter.api.Test
  * [seedBoard] board with its table's source answering `SELECT DATE '2026-09-01'` from the suite's PostgreSQL (a real
  * query whose rows reach the table as the server encodes them, no template between), so the frame carries what the
  * server writes for a DATE: the text `2026-09-01`. The table visualization is re-stamped by SQL with a DATE input and
- * a column of format `date` (the suite seeds by SQL; its helpers are called, never edited). The real board page is opened in a context whose clock is `America/New_York`,
- * carrying the suite page's session, where `new Date('2026-09-01').toLocaleDateString()` reads the 31st of August.
+ * a column of format `date` (the suite seeds by SQL; its helpers are called, never edited). The real board page is
+ * opened in a context whose clock is `America/New_York`, carrying the suite page's session, where
+ * `new Date('2026-09-01').toLocaleDateString()` reads the 31st of August.
  *
  * The expected texts are built in the page — the 1st of September 2026 and the 31st of August 2026, each written with
  * the zone fixed to UTC and no locale named, as the renderer names none — so the test names no locale's spelling.
