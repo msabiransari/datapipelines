@@ -15,9 +15,13 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.jdbc.datasource.SingleConnectionDataSource
+import org.springframework.transaction.support.TransactionOperations
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -46,18 +50,23 @@ class ExecutionCaptureIntegrationTest {
     private val now: Instant = Instant.now().truncatedTo(ChronoUnit.MICROS)
     private val window = Duration.ofSeconds(900)
     private val retention = Duration.ofHours(24)
+    private val replay = Duration.ofHours(24)
+
+    /** The store's write-time clock: what "now" is when a diagnostic write reaches storage. */
+    private val storeClock = MutableClock(now)
 
     @BeforeAll
     fun connect() {
         val ds = SharedPostgres.dataSource()
         jdbc = NamedParameterJdbcTemplate(ds)
         sessions = ExecutionCaptureSessionRepository(jdbc, TransactionTemplate(DataSourceTransactionManager(ds)))
-        reservations = PublishedMutationReservationRepository(jdbc)
-        store = ExecutionCaptureStore(jdbc)
+        reservations = PublishedMutationReservationRepository(jdbc, TransactionTemplate(DataSourceTransactionManager(ds)))
+        store = ExecutionCaptureStore(jdbc, TransactionTemplate(DataSourceTransactionManager(ds)), storeClock)
     }
 
     @BeforeEach
     fun seed() {
+        storeClock.set(now)
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
         userId = UUID.randomUUID()
         workspaceId = UUID.randomUUID()
@@ -136,11 +145,26 @@ class ExecutionCaptureIntegrationTest {
         )
     }
 
+    /** The decision a reserving transaction stored, as the tests read it. */
+    private data class Decision(
+        val sessionId: UUID?,
+        val expiresAt: Instant?,
+    ) {
+        val captured: Boolean get() = sessionId != null
+    }
+
+    private fun stamp(at: Instant) = AdmissionStamp(Clock.fixed(at, ZoneOffset.UTC), replay, retention)
+
+    private fun at(instant: Instant): Clock = Clock.fixed(instant, ZoneOffset.UTC)
+
+    /** Admits [c] with its own createdAt as the admission instant; the stamped reservation as stored, and its decision. */
     private fun admit(
         c: PublishedMutationReservation = candidate(),
         correlation: UUID? = null,
-    ): Pair<PublishedMutationReservation, CaptureDecision> =
-        c to reservations.reserveDeciding(c, correlation, c.createdAt.plus(retention)).shouldNotBeNull()
+    ): Pair<PublishedMutationReservation, Decision> {
+        val stored = reservations.reserveDeciding(c, correlation, stamp(c.createdAt)).shouldNotBeNull()
+        return stored to Decision(stored.captureSessionId, stored.captureExpiresAt)
+    }
 
     @Test
     fun `one open window per route and method - a second start is refused naming the first, an expired one is closed`() {
@@ -166,7 +190,7 @@ class ExecutionCaptureIntegrationTest {
     fun `stop names its window - idempotent, never closes a newer one, absent in another workspace`() {
         val first = session()
         sessions.start(first)
-        val stopped = sessions.stop(workspaceId, endpointId, first.id, userId, now.plusSeconds(5))
+        val stopped = sessions.stop(workspaceId, endpointId, first.id, userId, at(now.plusSeconds(5)))
         stopped.shouldBeInstanceOf<CaptureStop.Stopped>().session.let {
             it.endReason shouldBe CaptureSession.EndReason.STOPPED
             it.stoppedAt shouldBe now.plusSeconds(5)
@@ -175,10 +199,10 @@ class ExecutionCaptureIntegrationTest {
         val second = session(startedAt = now.plusSeconds(10))
         sessions.start(second).shouldBeInstanceOf<CaptureStart.Opened>()
         // The delayed repeat of the first stop answers the first window's state and leaves the second open.
-        sessions.stop(workspaceId, endpointId, first.id, userId, now.plusSeconds(20)).shouldBeInstanceOf<CaptureStop.AlreadyEnded>()
+        sessions.stop(workspaceId, endpointId, first.id, userId, at(now.plusSeconds(20))).shouldBeInstanceOf<CaptureStop.AlreadyEnded>()
         sessions.open(workspaceId, endpointId, EndpointMethod.POST).shouldNotBeNull().id shouldBe second.id
-        sessions.stop(otherWorkspaceId, endpointId, second.id, userId, now) shouldBe CaptureStop.NotFound
-        sessions.stop(workspaceId, UUID.randomUUID(), second.id, userId, now) shouldBe CaptureStop.NotFound
+        sessions.stop(otherWorkspaceId, endpointId, second.id, userId, at(now)) shouldBe CaptureStop.NotFound
+        sessions.stop(workspaceId, UUID.randomUUID(), second.id, userId, at(now)) shouldBe CaptureStop.NotFound
         // A stop at or after the deadline records the expiry at the deadline.
         sessions
             .stop(
@@ -186,7 +210,7 @@ class ExecutionCaptureIntegrationTest {
                 endpointId,
                 second.id,
                 userId,
-                second.deadlineAt.plusSeconds(60),
+                at(second.deadlineAt.plusSeconds(60)),
             ).shouldBeInstanceOf<CaptureStop.Stopped>()
             .session
             .let {
@@ -212,7 +236,7 @@ class ExecutionCaptureIntegrationTest {
         sessions.start(unfiltered)
         admit(correlation = null).second.sessionId shouldBe unfiltered.id
         admit(correlation = UUID.randomUUID()).second.sessionId shouldBe unfiltered.id
-        sessions.stop(workspaceId, endpointId, unfiltered.id, userId, now.plusSeconds(2))
+        sessions.stop(workspaceId, endpointId, unfiltered.id, userId, at(now.plusSeconds(2)))
 
         val wanted = UUID.randomUUID()
         val exact = session(correlation = wanted, startedAt = now.plusSeconds(3))
@@ -230,8 +254,91 @@ class ExecutionCaptureIntegrationTest {
         sessions.start(s)
         admit(candidate(createdAt = s.deadlineAt.minus(1, ChronoUnit.MICROS))).second.captured shouldBe true
         admit(candidate(createdAt = s.deadlineAt)).second.captured shouldBe false
-        sessions.stop(workspaceId, endpointId, s.id, userId, now.plusSeconds(2))
+        sessions.stop(workspaceId, endpointId, s.id, userId, at(now.plusSeconds(2)))
         admit(candidate(createdAt = now.plusSeconds(3))).second.captured shouldBe false
+    }
+
+    @Test
+    fun `before and exactly at the start, before and exactly at the deadline - the stored instant, decision and expiries agree`() {
+        val s = session(startedAt = now.plusSeconds(10))
+        sessions.start(s)
+        admit(candidate(createdAt = s.startedAt.minus(1, ChronoUnit.MICROS))).second.captured shouldBe false
+        val (atStart, decision) = admit(candidate(createdAt = s.startedAt))
+        decision.sessionId shouldBe s.id
+        stored(atStart).let {
+            it.createdAt shouldBe s.startedAt
+            it.expiresAt shouldBe s.startedAt.plus(replay)
+            it.captureExpiresAt shouldBe s.startedAt.plus(retention)
+        }
+        admit(candidate(createdAt = s.deadlineAt.minus(1, ChronoUnit.MICROS))).second.captured shouldBe true
+        val (atDeadline, late) = admit(candidate(createdAt = s.deadlineAt))
+        late.captured shouldBe false
+        stored(atDeadline).let {
+            it.createdAt shouldBe s.deadlineAt
+            it.captureSessionId.shouldBeNull()
+            it.captureExpiresAt.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a stale preflight timestamp is never the admission instant - the clock read at durable admission decides`() {
+        val s = session(startedAt = now.plusSeconds(10))
+        sessions.start(s)
+        // Validated before the window started; durable admission happened after the start.
+        val crossedStart = candidate(createdAt = now.plusSeconds(9))
+        val admittedAt = now.plusSeconds(11)
+        reservations.reserveDeciding(crossedStart, null, stamp(admittedAt)).shouldNotBeNull().captureSessionId shouldBe s.id
+        stored(crossedStart).let {
+            it.createdAt shouldBe admittedAt
+            it.expiresAt shouldBe admittedAt.plus(replay)
+            it.captureSessionId shouldBe s.id
+            it.captureExpiresAt shouldBe admittedAt.plus(retention)
+        }
+        // Validated just before the natural expiry; durable admission happened after it.
+        val crossedDeadline = candidate(createdAt = s.deadlineAt.minusSeconds(1))
+        val afterDeadline = s.deadlineAt.plusSeconds(1)
+        reservations
+            .reserveDeciding(crossedDeadline, null, stamp(afterDeadline))
+            .shouldNotBeNull()
+            .captureSessionId
+            .shouldBeNull()
+        stored(crossedDeadline).let {
+            it.createdAt shouldBe afterDeadline
+            it.captureExpiresAt.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a database wait crossing the start or the natural expiry is decided at the instant after the wait`() {
+        val s = session(startedAt = now.plusSeconds(10))
+        sessions.start(s)
+        val clock = MutableClock(s.startedAt.minusSeconds(1))
+        val crossedStart = candidate(createdAt = s.startedAt.minusSeconds(1))
+        heldWindowAdmission(s, crossedStart, clock, advanceTo = s.startedAt).let {
+            it.createdAt shouldBe s.startedAt
+            it.captureSessionId shouldBe s.id
+            it.captureExpiresAt shouldBe s.startedAt.plus(retention)
+        }
+        clock.set(s.deadlineAt.minusSeconds(1))
+        val crossedDeadline = candidate(createdAt = s.deadlineAt.minusSeconds(1))
+        heldWindowAdmission(s, crossedDeadline, clock, advanceTo = s.deadlineAt).let {
+            it.createdAt shouldBe s.deadlineAt
+            it.captureSessionId.shouldBeNull()
+        }
+        stored(crossedStart).createdAt shouldBe s.startedAt
+        stored(crossedDeadline).createdAt shouldBe s.deadlineAt
+    }
+
+    @Test
+    fun `a stop whose clock lags a captured admission still ends the window after that admission`() {
+        val s = session()
+        sessions.start(s)
+        val (c, decision) = admit(candidate(createdAt = now.plusSeconds(30)))
+        decision.captured shouldBe true
+        sessions
+            .stop(workspaceId, endpointId, s.id, userId, at(now.plusSeconds(20)))
+            .shouldBeInstanceOf<CaptureStop.Stopped>()
+            .session.stoppedAt shouldBe c.createdAt.plus(1, ChronoUnit.MICROS)
     }
 
     @Test
@@ -248,9 +355,9 @@ class ExecutionCaptureIntegrationTest {
         sessions.start(s)
         val (c, decision) = admit()
         decision.sessionId shouldBe s.id
-        sessions.stop(workspaceId, endpointId, s.id, userId, now.plusSeconds(2))
+        sessions.stop(workspaceId, endpointId, s.id, userId, at(now.plusSeconds(2)))
         // The retry under the same scope after the stop: no row, and the live row still carries the original decision.
-        reservations.reserveDeciding(c.copy(executionId = UUID.randomUUID()), null, now.plus(retention)).shouldBeNull()
+        reservations.reserveDeciding(c.copy(executionId = UUID.randomUUID()), null, stamp(now.plusSeconds(3))).shouldBeNull()
         reservations.findLive(c.scopeDigest!!).shouldNotBeNull().captureSessionId shouldBe s.id
     }
 
@@ -277,14 +384,20 @@ class ExecutionCaptureIntegrationTest {
         sessions.start(s)
         val c = candidate()
         withHeldConnection { held ->
-            val decision =
-                PublishedMutationReservationRepository(held).reserveDeciding(c, null, c.createdAt.plus(retention)).shouldNotBeNull()
-            decision.captured shouldBe true
-            val stop = CompletableFuture.supplyAsync { sessions.stop(workspaceId, endpointId, s.id, userId, now.plusSeconds(2)) }
+            val stored =
+                PublishedMutationReservationRepository(held, TransactionOperations.withoutTransaction())
+                    .reserveDeciding(c, null, stamp(c.createdAt))
+                    .shouldNotBeNull()
+            stored.captureSessionId shouldBe s.id
+            val stop = CompletableFuture.supplyAsync { sessions.stop(workspaceId, endpointId, s.id, userId, at(now.plusSeconds(2))) }
             awaitLockWait()
             stop.isDone shouldBe false
             held.jdbcTemplate.execute("COMMIT")
-            stop.get(30, TimeUnit.SECONDS).shouldBeInstanceOf<CaptureStop.Stopped>()
+            stop
+                .get(30, TimeUnit.SECONDS)
+                .shouldBeInstanceOf<CaptureStop.Stopped>()
+                .session.stoppedAt!!
+                .isAfter(c.createdAt) shouldBe true
         }
         reservations.findLive(c.scopeDigest!!).shouldNotBeNull().captureSessionId shouldBe s.id
     }
@@ -295,13 +408,80 @@ class ExecutionCaptureIntegrationTest {
         store.write(value(plain.executionId, workspaceId, recordedAt = now.plusSeconds(2))) shouldBe false
         sessions.start(session())
         val (captured, decision) = admit()
+        val expiresAt = decision.expiresAt!!
         store.write(value(captured.executionId, otherWorkspaceId, recordedAt = now.plusSeconds(2))) shouldBe false
-        store.write(value(captured.executionId, workspaceId, recordedAt = decision.expiresAt!!)) shouldBe false
         store.write(value(captured.executionId, workspaceId, recordedAt = now.plusSeconds(2), expiresAt = Instant.MAX)) shouldBe true
         store.write(value(captured.executionId, workspaceId, recordedAt = now.plusSeconds(3))) shouldBe false // same node/output
-        store.values(captured.executionId, workspaceId, now.plusSeconds(4)).single().expiresAt shouldBe decision.expiresAt
+        store.values(captured.executionId, workspaceId, now.plusSeconds(4)).single().expiresAt shouldBe expiresAt
         store.values(captured.executionId, otherWorkspaceId, now.plusSeconds(4)).shouldBeEmpty()
+        // At the stored expiry the store's own write-time clock refuses — whatever the value's recorded_at says.
+        storeClock.set(expiresAt)
+        store.write(value(captured.executionId, workspaceId, node = "late", recordedAt = expiresAt.minusSeconds(10))) shouldBe false
+        store.seal(seal(captured.executionId, decision.sessionId!!, sealedAt = expiresAt.minusSeconds(10), expiresAt)) shouldBe false
         count("execution_capture_values") shouldBe 1
+        count("execution_capture_runs") shouldBe 0
+    }
+
+    @Test
+    fun `a value and a seal held before the expiry and released after it and after the purge insert nothing`() {
+        sessions.start(session())
+        val (c, decision) = admit()
+        val expiresAt = decision.expiresAt!!
+        storeClock.set(expiresAt.minusSeconds(1))
+        // Before expiry: a write reaches storage and is kept.
+        store.write(value(c.executionId, workspaceId, node = "early", recordedAt = expiresAt.minusSeconds(2))) shouldBe true
+        withHeldConnection { held ->
+            // Hold the reservation row: every diagnostic write now waits for it, produced well before the expiry.
+            held.queryForList(
+                "SELECT 1 FROM published_mutation_reservations WHERE execution_id = :id FOR UPDATE",
+                mapOf("id" to c.executionId),
+            )
+            val produced = expiresAt.minusSeconds(1)
+            val write =
+                CompletableFuture.supplyAsync { store.write(value(c.executionId, workspaceId, node = "late", recordedAt = produced)) }
+            val sealed = CompletableFuture.supplyAsync { store.seal(seal(c.executionId, decision.sessionId!!, produced, expiresAt)) }
+            awaitLockWaits(2)
+            // The expiry passes and the retention step purges, while both writes are still queued behind the hold.
+            storeClock.set(expiresAt)
+            store.purgeExpired(expiresAt, 10) shouldBe 1
+            held.jdbcTemplate.execute("ROLLBACK")
+            write.get(30, TimeUnit.SECONDS) shouldBe false
+            sealed.get(30, TimeUnit.SECONDS) shouldBe false
+        }
+        // Nothing was inserted or recreated after the purge, and reads stay denied.
+        count("execution_capture_values") shouldBe 0
+        count("execution_capture_runs") shouldBe 0
+        store.values(c.executionId, workspaceId, expiresAt).shouldBeEmpty()
+        store.run(c.executionId, workspaceId, expiresAt).shouldBeNull()
+    }
+
+    @Test
+    fun `a value and a seal held and released before the expiry are kept - the successful control`() {
+        sessions.start(session())
+        val (c, decision) = admit()
+        val expiresAt = decision.expiresAt!!
+        storeClock.set(expiresAt.minusSeconds(5))
+        withHeldConnection { held ->
+            held.queryForList(
+                "SELECT 1 FROM published_mutation_reservations WHERE execution_id = :id FOR UPDATE",
+                mapOf("id" to c.executionId),
+            )
+            val produced = expiresAt.minusSeconds(6)
+            val write = CompletableFuture.supplyAsync { store.write(value(c.executionId, workspaceId, recordedAt = produced)) }
+            val sealed = CompletableFuture.supplyAsync { store.seal(seal(c.executionId, decision.sessionId!!, produced, expiresAt)) }
+            awaitLockWaits(2)
+            storeClock.set(expiresAt.minusSeconds(1))
+            store.purgeExpired(expiresAt.minusSeconds(1), 10) shouldBe 0
+            held.jdbcTemplate.execute("ROLLBACK")
+            write.get(30, TimeUnit.SECONDS) shouldBe true
+            sealed.get(30, TimeUnit.SECONDS) shouldBe true
+        }
+        // The production timestamp is kept as metadata; the deadline is the reservation's.
+        store.values(c.executionId, workspaceId, expiresAt.minusSeconds(1)).single().let {
+            it.recordedAt shouldBe expiresAt.minusSeconds(6)
+            it.expiresAt shouldBe expiresAt
+        }
+        store.run(c.executionId, workspaceId, expiresAt.minusSeconds(1)).shouldNotBeNull().sealedAt shouldBe expiresAt.minusSeconds(6)
     }
 
     @Test
@@ -358,6 +538,39 @@ class ExecutionCaptureIntegrationTest {
         expiresAt: Instant = recordedAt.plusSeconds(1),
     ) = CapturedValue(executionId, ws, node, "summary", """{"k":"v"}""", 9, null, recordedAt, expiresAt)
 
+    private fun stored(c: PublishedMutationReservation) = reservations.findLive(c.scopeDigest!!).shouldNotBeNull()
+
+    /**
+     * Admits [c] while another transaction holds window [s]'s row `FOR UPDATE` (a stop in progress): the admission waits
+     * on the window lock; meanwhile [clock] moves to [advanceTo]; the hold is released without changing the window.
+     */
+    private fun heldWindowAdmission(
+        s: CaptureSession,
+        c: PublishedMutationReservation,
+        clock: MutableClock,
+        advanceTo: Instant,
+    ): PublishedMutationReservation {
+        var admitted: PublishedMutationReservation? = null
+        withHeldConnection { held ->
+            held.queryForList("SELECT id FROM execution_capture_sessions WHERE id = :id FOR UPDATE", mapOf("id" to s.id))
+            val admission =
+                CompletableFuture.supplyAsync { reservations.reserveDeciding(c, null, AdmissionStamp(clock, replay, retention)) }
+            awaitLockWait()
+            admission.isDone shouldBe false
+            clock.set(advanceTo)
+            held.jdbcTemplate.execute("ROLLBACK")
+            admitted = admission.get(30, TimeUnit.SECONDS)
+        }
+        return admitted.shouldNotBeNull()
+    }
+
+    private fun seal(
+        executionId: UUID,
+        sessionId: UUID,
+        sealedAt: Instant,
+        expiresAt: Instant,
+    ) = CaptureSeal(executionId, workspaceId, sessionId, 1, 0, 0, 9, sealedAt, expiresAt)
+
     private fun count(table: String): Int = jdbc.jdbcTemplate.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java)!!
 
     /** Runs [block] with a template over ONE connection whose transaction stays open until the block commits it. */
@@ -374,7 +587,10 @@ class ExecutionCaptureIntegrationTest {
     }
 
     /** Polls, on its own connection, until some backend waits on a lock — the held side is now blocking the other. */
-    private fun awaitLockWait() {
+    private fun awaitLockWait() = awaitLockWaits(1)
+
+    /** Polls, on its own connection, until at least [backends] backends wait on a lock. */
+    private fun awaitLockWaits(backends: Int) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
         while (System.nanoTime() < deadline) {
             val waiting =
@@ -382,10 +598,25 @@ class ExecutionCaptureIntegrationTest {
                     "SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
                     Int::class.java,
                 )!!
-            if (waiting > 0) return
+            if (waiting >= backends) return
             Thread.sleep(LOCK_POLL_MILLIS)
         }
-        error("no backend began waiting on the held lock within 30 s")
+        error("fewer than $backends backends began waiting on the held lock within 30 s")
+    }
+
+    /** A clock a test moves: what the code under test reads as "now" at the moment it reads it. */
+    private class MutableClock(
+        @Volatile private var instant: Instant,
+    ) : Clock() {
+        fun set(to: Instant) {
+            instant = to
+        }
+
+        override fun instant(): Instant = instant
+
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+
+        override fun withZone(zone: ZoneId?): Clock = this
     }
 
     private companion object {

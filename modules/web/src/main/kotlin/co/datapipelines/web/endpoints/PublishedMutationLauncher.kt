@@ -186,9 +186,11 @@ class PublishedMutationLauncher(
                 }
             Attempt.Thrown(e, release)
         } finally {
-            // However the run ended — and after the caller's wait timed out too — the closing summary is written once,
-            // off the business path; a run released before it started has no reservation, so the store refuses it.
-            capture?.let { withContext(NonCancellable + Dispatchers.IO) { it.seal() } }
+            // However the run ended — and after the caller's wait timed out too — recording ends here. seal() only closes
+            // the run's diagnostic queue and returns at once: the summary is written by the recorder's own drain, after the
+            // last value, so neither the answer nor its 200/202 timing ever waits on diagnostic storage. A run released
+            // before it started has no reservation, so the store refuses its summary.
+            capture?.seal()
         }
 
     private fun answer(

@@ -136,10 +136,10 @@ class ExecutionCaptureServiceTest {
     fun `a stop audits only the stop that ended a window - an already ended one answers its own state`() {
         val post = route(EndpointMethod.POST)
         val ended = session(post).copy(stoppedAt = now, stoppedBy = admin.userId, endReason = CaptureSession.EndReason.STOPPED)
-        every { sessions.stop(workspaceId, post.id, ended.id, admin.userId, now) } returnsMany
+        every { sessions.stop(workspaceId, post.id, ended.id, admin.userId, clock) } returnsMany
             listOf(CaptureStop.Stopped(ended), CaptureStop.AlreadyEnded(ended))
         val unknown = UUID.randomUUID()
-        every { sessions.stop(workspaceId, post.id, unknown, admin.userId, now) } returns CaptureStop.NotFound
+        every { sessions.stop(workspaceId, post.id, unknown, admin.userId, clock) } returns CaptureStop.NotFound
 
         service.stop(admin, workspaceId, post.id, ended.id) shouldBe ended
         service.stop(admin, workspaceId, post.id, ended.id) shouldBe ended

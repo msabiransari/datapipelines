@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -35,7 +37,8 @@ class PublishedMutationReservationIntegrationTest {
     @BeforeAll
     fun connect() {
         jdbc = NamedParameterJdbcTemplate(SharedPostgres.dataSource())
-        reservations = PublishedMutationReservationRepository(jdbc)
+        reservations =
+            PublishedMutationReservationRepository(jdbc, TransactionTemplate(DataSourceTransactionManager(SharedPostgres.dataSource())))
     }
 
     @BeforeEach

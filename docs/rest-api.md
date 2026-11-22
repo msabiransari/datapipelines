@@ -3444,7 +3444,7 @@ A workspace administrator's temporary, private capture of what a published `POST
       "value_bytes": null, "omitted_reason": "byte_budget_exhausted", "recorded_at": "2026-11-22T10:01:13Z" } ] } }
 ```
 
-`value_json` is the stored JSON text as a string — never re-parsed or rendered; a client displays it as text. `capture_status`: `recording` (the run has not finished), `complete` (finished and its closing summary was written with no store failure: `values` is the whole set — an empty list then means the pipeline declared no value-mode output), `incomplete` (a value write failed, or the closing summary was not written: the set may be partial). Readable after the window stopped, until `expires_at`. Audited as `execution.capture.inspected`.
+`value_json` is the stored JSON text as a string — never re-parsed or rendered; a client displays it as text. `capture_status`: `recording` (the run has not finished), `complete` (finished and its closing summary was written with no store failure: `values` is the whole set — an empty list then means the pipeline declared no value-mode output), `incomplete` (a value write failed, or the closing summary was not written: the set may be partial). The summary is written asynchronously after the run's last value — the caller's answer never waits for it — so a run that has just finished can read `incomplete` for a moment before its summary lands; re-read to settle it. A value or summary that reaches storage after `expires_at` is never written. Readable after the window stopped, until `expires_at` — `410 execution.capture.expired` at that instant, even before the purge. Audited as `execution.capture.inspected`.
 
 | Refusal | Answer |
 |---|---|

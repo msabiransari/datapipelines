@@ -5,8 +5,10 @@ import co.datapipelines.executor.CaptureValueStore
 import co.datapipelines.executor.CapturedValue
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.support.TransactionOperations
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
@@ -36,71 +38,107 @@ data class StoredCaptureRun(
 
 /**
  * The private diagnostic store of runtime capture (metadata-db §4.63, §4.64; #1043): `execution_capture_values` and
- * `execution_capture_runs`. Never part of a business transaction — every statement is its own autocommit statement
- * on the metadata pool, so a diagnostic write can neither join nor roll back the run's business work.
+ * `execution_capture_runs`. Never part of a business transaction — each write is its own short metadata transaction,
+ * so a diagnostic write can neither join nor roll back the run's business work.
  *
- * **The store refuses what was not admitted.** A write is an `INSERT … SELECT` from the execution's reservation in the
- * same workspace, conditional on the reservation having been captured and its `capture_expires_at` being after the
- * write's time; the stored `expires_at` is the reservation's, never the caller's. So an uncaptured execution, another
- * workspace's execution, or a write after expiry inserts nothing (false).
+ * **The store refuses what was not admitted, at the time the write reaches storage.** A write first locks the
+ * execution's reservation in the same workspace (`FOR KEY SHARE` — the lock the detail rows' foreign key takes anyway,
+ * so nothing later in the transaction can wait), requires it to have been captured, and only THEN reads [clock]: the
+ * write inserts iff that instant is before the reservation's `capture_expires_at`. A value or seal produced before the
+ * deadline but queued, delayed or blocked until after it is refused (false) — its own `recorded_at`/`sealed_at` is kept
+ * as metadata, never as expiry authority. The stored `expires_at` is the reservation's, never the caller's. So an
+ * uncaptured execution, another workspace's execution, or a write after expiry inserts nothing.
  *
  * **Reads refuse what has expired**, whether or not the retention tick has deleted it yet: every read is bounded by
  * `expires_at > :now`. [purgeExpired] deletes physically in bounded batches; it holds no state between ticks, so a
- * restart simply resumes with the next tick's batch.
+ * restart simply resumes with the next tick's batch. A write that passed its deadline check commits within its own
+ * bounded transaction, so a row can outlive its deadline only until the next purge batch — and is never readable.
  */
 class ExecutionCaptureStore(
     private val jdbc: NamedParameterJdbcTemplate,
+    /** The metadata transactions each write runs in; null only for a [purgeOnly] store, whose writes then refuse to run. */
+    private val transactions: TransactionOperations?,
+    private val clock: Clock = Clock.systemUTC(),
 ) : CaptureValueStore {
     override fun write(value: CapturedValue): Boolean =
-        jdbc.update(
-            """
-            INSERT INTO execution_capture_values (
-                execution_id, node_id, output_key, workspace_id, state, omitted_reason, value_text, value_bytes,
-                recorded_at, expires_at)
-            SELECT r.execution_id, :nodeId, :outputKey, r.workspace_id, :state, :omittedReason, :valueJson, :valueBytes,
-                   :recordedAt, r.capture_expires_at
-              FROM published_mutation_reservations r
-             WHERE r.execution_id = :executionId AND r.workspace_id = :workspaceId
-               AND r.capture_session_id IS NOT NULL AND :recordedAt < r.capture_expires_at
-            ON CONFLICT (execution_id, node_id, output_key) DO NOTHING
-            """.trimIndent(),
-            mapOf(
-                "executionId" to value.executionId,
-                "workspaceId" to value.workspaceId,
-                "nodeId" to value.nodeId,
-                "outputKey" to value.outputKey,
-                "state" to if (value.omittedReason == null) STATE_CAPTURED else STATE_OMITTED,
-                "omittedReason" to value.omittedReason?.wire,
-                "valueJson" to value.valueJson,
-                "valueBytes" to value.valueBytes,
-                "recordedAt" to Timestamp.from(value.recordedAt),
-            ),
-        ) == 1
+        beforeDeadline(value.executionId, value.workspaceId, sessionId = null) { expiresAt ->
+            jdbc.update(
+                """
+                INSERT INTO execution_capture_values (
+                    execution_id, node_id, output_key, workspace_id, state, omitted_reason, value_text, value_bytes,
+                    recorded_at, expires_at)
+                VALUES (
+                    :executionId, :nodeId, :outputKey, :workspaceId, :state, :omittedReason, :valueJson, :valueBytes,
+                    :recordedAt, :expiresAt)
+                ON CONFLICT (execution_id, node_id, output_key) DO NOTHING
+                """.trimIndent(),
+                mapOf(
+                    "executionId" to value.executionId,
+                    "workspaceId" to value.workspaceId,
+                    "nodeId" to value.nodeId,
+                    "outputKey" to value.outputKey,
+                    "state" to if (value.omittedReason == null) STATE_CAPTURED else STATE_OMITTED,
+                    "omittedReason" to value.omittedReason?.wire,
+                    "valueJson" to value.valueJson,
+                    "valueBytes" to value.valueBytes,
+                    "recordedAt" to Timestamp.from(value.recordedAt),
+                    "expiresAt" to Timestamp.from(expiresAt),
+                ),
+            ) == 1
+        }
 
     override fun seal(seal: CaptureSeal): Boolean =
-        jdbc.update(
-            """
-            INSERT INTO execution_capture_runs (
-                execution_id, workspace_id, session_id, values_captured, values_omitted, write_failures, bytes_used,
-                sealed_at, expires_at)
-            SELECT r.execution_id, r.workspace_id, r.capture_session_id, :captured, :omitted, :failures, :bytes,
-                   :sealedAt, r.capture_expires_at
-              FROM published_mutation_reservations r
-             WHERE r.execution_id = :executionId AND r.workspace_id = :workspaceId
-               AND r.capture_session_id = :sessionId AND :sealedAt < r.capture_expires_at
-            ON CONFLICT (execution_id) DO NOTHING
-            """.trimIndent(),
-            mapOf(
-                "executionId" to seal.executionId,
-                "workspaceId" to seal.workspaceId,
-                "sessionId" to seal.sessionId,
-                "captured" to seal.valuesCaptured,
-                "omitted" to seal.valuesOmitted,
-                "failures" to seal.writeFailures,
-                "bytes" to seal.bytesUsed,
-                "sealedAt" to Timestamp.from(seal.sealedAt),
-            ),
-        ) == 1
+        beforeDeadline(seal.executionId, seal.workspaceId, seal.sessionId) { expiresAt ->
+            jdbc.update(
+                """
+                INSERT INTO execution_capture_runs (
+                    execution_id, workspace_id, session_id, values_captured, values_omitted, write_failures, bytes_used,
+                    sealed_at, expires_at)
+                VALUES (
+                    :executionId, :workspaceId, :sessionId, :captured, :omitted, :failures, :bytes, :sealedAt, :expiresAt)
+                ON CONFLICT (execution_id) DO NOTHING
+                """.trimIndent(),
+                mapOf(
+                    "executionId" to seal.executionId,
+                    "workspaceId" to seal.workspaceId,
+                    "sessionId" to seal.sessionId,
+                    "captured" to seal.valuesCaptured,
+                    "omitted" to seal.valuesOmitted,
+                    "failures" to seal.writeFailures,
+                    "bytes" to seal.bytesUsed,
+                    "sealedAt" to Timestamp.from(seal.sealedAt),
+                    "expiresAt" to Timestamp.from(expiresAt),
+                ),
+            ) == 1
+        }
+
+    /**
+     * Runs [insert] with the reservation's detail deadline, in one transaction, iff [executionId] in [workspaceId] was
+     * captured (by window [sessionId] when given) and [clock] — read AFTER the reservation row is locked — is still
+     * before that deadline. False otherwise, with nothing written.
+     */
+    private fun beforeDeadline(
+        executionId: UUID,
+        workspaceId: UUID,
+        sessionId: UUID?,
+        insert: (Instant) -> Boolean,
+    ): Boolean =
+        checkNotNull(transactions) { "a purge-only capture store does not write" }.execute { _ ->
+            val expiresAt =
+                jdbc
+                    .query(
+                        """
+                        SELECT capture_expires_at FROM published_mutation_reservations
+                         WHERE execution_id = :executionId AND workspace_id = :workspaceId
+                           AND capture_session_id IS NOT NULL
+                           AND (CAST(:sessionId AS uuid) IS NULL OR capture_session_id = CAST(:sessionId AS uuid))
+                           FOR KEY SHARE
+                        """.trimIndent(),
+                        mapOf("executionId" to executionId, "workspaceId" to workspaceId, "sessionId" to sessionId?.toString()),
+                    ) { rs, _ -> rs.getTimestamp("capture_expires_at").toInstant() }
+                    .firstOrNull()
+            expiresAt != null && clock.instant().isBefore(expiresAt) && insert(expiresAt)
+        } == true
 
     /** The unexpired captured values of [executionId] in [workspaceId] at [now], in recording order. */
     fun values(
@@ -169,11 +207,14 @@ class ExecutionCaptureStore(
         return values + runs
     }
 
-    private companion object {
-        const val STATE_CAPTURED = "CAPTURED"
-        const val STATE_OMITTED = "OMITTED"
+    companion object {
+        /** The store the retention step purges with — on the retention tick's statement bound; it never writes. */
+        fun purgeOnly(jdbc: NamedParameterJdbcTemplate): ExecutionCaptureStore = ExecutionCaptureStore(jdbc, transactions = null)
 
-        val VALUE_MAPPER =
+        private const val STATE_CAPTURED = "CAPTURED"
+        private const val STATE_OMITTED = "OMITTED"
+
+        private val VALUE_MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
                 StoredCaptureValue(
                     nodeId = rs.getString("node_id"),
@@ -186,7 +227,7 @@ class ExecutionCaptureStore(
                 )
             }
 
-        val RUN_MAPPER =
+        private val RUN_MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
                 StoredCaptureRun(
                     sessionId = rs.getObject("session_id", UUID::class.java),

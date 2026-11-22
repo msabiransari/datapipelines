@@ -31,6 +31,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.matchers.types.shouldBeSameInstanceAs
+import io.kotest.matchers.types.shouldNotBeInstanceOf
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -45,6 +46,7 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
@@ -58,6 +60,7 @@ class PublishedMutationCaptureLaunchTest {
     private val reservations = mockk<PublishedMutationReservationRepository>()
     private val executions = mockk<ExecutionRepository>()
     private val store = RecordingStore()
+    private val recorders = CaptureRecorders(store, BUDGET)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val endpoint =
@@ -115,12 +118,13 @@ class PublishedMutationCaptureLaunchTest {
             endpointsProperties = EndpointsProperties(),
             audit = NoAudit,
             scope = scope,
-            captures = CaptureRecorders(store, BUDGET),
+            captures = recorders,
         )
 
     @AfterEach
     fun stopScope() {
         scope.cancel()
+        recorders.close()
     }
 
     @Test
@@ -149,18 +153,53 @@ class PublishedMutationCaptureLaunchTest {
         launcher.start(endpoint, principal, captured, request(captured), TIMEOUT_S, PAGE_ROWS)
 
         ran.captured.valueCapture.shouldBeInstanceOf<BoundedValueCapture>()
+        awaitSeals(1)
         store.values.single().let {
             it.executionId shouldBe captured.executionId
             it.nodeId shouldBe "shape"
             it.valueJson shouldBe "42"
             it.expiresAt shouldBe expiry
         }
-        awaitSeals(1)
         store.seals.single().let {
             it.sessionId shouldBe session
             it.valuesCaptured shouldBe 1
             it.expiresAt shouldBe expiry
         }
+    }
+
+    @Test
+    fun `held diagnostic storage never delays the answer - the caller gets the run's outcome, the summary follows`() {
+        val held = HeldStore()
+        val heldRecorders = CaptureRecorders(held, BUDGET)
+        val heldLauncher =
+            PublishedMutationLauncher(
+                runner = runner,
+                reservations = reservations,
+                executions = executions,
+                answers = PublishedMutationAnswers(mockk<ResultStore>(relaxed = true), PublishedMutationUrls(null)),
+                endpointsProperties = EndpointsProperties(),
+                audit = NoAudit,
+                scope = scope,
+                captures = heldRecorders,
+            )
+        val ran = slot<ExecuteRequest>()
+        coEvery { runner.run(capture(ran), workspaceId, ExecutionTrigger.ENDPOINT, true, any()) } coAnswers {
+            requireNotNull(ran.captured.valueCapture).record("shape", "total", 42)
+            success(captured)
+        }
+        try {
+            // Timeout 1 s (the clamp's floor) while the store holds every write: the finished run is answered, never 202.
+            heldLauncher.start(endpoint, principal, captured, request(captured), 1, PAGE_ROWS).shouldNotBeInstanceOf<Outcome.Accepted>()
+            held.values.shouldBeEmpty()
+            held.seals.shouldBeEmpty()
+        } finally {
+            held.release.countDown()
+        }
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_S)
+        while (held.seals.isEmpty() && System.nanoTime() < deadline) Thread.sleep(POLL_MS)
+        held.values.single().nodeId shouldBe "shape"
+        held.seals.single().valuesCaptured shouldBe 1
+        heldRecorders.close()
     }
 
     @Test
@@ -225,6 +264,23 @@ class PublishedMutationCaptureLaunchTest {
         override fun write(value: CapturedValue): Boolean = values.add(value)
 
         override fun seal(seal: CaptureSeal): Boolean = seals.add(seal)
+    }
+
+    /** A [CaptureValueStore] whose every write and seal blocks until [release] — diagnostic storage not answering. */
+    private class HeldStore : CaptureValueStore {
+        val release = CountDownLatch(1)
+        val values = CopyOnWriteArrayList<CapturedValue>()
+        val seals = CopyOnWriteArrayList<CaptureSeal>()
+
+        override fun write(value: CapturedValue): Boolean {
+            check(release.await(AWAIT_S, TimeUnit.SECONDS))
+            return values.add(value)
+        }
+
+        override fun seal(seal: CaptureSeal): Boolean {
+            check(release.await(AWAIT_S, TimeUnit.SECONDS))
+            return seals.add(seal)
+        }
     }
 
     private object NoAudit : AuditEventSink {

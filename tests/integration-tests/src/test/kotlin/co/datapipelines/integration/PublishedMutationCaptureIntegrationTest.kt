@@ -99,6 +99,8 @@ class PublishedMutationCaptureIntegrationTest {
         }
         routes[GET_ROUTE] = publish(MAIN, "GET", workspace = null, pipeline = READ_PIPELINE)
         routes[OVERLAP_B] = publish(OVERLAP_IN_B, "POST", workspace = OTHER_WORKSPACE)
+        routes[PUT_KEY] = publish(PUT_PATH, "PUT", workspace = null)
+        routes[DELETE_KEY] = publish(DELETE_PATH, "DELETE", workspace = null, pipeline = DELETE_PIPELINE)
         mintKeys()
         bootReplicaB()
     }
@@ -141,7 +143,7 @@ class PublishedMutationCaptureIntegrationTest {
             text(
                 "SELECT extract(epoch FROM capture_expires_at - created_at)::bigint FROM published_mutation_reservations " +
                     "WHERE execution_id = '$id'",
-            ) shouldBe (24 * 3600).toString()
+            ) shouldBe DETAIL_RETENTION_S
             awaitSealed(id)
             rows(
                 "SELECT node_id, output_key, state, value_text FROM execution_capture_values WHERE execution_id = '$id'",
@@ -181,11 +183,12 @@ class PublishedMutationCaptureIntegrationTest {
     fun `a failing write still leaves its successful transformers inspectable, and the error marker is not captured`(
         output: CapturedOutput,
     ) {
+        val raw = marker("RAW-FAIL")
         val sel = marker("SEL-FAIL")
         val capture = start(FAILING)
         try {
             // The tag 'boom' trips the target's check constraint, whose NAME is the error marker.
-            val answered = mutate(writer, FAILING, "fail-1", body(sel, "boom"))
+            val answered = mutate(writer, FAILING, "fail-1", body(sel, "boom", raw))
             val id = executionIdOf(answered)
             awaitStatus(id, "FAILED")
             awaitSealed(id)
@@ -193,12 +196,22 @@ class PublishedMutationCaptureIntegrationTest {
             targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 0
             val read = detail(id)
             withClue(read.asString()) { read.statusCode() shouldBe 200 }
+            read.header("Cache-Control") shouldContain "no-store"
             read.jsonPath().getString("data.execution_status") shouldBe "FAILED"
             read.jsonPath().getString("data.capture_status") shouldBe "complete"
             read.jsonPath().getList<String>("data.values.node_id") shouldContainExactlyInAnyOrder listOf("pick", "tag")
-            read.asString() shouldNotContain ERROR_MARKER
-            captureText(id) shouldNotContain ERROR_MARKER
-            output.all shouldNotContain sel
+            read.jsonPath().getList<String>("data.values.value_json") shouldContainExactlyInAnyOrder listOf("\"$sel\"", "\"boom\"")
+
+            // The same surface walk as the successful case: RAW nowhere, SELECTED only in the private read and tables,
+            // and the ERROR marker — the run's own failure — never in the private read or tables.
+            for ((surface, text) in surfaces(id, answered, read, output)) {
+                withClue("RAW marker on $surface") { text shouldNotContain raw }
+            }
+            for ((surface, text) in surfaces(id, answered, read = null, output = output)) {
+                withClue("SELECTED marker on $surface") { text shouldNotContain sel }
+            }
+            withClue("ERROR marker on the private read") { read.asString() shouldNotContain ERROR_MARKER }
+            withClue("ERROR marker in the private tables") { captureText(id) shouldNotContain ERROR_MARKER }
         } finally {
             stop(FAILING, capture)
         }
@@ -415,6 +428,8 @@ class PublishedMutationCaptureIntegrationTest {
         text("SELECT capture_session_id::text FROM published_mutation_reservations WHERE execution_id = '$id'") shouldBe capture
         awaitSealed(id)
         count("SELECT count(*) FROM execution_capture_values WHERE execution_id = '$id'") shouldBe 2
+        // Whichever replica admitted it, the stored instant, decision and both expiries describe one admission.
+        assertOneAdmission(id, capture)
         // After the stop, a retry on either replica — even with a changed correlation — reuses the stored decision.
         for (replica in listOf(port, portB)) {
             val retry = mutate(writer, REPLICAS_ON, "replicas-on", body(sel, "t-on"), replica, UUID.randomUUID().toString())
@@ -459,6 +474,8 @@ class PublishedMutationCaptureIntegrationTest {
             val first = mutate(writer, RESTART, "restart-1", request, portB)
             val id = first.let(::executionIdOf)
             awaitSealed(id)
+            // Admitted on replica B: the one admission's instant sits inside the window replica A opened.
+            assertOneAdmission(id, capture)
             replicaB?.close()
             bootReplicaB()
             mutate(writer, RESTART, "restart-1", request, portB).let(::executionIdOf) shouldBe id
@@ -466,6 +483,249 @@ class PublishedMutationCaptureIntegrationTest {
             decisionOf(mutate(writer, RESTART, "restart-2", body(marker("SEL-R2"), "t"), portB)) shouldBe capture
         } finally {
             stop(RESTART, capture)
+        }
+    }
+
+    @Test
+    fun `a definitely-running execution retried on both replicas with a changed correlation keeps its decision - capture initially on`() {
+        val sel = marker("SEL-RUN-ON")
+        val capture = start(RUNNING_ON)
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val (id, first) =
+                holdingTarget {
+                    val first = pool.submit<Response> { mutate(writer, RUNNING_ON, "running-on", body(sel, "t-run-on")) }
+                    awaitTargetWaiters(BUSINESS_WRITE_SQL, 1)
+                    val id = reservedExecution(RUNNING_ON)
+                    count("SELECT count(*) FROM pipeline_executions WHERE execution_id = '$id' AND status = 'RUNNING'") shouldBe 1
+                    // The window ends while the admitted run is held in its business write.
+                    stop(RUNNING_ON, capture)
+                    for (replica in listOf(port, portB)) {
+                        val retry =
+                            mutate(writer, RUNNING_ON, "running-on", body(sel, "t-run-on"), replica, UUID.randomUUID().toString())
+                        withClue(retry.asString()) { retry.statusCode() shouldBe 202 }
+                        retry.let(::executionIdOf) shouldBe id
+                    }
+                    decisionOf(id) shouldBe capture
+                    id to first
+                }
+            first.get(FUTURE_S, TimeUnit.SECONDS).let(::executionIdOf) shouldBe id
+            awaitEnded(id)
+            awaitSealed(id)
+            targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+            count("SELECT count(*) FROM execution_capture_values WHERE execution_id = '$id'") shouldBe 2
+            count("SELECT count(*) FROM execution_capture_runs WHERE execution_id = '$id'") shouldBe 1
+            assertOneAdmission(id, capture)
+        } finally {
+            pool.shutdownNow()
+            stopRaw(RUNNING_ON, capture)
+        }
+    }
+
+    @Test
+    fun `a definitely-running execution retried on both replicas with a changed correlation keeps its decision - capture initially off`() {
+        val sel = marker("SEL-RUN-OFF")
+        val pool = Executors.newSingleThreadExecutor()
+        var capture: String? = null
+        try {
+            val (id, first) =
+                holdingTarget {
+                    val first = pool.submit<Response> { mutate(writer, RUNNING_OFF, "running-off", body(sel, "t-run-off")) }
+                    awaitTargetWaiters(BUSINESS_WRITE_SQL, 1)
+                    val id = reservedExecution(RUNNING_OFF)
+                    count("SELECT count(*) FROM pipeline_executions WHERE execution_id = '$id' AND status = 'RUNNING'") shouldBe 1
+                    // An unfiltered window opens while the uncaptured run is held: it would admit ANY new request.
+                    capture = start(RUNNING_OFF)
+                    for (replica in listOf(port, portB)) {
+                        val retry =
+                            mutate(writer, RUNNING_OFF, "running-off", body(sel, "t-run-off"), replica, UUID.randomUUID().toString())
+                        withClue(retry.asString()) { retry.statusCode() shouldBe 202 }
+                        retry.let(::executionIdOf) shouldBe id
+                    }
+                    decisionOf(id) shouldBe "none"
+                    id to first
+                }
+            first.get(FUTURE_S, TimeUnit.SECONDS).let(::executionIdOf) shouldBe id
+            awaitEnded(id)
+            decisionOf(id) shouldBe "none"
+            captureRows(id) shouldBe 0
+            targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+            // The control: the same open window does capture a NEW request.
+            decisionOf(mutate(writer, RUNNING_OFF, "running-off-2", body(marker("SEL-RUN-OFF2"), "t"))) shouldBe capture
+        } finally {
+            pool.shutdownNow()
+            capture?.let { stopRaw(RUNNING_OFF, it) }
+        }
+    }
+
+    // ------------------------------------------------------------------- the run outlives its window
+
+    @Test
+    fun `a run admitted in the window that continues past its natural expiry keeps its decision until its detail deadline`() {
+        val sel = marker("SEL-OUT")
+        val capture = start(OUTLIVES)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val (id, answers) =
+                holdingTarget {
+                    val first = pool.submit<Response> { mutate(writer, OUTLIVES, "outlives-1", body(sel, "t-out")) }
+                    awaitTargetWaiters(BUSINESS_WRITE_SQL, 1)
+                    val id = reservedExecution(OUTLIVES)
+                    // The window's natural deadline passes while the admitted run is held (moved, as a clock would).
+                    sql(
+                        "UPDATE execution_capture_sessions SET started_at = started_at - interval '2 hours', " +
+                            "deadline_at = now() - interval '1 second' WHERE id = '$capture'",
+                    )
+                    // A new request after the deadline is admitted uncaptured; it too waits on the held target.
+                    val later = pool.submit<Response> { mutate(writer, OUTLIVES, "outlives-2", body(marker("SEL-OUT2"), "t")) }
+                    awaitTargetWaiters(BUSINESS_WRITE_SQL, 2)
+                    id to (first to later)
+                }
+            val (first, later) = answers
+            first.get(FUTURE_S, TimeUnit.SECONDS).let(::executionIdOf) shouldBe id
+            decisionOf(later.get(FUTURE_S, TimeUnit.SECONDS)) shouldBe "none"
+            awaitEnded(id)
+            awaitSealed(id)
+            decisionOf(id) shouldBe capture
+            val read = detail(id)
+            withClue(read.asString()) { read.statusCode() shouldBe 200 }
+            read.jsonPath().getString("data.capture_status") shouldBe "complete"
+            read.jsonPath().getList<String>("data.values.value_json") shouldContainExactlyInAnyOrder listOf("\"$sel\"", "\"t-out\"")
+            text(
+                "SELECT extract(epoch FROM capture_expires_at - created_at)::bigint FROM published_mutation_reservations " +
+                    "WHERE execution_id = '$id'",
+            ) shouldBe DETAIL_RETENTION_S
+            // Until — and only until — its own detail deadline.
+            sql("UPDATE published_mutation_reservations SET capture_expires_at = now() - interval '1 second' WHERE execution_id = '$id'")
+            sql("UPDATE execution_capture_values SET expires_at = now() - interval '1 second' WHERE execution_id = '$id'")
+            sql("UPDATE execution_capture_runs SET expires_at = now() - interval '1 second' WHERE execution_id = '$id'")
+            detail(id).statusCode() shouldBe 410
+        } finally {
+            pool.shutdownNow()
+            stopRaw(OUTLIVES, capture)
+        }
+    }
+
+    @Test
+    fun `a run still going at its detail deadline writes no summary after it, and its detail reads as expired`() {
+        val sel = marker("SEL-DL")
+        val capture = start(DEADLINE)
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val (id, first) =
+                holdingTarget {
+                    val first = pool.submit<Response> { mutate(writer, DEADLINE, "deadline-1", body(sel, "t-dl")) }
+                    awaitTargetWaiters(BUSINESS_WRITE_SQL, 1)
+                    val id = reservedExecution(DEADLINE)
+                    awaitCount("SELECT count(*) FROM execution_capture_values WHERE execution_id = '$id'", 2)
+                    // The detail deadline passes while the run is held in its business write (moved, as a clock would).
+                    sql(
+                        "UPDATE published_mutation_reservations SET capture_expires_at = now() - interval '1 second' " +
+                            "WHERE execution_id = '$id'",
+                    )
+                    sql("UPDATE execution_capture_values SET expires_at = now() - interval '1 second' WHERE execution_id = '$id'")
+                    id to first
+                }
+            first.get(FUTURE_S, TimeUnit.SECONDS).let(::executionIdOf) shouldBe id
+            awaitEnded(id)
+            targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+            // The summary the drain tried after the deadline was refused at storage time; give it the time it needs.
+            Thread.sleep(SETTLE_MS)
+            count("SELECT count(*) FROM execution_capture_runs WHERE execution_id = '$id'") shouldBe 0
+            detail(id).statusCode() shouldBe 410
+            val retention = context.getBean("executionCaptureRetention")
+            retention.javaClass.getMethod("retainOnce").invoke(retention)
+            captureRows(id) shouldBe 0
+        } finally {
+            pool.shutdownNow()
+            stopRaw(DEADLINE, capture)
+        }
+    }
+
+    // --------------------------------------------------------------------------- PUT and DELETE
+
+    @Test
+    fun `a PUT route captures its declared outputs like a POST`() {
+        val sel = marker("SEL-PUT")
+        val capture = start(PUT_KEY)
+        try {
+            val answered = mutate(writer, PUT_PATH, "put-1", body(sel, "t-put"), method = "PUT")
+            withClue(answered.asString()) { answered.statusCode() shouldBe 200 }
+            val id = answered.let(::executionIdOf)
+            decisionOf(id) shouldBe capture
+            awaitSealed(id)
+            val read = detail(id)
+            withClue(read.asString()) { read.statusCode() shouldBe 200 }
+            read.jsonPath().getString("data.capture_status") shouldBe "complete"
+            read.jsonPath().getList<String>("data.values.value_json") shouldContainExactlyInAnyOrder listOf("\"$sel\"", "\"t-put\"")
+            targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+        } finally {
+            stop(PUT_KEY, capture)
+        }
+    }
+
+    @Test
+    fun `a bodyless DELETE with no value output is captured with an empty value set and a complete status`() {
+        val capture = start(DELETE_KEY)
+        try {
+            val answered = mutate(writer, DELETE_PATH, "delete-1", body = null, method = "DELETE")
+            withClue(answered.asString()) { answered.statusCode() shouldBe 200 }
+            val id = answered.let(::executionIdOf)
+            decisionOf(id) shouldBe capture
+            awaitSealed(id)
+            val read = detail(id)
+            withClue(read.asString()) { read.statusCode() shouldBe 200 }
+            read.header("Cache-Control") shouldContain "no-store"
+            read.jsonPath().getString("data.execution_status") shouldBe "SUCCESS"
+            read.jsonPath().getString("data.capture_status") shouldBe "complete"
+            read.jsonPath().getList<Any>("data.values") shouldHaveSize 0
+            text(
+                "SELECT values_captured || '/' || values_omitted || '/' || write_failures " +
+                    "FROM execution_capture_runs WHERE execution_id = '$id'",
+            ) shouldBe "0/0/0"
+        } finally {
+            stop(DELETE_KEY, capture)
+        }
+    }
+
+    // ---------------------------------------------------------------------- slow diagnostic storage
+
+    @Test
+    fun `diagnostic storage held during the run - the answer arrives while a value write still waits, one business change`() {
+        val sel = marker("SEL-SLOW")
+        val capture = start(SLOW_STORE)
+        try {
+            val (id, pending) =
+                holdingTable("execution_capture_values") {
+                    val answered = mutate(writer, SLOW_STORE, "slow-1", body(sel, "t-slow"))
+                    // The answer is here, and the diagnostic write it would have waited on is still queued on the lock.
+                    val pending =
+                        count(
+                            "SELECT count(*) FROM pg_stat_activity " +
+                                "WHERE wait_event_type = 'Lock' AND ltrim(query) LIKE '$CAPTURE_WRITE_SQL%'",
+                        )
+                    withClue(answered.asString()) { answered.statusCode() shouldBe 200 }
+                    val id = answered.let(::executionIdOf)
+                    targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+                    // A retry while storage is still held replays the one execution: no second business change.
+                    mutate(writer, SLOW_STORE, "slow-1", body(sel, "t-slow"), portB).let(::executionIdOf) shouldBe id
+                    targetCount("SELECT count(*) FROM cap_rows WHERE picked = '$sel'") shouldBe 1
+                    id to pending
+                }
+            withClue("diagnostic writes still waiting when the answer arrived") { (pending >= 1) shouldBe true }
+            awaitSealed(id)
+            decisionOf(id) shouldBe capture
+            count("SELECT count(*) FROM pipeline_executions WHERE execution_id = '$id' AND status = 'SUCCESS'") shouldBe 1
+            val status = detail(id).jsonPath().getString("data.capture_status")
+            status shouldBeIn listOf("complete", "incomplete")
+            val failures = text("SELECT write_failures FROM execution_capture_runs WHERE execution_id = '$id'").toInt()
+            val kept = count("SELECT count(*) FROM execution_capture_values WHERE execution_id = '$id'")
+            withClue("status $status, $kept kept, $failures failed") {
+                (kept + failures) shouldBe 2
+                (status == "complete") shouldBe (failures == 0)
+            }
+        } finally {
+            stop(SLOW_STORE, capture)
         }
     }
 
@@ -525,18 +785,24 @@ class PublishedMutationCaptureIntegrationTest {
     @Test
     fun `a key is refused every capture surface - an administrator-role mcp key and the route's own caller key`() {
         val id = routes.getValue(MAIN)
+        val surfaces =
+            listOf(
+                "GET" to "/api/v1/endpoints/$id/captures",
+                "POST" to "/api/v1/endpoints/$id/captures",
+                "GET" to "/api/v1/executions/${UUID.randomUUID()}/capture",
+            )
         for (key in listOf(adminKey, writer)) {
-            for ((method, path) in listOf("GET" to "/api/v1/endpoints/$id/captures", "POST" to "/api/v1/endpoints/$id/captures")) {
+            for ((method, path) in surfaces) {
                 val refused = given().port(port).header(API_KEY_HEADER, key.plaintext).request(method, path)
-                withClue("${key.id} $method $path ${refused.asString()}") { refused.statusCode() shouldBe 403 }
+                withClue("${key.id} $method $path ${refused.asString()}") {
+                    refused.statusCode() shouldBe 403
+                    // The FIRST guard a key meets on REST is the kind confinement (auth.md §7.7), before any permission
+                    // or handler: every key kind is off its surface here. The two capture-specific layers behind it —
+                    // the session-only rule of the key-role column and the handler's session check — have their own
+                    // witnesses (RoleMatrixTest, ExecutionCaptureControllerTest).
+                    refused.jsonPath().getString("error.code") shouldBe "endpoint.key_kind_refused"
+                }
             }
-            given()
-                .port(
-                    port,
-                ).header(API_KEY_HEADER, key.plaintext)
-                .get("/api/v1/executions/${UUID.randomUUID()}/capture")
-                .statusCode() shouldBe
-                403
         }
         count("SELECT count(*) FROM execution_capture_sessions WHERE endpoint_id = '$id' AND stopped_at IS NULL") shouldBe 0
     }
@@ -629,11 +895,19 @@ class PublishedMutationCaptureIntegrationTest {
             "audit_log" to text("SELECT coalesce(string_agg(row_to_json(a)::text, ''), '') FROM audit_log a"),
             "reservation row" to text("SELECT row_to_json(r)::text FROM published_mutation_reservations r WHERE execution_id = '$id'"),
             "caller answer" to answered.asString(),
-            "status poll" to poll(answered.jsonPath().getString("status_url")).asString(),
+            "status poll" to poll(statusUrlOf(answered)).asString(),
             "log output" to output.all,
             read?.let { "private read" to it.asString() },
             read?.let { "private tables" to captureText(id) },
         )
+
+    /** The status URL of an answered run (`status_url`) or of a failed one (`error.details.status_url`). */
+    private fun statusUrlOf(answer: Response): String =
+        withClue(answer.asString()) {
+            checkNotNull(answer.jsonPath().getString("status_url") ?: answer.jsonPath().getString("error.details.status_url")) {
+                "no status_url on the answer"
+            }
+        }
 
     /** The run's id: the `DP-Execution-Id` header of an answered run, or `error.details.execution_id` of a failed one. */
     private fun executionIdOf(answer: Response): String =
@@ -651,9 +925,97 @@ class PublishedMutationCaptureIntegrationTest {
         count("SELECT count(*) FROM execution_capture_values WHERE execution_id = '$id'") +
             count("SELECT count(*) FROM execution_capture_runs WHERE execution_id = '$id'")
 
-    private fun decisionOf(answer: Response): String {
-        val id = executionIdOf(answer)
-        return text("SELECT coalesce(capture_session_id::text, 'none') FROM published_mutation_reservations WHERE execution_id = '$id'")
+    private fun decisionOf(answer: Response): String = decisionOf(executionIdOf(answer))
+
+    private fun decisionOf(id: String): String =
+        text("SELECT coalesce(capture_session_id::text, 'none') FROM published_mutation_reservations WHERE execution_id = '$id'")
+
+    /**
+     * R2 — one admission: the stored instant lies inside the deciding window's `[started_at, stopped_at or deadline_at)`,
+     * and the detail deadline and the replay expiry are both measured from that same instant.
+     */
+    private fun assertOneAdmission(
+        id: String,
+        capture: String,
+    ) {
+        rows(
+            "SELECT r.created_at >= s.started_at AND r.created_at < s.deadline_at " +
+                "AND (s.stopped_at IS NULL OR r.created_at < s.stopped_at), " +
+                "extract(epoch FROM r.capture_expires_at - r.created_at)::bigint, " +
+                "extract(epoch FROM r.expires_at - r.created_at)::bigint " +
+                "FROM published_mutation_reservations r JOIN execution_capture_sessions s ON s.id = r.capture_session_id " +
+                "WHERE r.execution_id = '$id' AND s.id = '$capture'",
+        ) shouldBe listOf(listOf("t", DETAIL_RETENTION_S, replaySeconds()))
+    }
+
+    private fun replaySeconds(): String = checkNotNull(context.environment.getProperty("datapipelines.idempotency.ttl-seconds"))
+
+    /** The one execution reserved on route [path] so far (each of these routes is called once before it is read). */
+    private fun reservedExecution(path: String): String {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_S)
+        while (System.nanoTime() < deadline) {
+            val ids =
+                rows("SELECT execution_id::text FROM published_mutation_reservations WHERE endpoint_id = '${routes.getValue(path)}'")
+            if (ids.isNotEmpty()) return checkNotNull(ids.single().single())
+            Thread.sleep(POLL_MS)
+        }
+        throw AssertionError("no reservation on $path")
+    }
+
+    /** Holds the business target `cap_rows` exclusively on this test's own connection: every run's write waits on it. */
+    private fun <T> holdingTarget(block: () -> T): T =
+        DriverManager.getConnection(target.jdbcUrl, target.username, target.password).use { holder ->
+            holder.autoCommit = false
+            holder.createStatement().use { it.execute("LOCK TABLE cap_rows IN ACCESS EXCLUSIVE MODE") }
+            try {
+                block()
+            } finally {
+                holder.commit()
+            }
+        }
+
+    /** Holds metadata table [table] exclusively on this test's own connection: every write to it waits on the lock. */
+    private fun <T> holdingTable(
+        table: String,
+        block: () -> T,
+    ): T =
+        connect().use { holder ->
+            holder.autoCommit = false
+            holder.createStatement().use { it.execute("LOCK TABLE $table IN ACCESS EXCLUSIVE MODE") }
+            try {
+                block()
+            } finally {
+                holder.commit()
+            }
+        }
+
+    private fun awaitTargetWaiters(
+        prefix: String,
+        waiters: Int,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LOCK_WAIT_S)
+        var seen = 0
+        while (System.nanoTime() < deadline) {
+            seen =
+                targetCount("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND ltrim(query) LIKE '$prefix%'")
+            if (seen >= waiters) return
+            Thread.sleep(LOCK_POLL_MS)
+        }
+        throw AssertionError("expected $waiters statement(s) '$prefix…' waiting on the held target, saw $seen")
+    }
+
+    private fun awaitCount(
+        sql: String,
+        expected: Int,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(AWAIT_S)
+        var seen = 0
+        while (System.nanoTime() < deadline) {
+            seen = count(sql)
+            if (seen == expected) return
+            Thread.sleep(POLL_MS)
+        }
+        throw AssertionError("expected $expected from '$sql', saw $seen")
     }
 
     /** [CONTENDERS] identical requests at once, alternating replicas; returns every answer's execution id. */
@@ -766,19 +1128,19 @@ class PublishedMutationCaptureIntegrationTest {
         key: Key,
         path: String,
         idempotencyKey: String,
-        body: String,
+        body: String?,
         replicaPort: Int = port,
         correlation: String? = null,
+        method: String = "POST",
     ): Response {
         val spec =
             given()
                 .port(replicaPort)
                 .header(API_KEY_HEADER, key.plaintext)
                 .header(IDEMPOTENCY_HEADER, idempotencyKey)
-                .contentType(ContentType.JSON)
-                .body(body)
+        body?.let { spec.contentType(ContentType.JSON).body(it) }
         correlation?.let { spec.header(CORRELATION_HEADER, it) }
-        return spec.post("/api$path").thenReturn()
+        return spec.request(method, "/api$path").thenReturn()
     }
 
     private fun poll(url: String): Response =
@@ -974,6 +1336,7 @@ class PublishedMutationCaptureIntegrationTest {
         if (workspace == null) {
             sqlTemplate(WRITE_TEMPLATE, "INSERT INTO cap_rows (picked, tagged) VALUES (CAST(:picked AS text), CAST(:tagged AS text))")
             sqlTemplate(READ_TEMPLATE, "SELECT count(*) AS n FROM cap_rows")
+            sqlTemplate(DELETE_TEMPLATE, "DELETE FROM cap_rows WHERE tagged = '$NEVER_TAG'")
         }
     }
 
@@ -1009,6 +1372,19 @@ class PublishedMutationCaptureIntegrationTest {
                     "depends_on" to emptyList<String>(),
                 )
             pipeline(READ_PIPELINE, listOf(read), null, null)
+            // The DELETE route's pipeline: no request body, no value-mode transformer — a run with nothing to capture.
+            val delete =
+                mapOf(
+                    "id" to "delete",
+                    "description" to "Deletes nothing it was not asked to",
+                    "type" to "DML",
+                    "source" to DATASOURCE,
+                    "template" to mapOf("id" to DELETE_TEMPLATE, "version" to 1),
+                    "operation" to "update",
+                    "output" to mapOf("target" to "discard"),
+                    "depends_on" to emptyList<String>(),
+                )
+            pipeline(DELETE_PIPELINE, listOf(delete), null, null)
         }
     }
 
@@ -1031,6 +1407,8 @@ class PublishedMutationCaptureIntegrationTest {
     private fun mintKeys() {
         writer = mint("cap-writer", "endpoint", null, workspace = null)
         for (path in ROUTES) grant(writer, path, "POST", workspace = null)
+        grant(writer, PUT_PATH, "PUT", workspace = null)
+        grant(writer, DELETE_PATH, "DELETE", workspace = null)
         otherWriter = mint("cap-other-writer", "endpoint", null, workspace = OTHER_WORKSPACE)
         grant(otherWriter, OVERLAP_IN_B, "POST", workspace = OTHER_WORKSPACE)
         adminKey = mint("cap-admin-mcp", "mcp", "workspace_admin", workspace = null)
@@ -1250,10 +1628,19 @@ class PublishedMutationCaptureIntegrationTest {
         private const val OVERLAP_IN_B = "/cap/v1/overlapping"
         private const val REVOKED = "/cap/v1/revoked"
         private const val EXPIRED = "/cap/v1/expired"
+        private const val RUNNING_ON = "/cap/v1/running-on"
+        private const val RUNNING_OFF = "/cap/v1/running-off"
+        private const val OUTLIVES = "/cap/v1/outlives"
+        private const val DEADLINE = "/cap/v1/deadline"
+        private const val SLOW_STORE = "/cap/v1/slow-store"
+        private const val PUT_PATH = "/cap/v1/put"
+        private const val DELETE_PATH = "/cap/v1/delete"
 
         /** Route-map keys that are not a POST path of workspace A. */
         private const val GET_ROUTE = "GET $MAIN"
         private const val OVERLAP_B = "B $OVERLAP"
+        private const val PUT_KEY = "PUT $PUT_PATH"
+        private const val DELETE_KEY = "DELETE $DELETE_PATH"
 
         private val ROUTES =
             listOf(
@@ -1275,6 +1662,11 @@ class PublishedMutationCaptureIntegrationTest {
                 OVERLAP,
                 REVOKED,
                 EXPIRED,
+                RUNNING_ON,
+                RUNNING_OFF,
+                OUTLIVES,
+                DEADLINE,
+                SLOW_STORE,
             )
 
         private const val CAP_PIPELINE = "test/cap1043_capture"
@@ -1294,15 +1686,33 @@ class PublishedMutationCaptureIntegrationTest {
 
         private const val WRITE_TEMPLATE = "test/cap1043_write.sql"
         private const val READ_TEMPLATE = "test/cap1043_read.sql"
+        private const val DELETE_TEMPLATE = "test/cap1043_delete.sql"
+        private const val DELETE_PIPELINE = "test/cap1043_delete"
+
+        /** A tag no request writes: the DELETE route's run changes nothing and selects nothing. */
+        private const val NEVER_TAG = "never-1043"
 
         /** The target's check constraint name: it reaches the run's error, and must never reach the capture. */
         private const val ERROR_MARKER = "err_mark_1043_constraint"
 
-        /** The reserving statement and the stop, as `pg_stat_activity` shows them while they wait. */
-        private const val ADMIT_SQL = "WITH capture AS"
-        private const val STOP_SQL = "UPDATE execution_capture_sessions"
+        /**
+         * The admission's window read (`FOR SHARE`) and the stop's window lock (`FOR UPDATE`), as `pg_stat_activity` shows
+         * them while they wait on the held window row.
+         */
+        private const val ADMIT_SQL = "SELECT id, started_at, deadline_at, correlation_id FROM execution_capture_sessions"
+        private const val STOP_SQL = "SELECT id FROM execution_capture_sessions WHERE id ="
+
+        /** The business write and a diagnostic value write, as `pg_stat_activity` shows them while a held table blocks them. */
+        private const val BUSINESS_WRITE_SQL = "INSERT INTO cap_rows"
+        private const val CAPTURE_WRITE_SQL = "INSERT INTO execution_capture_values"
 
         private const val TIMEOUT_S = 60
+
+        /** `datapipelines.endpoints.capture-detail-retention-hours` at its default: 24 h from admission, in seconds. */
+        private const val DETAIL_RETENTION_S = "86400"
+
+        /** How long the deadline case lets the drain attempt its refused summary after the run ended. */
+        private const val SETTLE_MS = 3000L
         private const val CONTENDERS = 4
         private const val FUTURE_S = 90L
         private const val LOCK_WAIT_S = 30L

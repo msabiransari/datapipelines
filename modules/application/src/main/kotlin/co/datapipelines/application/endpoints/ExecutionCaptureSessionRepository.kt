@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionOperations
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
@@ -80,8 +81,9 @@ sealed interface CaptureStop {
  * another workspace's session is absent, never filtered afterwards.
  *
  * The admission side of the window lives in [PublishedMutationReservationRepository.reserveDeciding], which reads the
- * open session under `FOR SHARE` in the reserving statement; [stop] is an `UPDATE` of the same row, so the database
- * orders every stop strictly before or after every admission.
+ * open session under `FOR SHARE` and reads its clock while holding it; [stop] locks the same row `FOR UPDATE` before
+ * reading ITS clock, so the database orders every stop strictly before or after every admission, and the stored
+ * instants follow that order.
  */
 class ExecutionCaptureSessionRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -137,36 +139,52 @@ class ExecutionCaptureSessionRepository(
 
     /**
      * Ends window [sessionId] of route [endpointId] in [workspaceId] — only that window, so a delayed stop can never
-     * close a newer one. At or after the deadline the end is recorded as `EXPIRED` at the deadline; before it, as
-     * `STOPPED` at [now] (never before the window started).
+     * close a newer one. In one transaction the row is locked `FOR UPDATE` FIRST — which waits for every admission
+     * holding it `FOR SHARE` ([PublishedMutationReservationRepository.reserveDeciding]) to commit — and only then is
+     * [clock] read, so the stop instant is taken after every admission the window captured. At or after the deadline
+     * the end is recorded as `EXPIRED` at the deadline; before it, as `STOPPED` at that instant, never before the window
+     * started and never at or before an admission it captured (a replica whose clock lags cannot write a `stopped_at`
+     * that would exclude a captured admission from `[started_at, stopped_at)`).
      */
     fun stop(
         workspaceId: UUID,
         endpointId: UUID,
         sessionId: UUID,
         stoppedBy: UUID,
-        now: Instant,
+        clock: Clock,
     ): CaptureStop {
+        val key = mapOf("id" to sessionId, "workspaceId" to workspaceId, "endpointId" to endpointId)
         val stopped =
-            jdbc
-                .query(
-                    """
-                    UPDATE execution_capture_sessions
-                       SET stopped_at = LEAST(GREATEST(:now, started_at), deadline_at),
-                           end_reason = CASE WHEN :now >= deadline_at THEN 'EXPIRED' ELSE 'STOPPED' END,
-                           stopped_by = :stoppedBy
-                     WHERE id = :id AND workspace_id = :workspaceId AND endpoint_id = :endpointId AND stopped_at IS NULL
-                    RETURNING $COLUMNS
-                    """.trimIndent(),
-                    mapOf(
-                        "id" to sessionId,
-                        "workspaceId" to workspaceId,
-                        "endpointId" to endpointId,
-                        "stoppedBy" to stoppedBy,
-                        "now" to Timestamp.from(now),
-                    ),
-                    MAPPER,
-                ).firstOrNull()
+            transactions.execute { _ ->
+                val held =
+                    jdbc
+                        .queryForList(
+                            "SELECT id FROM execution_capture_sessions WHERE id = :id AND workspace_id = :workspaceId " +
+                                "AND endpoint_id = :endpointId AND stopped_at IS NULL FOR UPDATE",
+                            key,
+                            UUID::class.java,
+                        ).isNotEmpty()
+                if (!held) return@execute null
+                jdbc
+                    .query(
+                        """
+                        UPDATE execution_capture_sessions s
+                           SET stopped_at = LEAST(
+                                   GREATEST(
+                                       :now, s.started_at,
+                                       (SELECT MAX(r.created_at) + INTERVAL '1 microsecond'
+                                          FROM published_mutation_reservations r WHERE r.capture_session_id = s.id)),
+                                   s.deadline_at),
+                               end_reason = CASE WHEN :now >= s.deadline_at THEN 'EXPIRED' ELSE 'STOPPED' END,
+                               stopped_by = :stoppedBy
+                         WHERE s.id = :id AND s.workspace_id = :workspaceId AND s.endpoint_id = :endpointId
+                           AND s.stopped_at IS NULL
+                        RETURNING $COLUMNS
+                        """.trimIndent(),
+                        key + mapOf("stoppedBy" to stoppedBy, "now" to Timestamp.from(clock.instant())),
+                        MAPPER,
+                    ).firstOrNull()
+            }
         if (stopped != null) return CaptureStop.Stopped(stopped)
         val existing = find(workspaceId, endpointId, sessionId) ?: return CaptureStop.NotFound
         return CaptureStop.AlreadyEnded(existing)

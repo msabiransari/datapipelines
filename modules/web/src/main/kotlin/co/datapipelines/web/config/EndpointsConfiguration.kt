@@ -320,8 +320,10 @@ class EndpointsConfiguration {
 
     /** #1039 — the durable reservation + origin store of published mutations (Metadata DB §4.61). */
     @Bean
-    fun publishedMutationReservationRepository(jdbc: NamedParameterJdbcTemplate): PublishedMutationReservationRepository =
-        PublishedMutationReservationRepository(jdbc)
+    fun publishedMutationReservationRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        transactionManager: PlatformTransactionManager,
+    ): PublishedMutationReservationRepository = PublishedMutationReservationRepository(jdbc, TransactionTemplate(transactionManager))
 
     /**
      * #1039 — the keyed replay digests, under their own subkey of the deployment's signing secret: a stored digest

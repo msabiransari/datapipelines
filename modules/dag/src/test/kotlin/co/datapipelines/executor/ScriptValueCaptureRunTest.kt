@@ -23,7 +23,13 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -31,6 +37,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * #1043 — an administrator's runtime capture through the real executor: only declared value-mode transformer outputs are
@@ -111,12 +119,36 @@ class ScriptValueCaptureRunTest {
     private val now = Instant.parse("2026-11-22T10:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
 
+    /** The diagnostic write scope, as CaptureRecorders owns it in production: no business run is its parent. */
+    private val writes = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @AfterEach
+    fun closeWrites() {
+        writes.cancel()
+    }
+
     private fun capture(
         store: CaptureValueStore,
         budget: Long = 1_048_576,
         meters: SimpleMeterRegistry? = null,
         expiresAt: Instant = now.plus(Duration.ofHours(24)),
-    ) = BoundedValueCapture(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), expiresAt, budget, store, meters, clock)
+    ) = BoundedValueCapture(
+        executionId = UUID.randomUUID(),
+        workspaceId = UUID.randomUUID(),
+        sessionId = UUID.randomUUID(),
+        expiresAt = expiresAt,
+        budgetBytes = budget,
+        store = store,
+        writes = writes,
+        meters = meters,
+        clock = clock,
+    )
+
+    /** Ends recording as the launcher does, then waits — off the business path — for the drain to finish. */
+    private fun sealAndDrain(recorder: BoundedValueCapture) {
+        recorder.seal()
+        runBlocking { withTimeout(DRAIN_TIMEOUT_MILLIS) { recorder.join() } }
+    }
 
     private fun run(
         h: ExecutorHarness,
@@ -139,6 +171,7 @@ class ScriptValueCaptureRunTest {
         harness().use { h ->
             run(h, recorder).status shouldBe ExecutionStatus.SUCCESS
         }
+        sealAndDrain(recorder)
         store.values.map { it.nodeId to it.outputKey } shouldBe listOf("shape_a" to "summary_a", "shape_b" to "summary_b")
         store.values.forEach { v ->
             v.omittedReason shouldBe null
@@ -153,7 +186,6 @@ class ScriptValueCaptureRunTest {
         }
         meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_CAPTURED).count() shouldBe
             2.0
-        recorder.seal()
         store.seals.single().let {
             it.valuesCaptured shouldBe 2
             it.valuesOmitted shouldBe 0
@@ -166,7 +198,9 @@ class ScriptValueCaptureRunTest {
     fun `the byte budget spans the execution - the value that does not fit is omitted with its reason and no preview`() {
         val store = RecordingStore()
         val one = """{"lines":2,"student":"$SELECTED_MARKER"}""".toByteArray().size.toLong()
-        harness().use { h -> run(h, capture(store, budget = one + one - 1)).status shouldBe ExecutionStatus.SUCCESS }
+        val recorder = capture(store, budget = one + one - 1)
+        harness().use { h -> run(h, recorder).status shouldBe ExecutionStatus.SUCCESS }
+        sealAndDrain(recorder)
         store.values[0].omittedReason shouldBe null
         store.values[1].let {
             it.nodeId shouldBe "shape_b"
@@ -188,10 +222,93 @@ class ScriptValueCaptureRunTest {
                 .filterIsInstance<NodeCompleted>()
                 .map { it.nodeId } shouldBe listOf("shape_a", "shape_b")
         }
+        sealAndDrain(recorder)
         meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_FAILED).count() shouldBe 2.0
-        recorder.seal()
         meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_SEAL_FAILED).count() shouldBe
             1.0
+    }
+
+    /** A store whose writes block until [release] — diagnostic storage that is slow, or not answering. */
+    private class HeldStore : CaptureValueStore {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val values = CopyOnWriteArrayList<CapturedValue>()
+        val seals = CopyOnWriteArrayList<CaptureSeal>()
+
+        override fun write(value: CapturedValue): Boolean {
+            entered.countDown()
+            check(release.await(HOLD_LIMIT_SECONDS, TimeUnit.SECONDS)) { "the held store was never released" }
+            values += value
+            return true
+        }
+
+        override fun seal(seal: CaptureSeal): Boolean {
+            seals += seal
+            return true
+        }
+    }
+
+    @Test
+    fun `slow diagnostic storage past the node deadline keeps the uncaptured business outcome, then drains and seals`() {
+        fun bounded() =
+            ExecutorHarness(
+                Fixtures.templateEngine("SELECT 1").first,
+                config = ExecutorConfig(nodeTimeoutSeconds = 1, executionTimeoutSeconds = 30),
+                scripts = support,
+            )
+        // The control: the same script, input and one-second node deadline, uncaptured.
+        val control = bounded().use { h -> run(h, null) }
+        control.status shouldBe ExecutionStatus.SUCCESS
+        val held = HeldStore()
+        val recorder = capture(held)
+        try {
+            // Diagnostic storage holds its first write for longer than the node deadline (released only afterwards).
+            val captured = bounded().use { h -> run(h, recorder) }
+            held.entered.await(HOLD_LIMIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+            captured.status shouldBe control.status
+            held.values.shouldBeEmpty() // the business run finished while its diagnostics were still waiting
+            recorder.seal()
+            Thread.sleep(NODE_DEADLINE_MILLIS * 2)
+        } finally {
+            held.release.countDown()
+        }
+        runBlocking { withTimeout(DRAIN_TIMEOUT_MILLIS) { recorder.join() } }
+        held.values.map { it.nodeId } shouldBe listOf("shape_a", "shape_b")
+        held.seals.single().valuesCaptured shouldBe 2
+    }
+
+    @Test
+    fun `storage slower than the detail expiry - the drain ends at the expiry, writes nothing more and never seals`() {
+        val held = HeldStore()
+        val recorder = capture(held, expiresAt = now.plusSeconds(1))
+        harness().use { h -> run(h, recorder).status shouldBe ExecutionStatus.SUCCESS }
+        recorder.seal()
+        held.entered.await(HOLD_LIMIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+        Thread.sleep(EXPIRY_MILLIS * 2) // the expiry passes while the first write is still blocked
+        held.release.countDown()
+        runBlocking { withTimeout(DRAIN_TIMEOUT_MILLIS) { recorder.join() } }
+        held.values.map { it.nodeId } shouldBe listOf("shape_a") // the write in flight returns; nothing after it
+        held.seals.shouldBeEmpty() // no summary: the diagnostic view reads the run as incomplete
+    }
+
+    @Test
+    fun `record never waits on storage - past the queue's capacity a value is counted as failed, without a value`() {
+        val held = HeldStore()
+        val meters = SimpleMeterRegistry()
+        val recorder = capture(held, meters = meters)
+        try {
+            recorder.record("node_0", "out", "first")
+            held.entered.await(HOLD_LIMIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+            val extra = 43
+            (1..BoundedValueCapture.QUEUE_CAPACITY + extra).forEach { recorder.record("node_$it", "out", "v$it") }
+            meters.counter(BoundedValueCapture.METER, BoundedValueCapture.OUTCOME_TAG, BoundedValueCapture.OUTCOME_FAILED).count() shouldBe
+                extra.toDouble()
+        } finally {
+            held.release.countDown()
+        }
+        sealAndDrain(recorder)
+        held.values.size shouldBe 1 + BoundedValueCapture.QUEUE_CAPACITY
+        held.seals.single().writeFailures shouldBe 43
     }
 
     @Test
@@ -199,8 +316,8 @@ class ScriptValueCaptureRunTest {
         val store = RecordingStore()
         val expired = capture(store, expiresAt = now)
         harness().use { h -> run(h, expired).status shouldBe ExecutionStatus.SUCCESS }
+        sealAndDrain(expired)
         store.values.shouldBeEmpty()
-        expired.seal()
         store.seals.shouldBeEmpty()
     }
 
@@ -261,5 +378,9 @@ class ScriptValueCaptureRunTest {
     private companion object {
         const val SELECTED_MARKER = "selected-out-7f3e"
         const val RAW_MARKER = "raw-in-91ac"
+        const val DRAIN_TIMEOUT_MILLIS = 30_000L
+        const val HOLD_LIMIT_SECONDS = 30L
+        const val NODE_DEADLINE_MILLIS = 1_000L
+        const val EXPIRY_MILLIS = 1_000L
     }
 }

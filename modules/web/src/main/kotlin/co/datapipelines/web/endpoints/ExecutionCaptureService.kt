@@ -165,7 +165,7 @@ class ExecutionCaptureService(
         endpointId: UUID,
         sessionId: UUID,
     ): CaptureSession =
-        when (val stopped = sessions.stop(workspaceId, endpointId, sessionId, principal.userId, clock.instant())) {
+        when (val stopped = sessions.stop(workspaceId, endpointId, sessionId, principal.userId, clock)) {
             is CaptureStop.Stopped -> {
                 audited(AUDIT_STOPPED, principal, stopped.session)
                 stopped.session

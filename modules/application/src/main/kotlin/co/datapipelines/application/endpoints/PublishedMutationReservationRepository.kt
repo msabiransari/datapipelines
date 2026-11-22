@@ -2,8 +2,11 @@ package co.datapipelines.application.endpoints
 
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.support.TransactionOperations
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -58,6 +61,8 @@ data class PublishedMutationReservation(
  */
 class PublishedMutationReservationRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    /** #1043 — the metadata transactions [reserveDeciding] runs in (its window lock is held until the insert commits). */
+    private val transactions: TransactionOperations,
 ) {
     /**
      * Inserts [candidate] unless a LIVE reservation holds its scope digest. True when this call's row was written —
@@ -85,48 +90,98 @@ class PublishedMutationReservationRepository(
     }
 
     /**
-     * #1043 — [reserve] that also DECIDES runtime capture, in the same statement: the open capture window of the
-     * candidate's route entity and method whose deadline is after [PublishedMutationReservation.createdAt] and whose
-     * correlation filter is absent or equals [correlationId] is read under `FOR SHARE`, and its id is written with the
-     * reservation (with `capture_expires_at` = [captureExpiresAt]). A concurrent stop updates that row, so the database
-     * orders it strictly before this statement (no capture) or after it (captured). Returns the decision when this call's
-     * row was written, null when another request already holds the scope (its row carries ITS decision — read it with
-     * [findLive]). The candidate's own capture fields are ignored.
+     * #1043 — [reserve] that also DECIDES runtime capture and stamps the ONE admission instant, in one transaction:
+     *
+     * 1. the route entity's and method's not-stopped capture window is read under `FOR SHARE`, so a concurrent stop
+     *    (which takes `FOR UPDATE` on that row, see [ExecutionCaptureSessionRepository.stop]) is ordered by the database
+     *    strictly before this admission (the window reads stopped) or after its commit;
+     * 2. only then is [AdmissionStamp.clock] read — the admission instant `T`, taken while the window's state is held,
+     *    never a timestamp sampled earlier during the caller's preflight, pin resolution or validation;
+     * 3. the window captures iff `started_at <= T < deadline_at` (both bounds of the half-open window) and its
+     *    correlation filter is absent or equals [correlationId];
+     * 4. the reservation is inserted with `created_at = T`, `expires_at = T + replay` and, when captured,
+     *    `capture_session_id` and `capture_expires_at = T + captureRetention` — so the persisted admission time, the
+     *    decision and the detail deadline all describe the same admission.
+     *
+     * The candidate's own `createdAt`, `expiresAt` and capture fields are ignored. Returns the reservation as stored
+     * when this call's row was written; null when another request already holds the scope (its row carries ITS stamp
+     * and decision — read it with [findLive]). A start committing after step 1 is not seen: such an admission is not
+     * captured (a window captures only once its start is visible — never an admission it did not see).
      */
     fun reserveDeciding(
         candidate: PublishedMutationReservation,
         correlationId: UUID?,
-        captureExpiresAt: Instant,
-    ): CaptureDecision? {
+        stamp: AdmissionStamp,
+    ): PublishedMutationReservation? {
         require(candidate.retiredAt == null && candidate.scopeDigest != null && candidate.requestFingerprint != null) {
             "only a live reservation is inserted"
         }
-        return jdbc
-            .query(
-                """
-                WITH capture AS (
-                    SELECT id FROM execution_capture_sessions
+        return transactions.execute { _ ->
+            val windows =
+                jdbc.query(
+                    """
+                    SELECT id, started_at, deadline_at, correlation_id FROM execution_capture_sessions
                      WHERE workspace_id = :workspaceId AND endpoint_id = :endpointId AND method = :method
-                       AND stopped_at IS NULL AND :createdAt < deadline_at
-                       AND (correlation_id IS NULL OR correlation_id = CAST(:correlationId AS uuid))
-                       FOR SHARE)
-                INSERT INTO published_mutation_reservations (
-                    execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
-                    has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
-                    created_at, expires_at, capture_session_id, capture_expires_at)
-                SELECT
-                    :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
-                    :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
-                    :createdAt, :expiresAt, c.id, CASE WHEN c.id IS NULL THEN NULL ELSE CAST(:captureExpiresAt AS timestamptz) END
-                  FROM (SELECT 1) AS one LEFT JOIN capture c ON TRUE
-                ON CONFLICT (scope_digest) DO NOTHING
-                RETURNING capture_session_id, capture_expires_at
-                """.trimIndent(),
-                params(candidate) +
-                    mapOf("correlationId" to correlationId?.toString(), "captureExpiresAt" to Timestamp.from(captureExpiresAt)),
-            ) { rs, _ ->
-                CaptureDecision(rs.getObject("capture_session_id", UUID::class.java), rs.getTimestamp("capture_expires_at")?.toInstant())
-            }.firstOrNull()
+                       AND stopped_at IS NULL
+                       FOR SHARE
+                    """.trimIndent(),
+                    mapOf(
+                        "workspaceId" to candidate.workspaceId,
+                        "endpointId" to candidate.endpointId,
+                        "method" to candidate.method.name,
+                    ),
+                ) { rs, _ ->
+                    OpenWindow(
+                        rs.getObject("id", UUID::class.java),
+                        rs.getTimestamp("started_at").toInstant(),
+                        rs.getTimestamp("deadline_at").toInstant(),
+                        rs.getObject("correlation_id", UUID::class.java),
+                    )
+                }
+            val admittedAt = stamp.clock.instant()
+            val window = windows.firstOrNull { it.admits(admittedAt, correlationId) }
+            val stamped =
+                candidate.copy(
+                    createdAt = admittedAt,
+                    expiresAt = admittedAt.plus(stamp.replay),
+                    captureSessionId = window?.id,
+                    captureExpiresAt = window?.let { admittedAt.plus(stamp.captureRetention) },
+                )
+            val written =
+                jdbc.update(
+                    """
+                    INSERT INTO published_mutation_reservations (
+                        execution_id, workspace_id, api_key_id, endpoint_id, api_version, pipeline_id, pipeline_version,
+                        has_caller, method, business_path, scope_digest, request_fingerprint, body_bytes, owner_token,
+                        created_at, expires_at, capture_session_id, capture_expires_at)
+                    VALUES (
+                        :executionId, :workspaceId, :apiKeyId, :endpointId, :apiVersion, :pipelineId, :pipelineVersion,
+                        :hasCaller, :method, :businessPath, :scopeDigest, :requestFingerprint, :bodyBytes, :ownerToken,
+                        :createdAt, :expiresAt, :captureSessionId, :captureExpiresAt)
+                    ON CONFLICT (scope_digest) DO NOTHING
+                    """.trimIndent(),
+                    params(stamped) +
+                        mapOf(
+                            "captureSessionId" to stamped.captureSessionId,
+                            "captureExpiresAt" to stamped.captureExpiresAt?.let(Timestamp::from),
+                        ),
+                ) == 1
+            stamped.takeIf { written }
+        }
+    }
+
+    /** A not-stopped capture window as the reserving transaction read it. */
+    private data class OpenWindow(
+        val id: UUID,
+        val startedAt: Instant,
+        val deadlineAt: Instant,
+        val correlationId: UUID?,
+    ) {
+        /** `[started_at, deadline_at)` holds [at], and the filter is absent or equals [correlation]. */
+        fun admits(
+            at: Instant,
+            correlation: UUID?,
+        ): Boolean = !at.isBefore(startedAt) && at.isBefore(deadlineAt) && (correlationId == null || correlationId == correlation)
     }
 
     /** The live reservation holding [scopeDigest], or null. */
@@ -258,10 +313,20 @@ class PublishedMutationReservationRepository(
     }
 }
 
-/** #1043 — the capture decision a reserving statement stored: [sessionId] null = not captured. */
-data class CaptureDecision(
-    val sessionId: UUID?,
-    val expiresAt: Instant?,
+/**
+ * #1043 — how [PublishedMutationReservationRepository.reserveDeciding] stamps an admission: [clock] is read ONCE, under
+ * the capture window's lock, and the replay window ([replay], `datapipelines.idempotency.ttl-seconds`) and the capture
+ * detail retention ([captureRetention], `datapipelines.endpoints.capture-detail-retention-hours`) are measured from it.
+ */
+data class AdmissionStamp(
+    val clock: Clock,
+    val replay: Duration,
+    val captureRetention: Duration,
 ) {
-    val captured: Boolean get() = sessionId != null
+    init {
+        require(!replay.isNegative && !replay.isZero) { "the replay window must be positive, was $replay" }
+        require(!captureRetention.isNegative && !captureRetention.isZero) {
+            "the capture detail retention must be positive, was $captureRetention"
+        }
+    }
 }

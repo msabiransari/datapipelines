@@ -130,13 +130,13 @@ class RetentionSchedulingConfiguration {
 
     /**
      * #1043: expired runtime capture detail, deleted in bounded batches (metadata-db §8.6). Its store is built here over
-     * the retention tick's bound, so the capture writes on the shared store bean stay unbounded by it.
+     * the retention tick's bound, so the capture writes on the shared store bean keep their own bound.
      */
     @Bean
     fun executionCaptureRetention(
         jdbc: NamedParameterJdbcTemplate,
         meterRegistry: MeterRegistry,
-    ): ExecutionCaptureRetention = ExecutionCaptureRetention(ExecutionCaptureStore(retentionStatements(jdbc)), meterRegistry)
+    ): ExecutionCaptureRetention = ExecutionCaptureRetention(ExecutionCaptureStore.purgeOnly(retentionStatements(jdbc)), meterRegistry)
 
     @Bean
     @Suppress("LongParameterList") // one retention step per collaborator; the tick runs them all in order
