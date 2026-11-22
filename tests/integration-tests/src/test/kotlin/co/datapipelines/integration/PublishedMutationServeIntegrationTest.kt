@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import io.restassured.RestAssured.given
@@ -735,6 +736,18 @@ class PublishedMutationServeIntegrationTest {
             it shouldNotContain CANARY_KEY
         }
         text("SELECT row_to_json(r)::text FROM published_mutation_reservations r WHERE execution_id = '$id'").let {
+            it shouldNotContain CANARY_BODY
+            it shouldNotContain CANARY_KEY
+        }
+        // #1040: nor the execution row (its parameters_json, error and stats) or its replayable event stream. Both
+        // reads are non-vacuous: the row and at least one event exist and carry the execution's id.
+        text("SELECT row_to_json(e)::text FROM pipeline_executions e WHERE execution_id = '$id'").let {
+            it shouldContain id
+            it shouldNotContain CANARY_BODY
+            it shouldNotContain CANARY_KEY
+        }
+        text("SELECT coalesce(string_agg(row_to_json(v)::text, ' '), '') FROM execution_events v WHERE execution_id = '$id'").let {
+            it shouldContain id
             it shouldNotContain CANARY_BODY
             it shouldNotContain CANARY_KEY
         }
