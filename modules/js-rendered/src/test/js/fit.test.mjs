@@ -117,9 +117,10 @@ test("R1: the level boundary itself, each text size: the returned level is the a
 
 // ---------------------------------------------------------------- R2
 
-/** This test's own reader: a label's exact value as [BigInt numerator, power of ten], or null when it is no number. */
+/** This test's own reader: a label's exact value as [BigInt numerator, power of ten], or null when it is no number. It
+ * reads the e form an axis writes from 10^15 up and below 10^-5 (#1059: 2.5e18, 1e−12), never with a unit letter. */
 function exact(label) {
-  let t = label.replace(/,/g, "").replace(MINUS, "-"), shift = 0;
+  let t = label.replace(/,/g, "").replaceAll(MINUS, "-"), shift = 0;
   if (t.endsWith("%")) {
     t = t.slice(0, -1);
     shift = -2;
@@ -130,10 +131,10 @@ function exact(label) {
       t = t.slice(0, -1);
     }
   }
-  const m = /^(-?)([0-9]+)(?:\.([0-9]+))?$/.exec(t);
-  if (!m) return null;
+  const m = /^(-?)([0-9]+)(?:\.([0-9]+))?(?:e(-?[0-9]+))?$/.exec(t);
+  if (!m || (m[4] !== undefined && shift > 0)) return null;
   const frac = m[3] || "";
-  return { n: BigInt(m[1] + m[2] + frac), e: shift - frac.length };
+  return { n: BigInt(m[1] + m[2] + frac), e: shift + (m[4] === undefined ? 0 : Number(m[4])) - frac.length };
 }
 
 /** a − b of two exact values, as an exact value. */
@@ -159,7 +160,8 @@ test("R2: small-value ticks keep their values (the refusal's case, 0.00001 and 0
   const t = (xs, f) => [...R.text.ticks(xs, f)];
   assert.deepEqual(t([0, 0.0001, 0.0002]), ["0", "0.0001", "0.0002"]);
   assert.deepEqual(t([0, 0.00001, 0.00002, 0.00003]), ["0", "0.00001", "0.00002", "0.00003"]);
-  assert.deepEqual(t([0, 0.0000025, 0.000005, 0.0000075, 0.00001]), ["0", "0.0000025", "0.000005", "0.0000075", "0.00001"]);
+  // Below 10^-5 the axis writes the e form (#1059, owner 2026-11-21).
+  assert.deepEqual(t([0, 0.0000025, 0.000005, 0.0000075, 0.00001]), ["0", "2.5e" + MINUS + "6", "5e" + MINUS + "6", "7.5e" + MINUS + "6", "1e" + MINUS + "5"]);
   assert.deepEqual(t([-0.0002, -0.0001, 0]), [MINUS + "0.0002", MINUS + "0.0001", "0"], "the true minus sign stays (§4.7)");
   assert.deepEqual(t([0, 0.0001, 0.0002], "percent"), ["0%", "0.01%", "0.02%"]);
   assert.deepEqual(t([0, 0.000025, 0.00005], "percent"), ["0%", "0.0025%", "0.005%"]);
