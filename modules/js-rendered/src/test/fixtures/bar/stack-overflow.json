@@ -1,0 +1,82 @@
+{
+ "source": [],
+ "note": "#1011: two finite DOUBLE cells of 1e308 in two series of category a; their stacked sum is beyond float64. The whole stack of that category is not drawn, with one rule.non-finite data warning; category b draws both series.",
+ "document": {
+  "display_name": "Stack overflow",
+  "description": "Value by category, stacked by series, with one stack whose sum is beyond float64.",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "STRING"
+     },
+     {
+      "name": "s",
+      "type": "STRING"
+     },
+     {
+      "name": "v",
+      "type": "DOUBLE",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "nominal",
+     "title": "Category"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "stack": "zero"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "A stack beyond the number range"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "a",
+   "a",
+   "b",
+   "b"
+  ],
+  "s": [
+   "P",
+   "Q",
+   "P",
+   "Q"
+  ],
+  "v": [
+   1e+308,
+   1e+308,
+   1,
+   2
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "s": "STRING",
+  "v": "DOUBLE"
+ }
+}

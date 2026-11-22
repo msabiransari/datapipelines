@@ -37,7 +37,6 @@ export function expectedBarMarks(fx, hiddenIds) {
     const b = B[i], s = C ? C[i] : null;
     if (b === null || b === undefined || (C && (s === null || s === undefined))) continue;
     const sid = C ? typeof s + ":" + String(s) : "measure";
-    if (hiddenIds.includes(sid)) continue;
     // Nested maps: a value may hold any character, NUL included (parity fixture bar-nul-keys), so no joined key.
     const bk = typeof b + ":" + String(b);
     if (!cells.has(bk)) cells.set(bk, new Map());
@@ -45,17 +44,29 @@ export function expectedBarMarks(fx, hiddenIds) {
     if (!row.has(sid)) row.set(sid, []);
     row.get(sid).push(V ? V[i] : 1);
   }
+  // #1011: a stack at zero whose sum, up or down, is beyond float64 draws none of its cells; the sums are taken over
+  // every series, hidden ones too, and only then are the hidden ones left out of the count.
+  const stackZero = color !== null && value.stack === "zero";
   let n = 0;
-  for (const vals of [...cells.values()].flatMap((m) => [...m.values()])) {
-    if (value.aggregate === "count") {
-      n++;
-      continue;
+  for (const row of cells.values()) {
+    const drawn = [];
+    for (const [sid, vals] of row) {
+      if (value.aggregate === "count") {
+        drawn.push([sid, vals.length]);
+        continue;
+      }
+      const xs = vals.filter((v) => v !== null && v !== undefined).map(Number);
+      if (xs.length === 0) continue;
+      let r = value.aggregate === "min" || value.aggregate === "max" ? xs[0] : 0;
+      for (const x of xs) r = value.aggregate === "min" ? Math.min(r, x) : value.aggregate === "max" ? Math.max(r, x) : r + x;
+      if (Number.isFinite(r)) drawn.push([sid, r]);
     }
-    const xs = vals.filter((v) => v !== null && v !== undefined).map(Number);
-    if (xs.length === 0) continue;
-    let r = value.aggregate === "min" || value.aggregate === "max" ? xs[0] : 0;
-    for (const x of xs) r = value.aggregate === "min" ? Math.min(r, x) : value.aggregate === "max" ? Math.max(r, x) : r + x;
-    if (Number.isFinite(r)) n++;
+    if (stackZero) {
+      let up = 0, down = 0;
+      for (const [, r] of drawn) if (r < 0) down += r; else up += r;
+      if (!Number.isFinite(up) || !Number.isFinite(down)) continue;
+    }
+    n += drawn.filter(([sid]) => !hiddenIds.includes(sid)).length;
   }
   return n;
 }
@@ -80,14 +91,16 @@ export function expectedLineMarks(fx, hiddenIds) {
     if (C && (C[i] === null || C[i] === undefined)) continue;
     for (const m of measures) {
       const sid = C ? typeof C[i] + ":" + String(C[i]) : m.id;
-      if (hiddenIds.includes(sid)) continue;
       const key = JSON.stringify([sid, x.type === "quantitative" ? Number(xv) : String(xv)]);
       if (!cells.has(key)) cells.set(key, []);
       cells.get(key).push(m.V ? m.V[i] : 1);
     }
   }
-  let n = 0;
-  for (const vals of cells.values()) {
+  // #1011: a stacked area's position whose sum, up or down, is beyond float64 draws no point of any series; decided
+  // over every series, hidden ones too.
+  const stackZero = fx.document.config.mark.type === "area" && (C !== null || Array.isArray(y.fields)) && y.stack === "zero";
+  const points = [];
+  for (const [key, vals] of cells) {
     let r;
     if (y.aggregate === "count") r = vals.length;
     else {
@@ -98,9 +111,20 @@ export function expectedLineMarks(fx, hiddenIds) {
       if (y.aggregate === "mean") r /= xs.length;
     }
     if (!Number.isFinite(r) || (log && !(r > 0))) continue;
-    n++;
+    const [sid, at] = JSON.parse(key);
+    points.push({ sid, at: JSON.stringify(at), r });
   }
-  return n;
+  const over = new Set();
+  if (stackZero) {
+    const sums = new Map();
+    for (const p of points) {
+      const t = sums.get(p.at) || { up: 0, down: 0 };
+      if (p.r < 0) t.down += p.r; else t.up += p.r;
+      sums.set(p.at, t);
+    }
+    for (const [at, t] of sums) if (!Number.isFinite(t.up) || !Number.isFinite(t.down)) over.add(at);
+  }
+  return points.filter((p) => !over.has(p.at) && !hiddenIds.includes(p.sid)).length;
 }
 
 /**

@@ -10,7 +10,7 @@ const R = engine();
 const FIXTURES = chartFixtures();
 
 /** Non-vacuity floors: the fixture set, the frames, and what the checker saw. */
-const FLOOR = { fixtures: 119, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
+const FLOOR = { fixtures: 121, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
 
 test("the invariant sweep is not vacuous (floors)", () => {
   assert.ok(FIXTURES.length >= FLOOR.fixtures, "chart fixtures: " + FIXTURES.length);
