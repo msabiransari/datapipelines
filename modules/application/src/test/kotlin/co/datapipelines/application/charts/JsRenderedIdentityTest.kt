@@ -107,7 +107,9 @@ class JsRenderedIdentityTest {
                 var cases = [[[0, 0.0001, 0.0002], null], [[0, 0.00001, 0.00002, 0.00003], null],
                   [[0, 0.0000025, 0.000005, 0.0000075, 0.00001], null], [[0, 0.0001, 0.0002], "percent"],
                   [[0, 2.5e17, 5e17, 7.5e17, 1e18], null], [[1e-9], null],
-                  [[-1.7976931348623157e308, 1.7976931348623157e308], null], [[0, 2.5e-9, 5e-9], "percent"], [[0.0000105], null]];
+                  [[-1.7976931348623157e308, 1.7976931348623157e308], null], [[0, 2.5e-9, 5e-9], "percent"], [[0.0000105], null],
+                  [[0, 250000000, 500000000, 750000000, 1000000000, 1250000000], null], [[0, 1250, 2500], null],
+                  [[-1250000000, -1000000000, 0], null], [[-2790.9621305348655, 2311.2831141308657], "decimal(2)"]];
                 return cases.map(function (c) { return JsRendered.text.ticks(c[0], c[1]).join("|"); }).join("\n");
                 """.trimIndent(),
                 null,
@@ -124,11 +126,19 @@ class JsRenderedIdentityTest {
                 "\u22121.797693e308|1.797693e308",
                 "0%|2.5e\u22127%|5e\u22127%",
                 "0.0000105",
+                // The short form carries up to two digits after the point (#1089, owner 2026-11-22); plain digits at two
+                // digits are tried before any third digit, so the unrounded ends below keep two digits.
+                "0|250M|500M|750M|1B|1.25B",
+                "0|1.25K|2.5K",
+                "\u22121.25B|\u22121B|0",
+                "\u22122,790.96|2,311.28",
             )
         // This test's reader reads every one of those labels, the e form's exponent as written.
         direct.lines().flatMap { it.split("|") }.forEach { readLabel(it) }
         readLabel("1e\u22129") shouldBe BigDecimal("1E-9")
         readLabel("5e\u22127%") shouldBe BigDecimal("5E-9")
+        readLabel("1.25B") shouldBe BigDecimal("1250000000")
+        readLabel("\u22121.25K") shouldBe BigDecimal("-1250")
         for ((fixture, most) in SMALL_VALUE_FIXTURES) {
             for (frame in listOf("960x540", "300x180")) {
                 val input = ChartGuardFiles.resource("${ChartGuardFiles.EMITTED}/$fixture/$frame.input.json")
@@ -145,13 +155,25 @@ class JsRenderedIdentityTest {
         }
     }
 
-    /** A tick label's exact value, by this test alone: grouping commas dropped, U+2212 read as minus, % moved two places. */
+    /**
+     * A tick label's exact value, by this test alone: grouping commas dropped, U+2212 read as minus, % moved two places,
+     * a unit letter of the short form (K, M, B, T) moved three places each (#1089).
+     */
     private fun readLabel(label: String): BigDecimal {
         val t = label.replace(",", "").replace('\u2212', '-')
-        return if (t.endsWith("%")) BigDecimal(t.dropLast(1)).movePointLeft(2) else BigDecimal(t)
+        val unit = SHORT_UNITS.indexOf(t.last())
+        return when {
+            t.endsWith("%") -> BigDecimal(t.dropLast(1)).movePointLeft(2)
+            unit >= 0 -> BigDecimal(t.dropLast(1)).movePointRight(UNIT_PLACES * (unit + 1))
+            else -> BigDecimal(t)
+        }
     }
 
     private companion object {
+        /** The short form's unit letters, each a thousand times the one before it, and the places one letter moves. */
+        const val SHORT_UNITS = "KMBT"
+        const val UNIT_PLACES = 3
+
         /** #985 R2's rendered fixtures and the largest value each delivers (read from the fixture files). */
         val SMALL_VALUE_FIXTURES = listOf("bar/ticks-small-decimal" to "0.0002", "bar/ticks-small-percent" to "0.00003")
 

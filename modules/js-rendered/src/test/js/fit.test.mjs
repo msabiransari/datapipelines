@@ -165,10 +165,10 @@ test("R2: small-value ticks keep their values (the refusal's case, 0.00001 and 0
   assert.deepEqual(t([-0.0002, -0.0001, 0]), [MINUS + "0.0002", MINUS + "0.0001", "0"], "the true minus sign stays (§4.7)");
   assert.deepEqual(t([0, 0.0001, 0.0002], "percent"), ["0%", "0.01%", "0.02%"]);
   assert.deepEqual(t([0, 0.000025, 0.00005], "percent"), ["0%", "0.0025%", "0.005%"]);
-  // The fewest digits still win where they suffice, and the compact form keeps its one fraction digit (§4.7).
+  // The fewest digits still win where they suffice, and the compact form carries up to two fraction digits (§4.7, #1089).
   assert.deepEqual(t([0, 0.25, 0.5]), ["0", "0.25", "0.5"]);
   assert.deepEqual(t([0, 2500, 5000]), ["0", "2.5K", "5K"]);
-  assert.deepEqual(t([0, 1250, 2500]), ["0", "1,250", "2,500"]);
+  assert.deepEqual(t([0, 1250, 2500]), ["0", "1.25K", "2.5K"]);
 });
 
 test("R2: nice ticks of every decade from 1e-12 to 1e15, plain and percent, read back as their own values", () => {

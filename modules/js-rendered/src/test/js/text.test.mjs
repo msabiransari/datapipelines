@@ -66,7 +66,7 @@ test("tick labels: the fewest fraction digits at which every label IS its tick; 
   assert.deepEqual(t([0, 0.25, 0.5, 0.75, 1]), ["0", "0.25", "0.5", "0.75", "1"]);
   assert.deepEqual(t([0, 0.1, 0.2, 0.30000000000000004]), ["0", "0.1", "0.2", "0.3"]);
   assert.deepEqual(t([1e7, 1.5e7, 2e7]), ["10M", "15M", "20M"]);
-  assert.deepEqual(t([0, 1250, 2500]), ["0", "1,250", "2,500"], "1.25K would need two digits: plain grouped digits instead");
+  assert.deepEqual(t([0, 1250, 2500]), ["0", "1.25K", "2.5K"], "the short form carries up to two digits (owner 2026-11-22, #1089)");
   assert.deepEqual(t([0, 0.25, 0.5], "percent"), ["0%", "25%", "50%"]);
   for (const xs of [[-600, -400, -200, 0, 200], [0, 0.002, 0.004], [1e15, 2e15]]) {
     const labels = T.ticks(xs, null);
