@@ -48,8 +48,12 @@ pgplan::build() {
   # verifyTestsExecuted never do (buildSrc CommonConventionsPlugin). The pregate only: gate.sh
   # and CI stay cold. pregate-safety-test.sh asserts every stage carries it and
   # gate.sh/gradle.properties do not.
-  # Both appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
-  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -PversionLifecycle.sequences=200 --build-cache)
+  # -Pdp.test.heap=2g (#1058, DEVELOPMENT.md §9.5): the pregate runs ONE test JVM at a time, so
+  # its ceiling is not multiplied by forks; at the 1g default the web suite's one JVM ran out of
+  # heap. Suites that name their own heap (integration-tests 6g) keep it; Gate A, CI and
+  # gradle.properties keep 1g. pregate-safety-test.sh asserts every stage carries it.
+  # All appended AFTER the serial quartet: pregate-safety-test.sh pins that substring contiguous.
+  PG_COMMON=(-Pdp.browser.ciPatience=true --no-parallel --max-workers=1 -Pdp.test.forks=1 -Pdp.test.forks.e2e=1 -Pdp.test.heap=2g -PversionLifecycle.sequences=200 --build-cache)
   declare -gA PG_SELECTIONS=()
   mapfile -t PG_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^modules/([a-z-]+)/.*|:modules:\1|p' | LC_ALL=C sort -u)
   mapfile -t PG_TEST_MODULES < <(printf '%s\n' "$PG_FILES" | sed -nE 's|^tests/([a-z-]+)/.*|\1|p' | LC_ALL=C sort -u)
