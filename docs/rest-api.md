@@ -2394,7 +2394,10 @@ looked up or run. A `GET` ignores the header and keeps every behaviour of §19.3
 
 **The replay scope** is the workspace, the presenting key, the method, the concrete business path and the client
 key; the **fingerprint** is the method, the concrete path, the typed path and query values and the canonical
-body (object member order immaterial, array order material, an absent body distinct from an empty one). Both are
+body (object member order immaterial, array order material, an absent body distinct from an empty one). The
+values are the ones the reservation's ORIGINAL pin binds — its declared types, with its declared defaults applied —
+so `quantity=01` and `quantity=1` on an `INTEGER` parameter are one request, an omitted optional parameter equals
+its explicit default, and a `DECIMAL` keeps its scale (`1.0` is not `1.00`). Both are
 stored only as keyed digests (Metadata DB §4.61) — never the client key, a value or the body. A reservation
 lives for [`datapipelines.idempotency.ttl-seconds`](configuration.md) (default `86400`); after that the scope is
 free and the same key is a fresh request. A new key — and a rotated API key — is a different scope: a new `POST`
@@ -2406,7 +2409,9 @@ may deliberately send identical JSON twice under two keys.
 2. the live reservation for the scope: when one exists the request is a **retry**. A different fingerprint is
    `409 idempotency.key_reused_for_different_request` with no details; an identical one is answered from the
    ORIGINAL execution by the table below, validated against the version the reservation pinned — a later release
-   never changes how a retry is judged, and nothing reruns;
+   never changes how a retry is judged, and nothing reruns. A retry meets the same result negotiation as a first
+   call — an `Accept` that admits no JSON is `406 endpoint.not_acceptable` (§19.6) at any state of the original
+   run, and the reservation stays — and a retry the original pin's parameter rules refuse is that pin's `400`;
 3. a fresh request only: the operator gate (`503 endpoint.mutations_disabled` while off), the route's current
    pin (its own `503`), the pin's parameter and body rules (§19.3) and its read-only posture;
 4. one atomic reservation under the scope, with the execution id fixed before any business SQL. Two identical
@@ -2414,8 +2419,12 @@ may deliberately send identical JSON twice under two keys.
 5. the run, with bounded diagnostics: a failure leaves only its code, never engine text or a supplied value.
 
 A reservation store that cannot be read or written, or a reservation whose state is indeterminate, is
-`503 idempotency.reservation_unavailable` before any new business SQL — the same key may be retried. A metadata
-read that fails while the pin resolves is `503 endpoint.dependency_unavailable`. If the admitting replica stops
+`503 idempotency.reservation_unavailable` before any new business SQL — the same key may be retried. That
+includes a release the store did not confirm and an execution record it could not read: only CONFIRMED state
+answers (a recorded run its row, a confirmed lost release `202`), never an assumed one. A metadata read that
+fails while the pin resolves — the current pin of a fresh request, or the original pin of a retry or takeover —
+is `503 endpoint.dependency_unavailable`, distinct from a pin confirmed absent or unservable (its own refusal,
+`endpoint.pipeline_not_released`); neither runs SQL, and the reservation stays. If the admitting replica stops
 after reserving and before the execution row exists, an identical retry after
 [`mutation-start-window-seconds`](configuration.md#322-published-endpoints) (default `60`) takes the start claim
 over and starts the ORIGINAL pin under the ORIGINAL execution id; the execution row's primary key fences the
@@ -2444,8 +2453,11 @@ business path the client called. They serve only the INITIATING key, and only wh
 originating route-and-method grant — a write-only key polls its own run without any `GET` grant, and a `GET`
 grant on another route never substitutes. Another key, another route, another workspace, a revoked grant or a
 disabled route is the ordinary opaque `404`. The status projection relays no parameter values and no failure
-text; a zero-caller run's result route answers `204`. A disabled or unpublished route, or a revoked grant, also
-refuses a retry with the same `404` and reveals no prior result. Turning `mutations-enabled` off withholds fresh
+text; a zero-caller run's result route answers `204`. A retry is re-authorised like a new request and reveals
+no prior result: a disabled or unpublished route is the opaque `404`, and so is a revoked grant when the key holds
+no other method on the path; when it still holds another, the retry is `405 endpoint.method_not_allowed` whose
+`Allow` names only the methods the key may call there (the §19.3 method rule). Polling never answers `405` — every
+mismatch there stays the opaque `404`. Turning `mutations-enabled` off withholds fresh
 requests only: retries and polling of admitted runs keep working while writes drain.
 
 **Metrics and audit.** Every served mutation counts once on `datapipelines.endpoints.mutations{method,outcome}`
@@ -3266,7 +3278,7 @@ family is readable, so no route reaches one; the dependency contract's own fixtu
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` / `endpoint.dependency_unavailable`, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
+| 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
 | 2026-11-21 | v2.132 | 1038 r4 (#1038) | **§6.1.4 (additive):** a saved body fixture keeps member order, repeated members and exact numbers through stored tests, template read-back, re-save, export and release (#1080). |
 | 2026-11-21 | v2.131 | 1038 r3 (#1038) | **§6.1.4 (additive):** the fixture budget counts canonical bytes on both full-run surfaces; an authored body fixture on evaluate and template save is read from the request's own text (a repeated member refused, exact fractions); an authored body case's evaluation and suite verdict use the bounded diagnostics. |
 | 2026-11-21 | v2.130 | 1038 r2 (#1038) | **§6.1.4 (additive):** a failure of a run that carries a `request_body` (and of its children) is reported as code and node metadata only on every event, stream, replay and stored-error surface. |

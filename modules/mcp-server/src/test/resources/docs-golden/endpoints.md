@@ -103,7 +103,9 @@ and `DELETE` to a published route — a bodyless `DELETE` too — sends `Idempot
 `A–Z a–z 0–9 . _ : -`); without one it is a `400` before anything runs. The same key with the
 same input, from any replica, is answered from the ONE original execution — `202` while it
 runs, then its stored answer — and never runs again; the same key with different input is
-`409 idempotency.key_reused_for_different_request`. A deliberate second write takes a NEW key.
+`409 idempotency.key_reused_for_different_request`. Input is compared as the API's original
+version types it: `quantity=01` and `quantity=1` on an `INTEGER` are the same request. A
+retry still needs an `Accept` that admits JSON (else `406`). A deliberate second write takes a NEW key.
 A run that ended `FAILED`, `ABORTED` or `OUTCOME_UNKNOWN` answers `409` with its code and a
 `status_url`: an unknown outcome means the target may hold the write — reconcile, never resend.
 `503 idempotency.reservation_unavailable` ran nothing; retry with the same key. The answer's
