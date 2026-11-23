@@ -932,6 +932,63 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    /**
+     * #1111 — a mutation-only namespace has no transferable write grant. dev's key holds the opt-in over a write-only
+     * route, so dev needs no exact grant; promotion carries the route and the key's GET binding by NAME, unmarked, and
+     * never turns the opt-in into exact grants. On uat the promoted write is therefore as invisible as an unknown path
+     * (404) — even after uat's own row is marked, because uat's authoring is off — until uat's administrator grants the
+     * exact route, after which the same call writes (uat admits fresh writes).
+     */
+    @Test
+    @Order(74)
+    fun `a promoted write under an opt-in is 404 on the receiver until the receiver grants the exact route`() {
+        val writePath = "$NS_PATH/write"
+        val devWriter = mintOn(portDev, NS_WRITER)
+        val uatWriter = mintKeyOn(portUat, NS_WRITER)
+        given()
+            .port(portDev)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .body("""{"api_key_id": "$devWriter", "path_prefix": "$NS_PATH", "allow": true}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+        publishOn(portDev, writePath, "POST", NS_PIPELINE, 2)
+
+        promoteOrExplain(NS_PIPELINE)
+
+        val uatGrants = {
+            uatJdbc.scalar(
+                "SELECT coalesce(string_agg(method || '@' || path_prefix || ':' || allow_namespace_writes::text, ',' " +
+                    "ORDER BY method, path_prefix), '') FROM endpoint_key_bindings WHERE api_key_id = '${uatWriter.first}'",
+            )
+        }
+        assertAll(
+            { assertEquals("1", uatJdbc.scalar("SELECT count(*)::text FROM published_endpoints WHERE path_pattern = '$writePath'")) },
+            { assertEquals("GET@$NS_PATH:false", uatGrants(), "the name's GET binding travels, unmarked; no exact grant appears") },
+        )
+        val write = { idempotency: String ->
+            given()
+                .port(portUat)
+                .header("DP-API-Key", uatWriter.second)
+                .header("Idempotency-Key", idempotency)
+                .`when`()
+                .post("/api$writePath")
+                .thenReturn()
+        }
+        assertEquals(404, write("ns-promo-1").statusCode(), "no grant reaches the promoted write: the opaque unknown-path 404")
+        uatJdbc.execute(
+            "UPDATE endpoint_key_bindings SET allow_namespace_writes = TRUE WHERE api_key_id = '${uatWriter.first}' AND method = 'GET'",
+        )
+        assertEquals(404, write("ns-promo-2").statusCode(), "a marker is dormant on a receiver: authoring is off")
+
+        grantOn(portUat, uatWriter.first, writePath, "POST")
+        val granted = write("ns-promo-3")
+        withClue(granted.asString()) { assertEquals(200, granted.statusCode(), "the receiver's own exact grant admits the write") }
+        assertEquals("SUCCESS", granted.jsonPath().getString("status"))
+    }
+
     /** dev's configured promotion target (the shared properties' nested Target) — swapped only by Order 72. */
     private fun devPromotionTarget(): Any {
         val properties = checkNotNull(dev).getBean(Class.forName("co.datapipelines.auth.PromotionProperties"))
@@ -1028,7 +1085,13 @@ class PromotionTwoDeploymentE2eTest {
     private fun mintOn(
         port: Int,
         name: String,
-    ): String =
+    ): String = mintKeyOn(port, name).first
+
+    /** Mints an endpoint key named [name] on [port]; its id and its plaintext (shown once, at issuance). */
+    private fun mintKeyOn(
+        port: Int,
+        name: String,
+    ): Pair<String, String> =
         given()
             .port(port)
             .contentType(ContentType.JSON)
@@ -1040,7 +1103,7 @@ class PromotionTwoDeploymentE2eTest {
             .statusCode(201)
             .extract()
             .jsonPath()
-            .getString("data.id")
+            .let { it.getString("data.id") to it.getString("data.key") }
 
     private fun grantOn(
         port: Int,
@@ -1819,6 +1882,7 @@ class PromotionTwoDeploymentE2eTest {
         private const val NS_PIPELINE = "test/promo_e2e_ns"
         private const val NS_PATH = "/promo/v1/namespace"
         private const val NS_KEY = "promo-e2e-dev-namespace"
+        private const val NS_WRITER = "promo-e2e-namespace-writer"
         private const val GUARD_PROBE_SECONDS = 4L
         private const val GUARD_PROBE_INTERVAL_MS = 20L
         private const val GUARD_WRITER_TIMEOUT_SECONDS = 30L
@@ -1871,7 +1935,12 @@ class PromotionTwoDeploymentE2eTest {
                     redis = redisUat,
                     name = "uat",
                     authoring = false,
-                    extra = arrayOf("--datapipelines.deployment.promotion.server-key=$SERVER_KEY"),
+                    // #1111 — fresh writes on uat's published POST routes are admitted (Order 74 calls one).
+                    extra =
+                        arrayOf(
+                            "--datapipelines.deployment.promotion.server-key=$SERVER_KEY",
+                            "--datapipelines.endpoints.mutations-enabled=true",
+                        ),
                 )
             portUat = portOf(uat)
 

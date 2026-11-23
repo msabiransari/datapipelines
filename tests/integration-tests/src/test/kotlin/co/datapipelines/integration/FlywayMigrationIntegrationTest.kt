@@ -215,6 +215,9 @@ class FlywayMigrationIntegrationTest {
                 // #1043 (V68) — runtime capture: administrator windows, the reservation's admission-time capture
                 // decision, a captured run's private values and its closing summary (metadata-db §4.61–§4.64).
                 "68|execution capture|true",
+                // #1111 (V69) — the namespace-writes opt-in on a GET binding, false by default and on every existing row,
+                // CHECKed to GET rows only (metadata-db §4.14).
+                "69|endpoint binding namespace writes|true",
                 // #1035 — the repeatable downgrade barrier of V66 (repeatables run in description order, so it precedes
                 // #1037's): a binary that does not resolve it refuses to start on V66 metadata (metadata-db §7.5;
                 // ExecutionCommitOutcomeDowngradeBarrierIntegrationTest).
@@ -1133,6 +1136,25 @@ class FlywayMigrationIntegrationTest {
         query(
             "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'published_endpoints_path_pattern_key'",
         ) { it.getString(1) } shouldBe emptyList()
+    }
+
+    /**
+     * #1111 (V69) — the namespace-writes opt-in, read from the SHIPPED database: a NOT NULL boolean whose constant
+     * `DEFAULT FALSE` is what every row written before V69 reads (PostgreSQL fills an added column's constant default
+     * into existing rows), and the CHECK that admits `TRUE` on GET rows only — an exact route grant can never carry it.
+     * Behaviour is `AuthoringNamespaceKeyIntegrationTest`'s; this pins that production Flyway builds what it runs on.
+     */
+    @Test
+    fun `V69 adds the namespace-writes opt-in to bindings, false by default and refused on an exact grant`() {
+        query(
+            "SELECT data_type || '|' || is_nullable || '|' || column_default FROM information_schema.columns " +
+                "WHERE table_schema = 'public' AND table_name = 'endpoint_key_bindings' AND column_name = 'allow_namespace_writes'",
+        ) { it.getString(1) } shouldContainExactly listOf("boolean|NO|false")
+        query(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'endpoint_key_bindings'::regclass " +
+                "AND conname = 'chk_endpoint_key_bindings_namespace_writes'",
+        ) { it.getString(1) } shouldContainExactly
+            listOf("CHECK (((NOT allow_namespace_writes) OR (method = 'GET'::text)))")
     }
 
     /**
@@ -2326,6 +2348,8 @@ class FlywayMigrationIntegrationTest {
                 // #1037 (V65) — the closed method list on the bindings table, and its shape rule: a GET row
                 // has no entity, a mutation row must (metadata-db §4.14).
                 "chk_endpoint_key_bindings_method",
+                // #1111 (V69) — the namespace-writes opt-in lives on GET rows only (metadata-db §4.14).
+                "chk_endpoint_key_bindings_namespace_writes",
                 "chk_endpoint_key_bindings_shape",
                 // #1043 (V68) — a captured run's non-negative counts; a window's end (open xor ended inside its own
                 // span with a closed reason), method list and positive span; a value is captured xor omitted with a

@@ -25,6 +25,7 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import java.io.File
 import java.sql.DriverManager
 import java.sql.SQLException
 import java.util.Base64
@@ -640,6 +641,16 @@ class AuthoringNamespaceKeyIntegrationTest {
         markedAt(dev, NS) shouldBe true
     }
 
+    /** The operator's three statements are the runbook's own text (metadata-db §4.14): a doc edit that drifts goes red here. */
+    @Test
+    @Order(37)
+    fun `the runbook prints the inventory, preflight and cleanup this suite executes, verbatim`() {
+        var dir: File? = File("").absoluteFile
+        while (dir != null && !File(dir, METADATA_DOC).isFile) dir = dir.parentFile
+        val doc = File(checkNotNull(dir) { "$METADATA_DOC not found" }, METADATA_DOC).readText()
+        listOf(INVENTORY, MISMATCH_PREFLIGHT, MISMATCH_CLEANUP).forEach { statement -> doc shouldContain statement }
+    }
+
     @Test
     @Order(40)
     fun `a deactivated workspace's routes are not admitted by the opt-in, and reactivation restores it`() {
@@ -1122,6 +1133,7 @@ class AuthoringNamespaceKeyIntegrationTest {
                 "WHERE k.workspace_id <> b.workspace_id"
 
         /** metadata-db §4.14 — the cleanup, run inside a transaction whose row count is checked before COMMIT. */
+        private const val METADATA_DOC = "docs/metadata-db.md"
         private const val MISMATCH_CLEANUP =
             "DELETE FROM endpoint_key_bindings b USING api_keys k WHERE k.id = b.api_key_id AND k.workspace_id <> b.workspace_id"
 
