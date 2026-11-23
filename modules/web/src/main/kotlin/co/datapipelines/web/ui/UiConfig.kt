@@ -175,7 +175,8 @@ class UiConfig {
         executions: co.datapipelines.executor.ExecutionRepository,
         pipelineNames: PipelineNames,
         pipelines: co.datapipelines.pipeline.PipelineRepository,
-    ): ExecutionHistoryBrowseModel = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
+        actorNames: ActorNames,
+    ): ExecutionHistoryBrowseModel = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines, actorNames)
 
     /** 097 §C: the admin user table's row model, shared by the page and the partial. */
     @Bean

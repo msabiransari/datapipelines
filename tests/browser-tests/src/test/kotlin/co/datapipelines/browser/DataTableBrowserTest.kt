@@ -318,7 +318,9 @@ class DataTableBrowserTest : BrowserSuite() {
         // htmx re-creates the cached body's scripts on Back: data-table.js must wire once (a second
         // registry entry here meant a second observer and a second instance per restored table).
         withClue("data-table.js wired once across Back") { page.evaluate("() => window.__dpHistoryStyleCleanups.length") shouldBe wired }
-        page.locator("$frame thead .dt-sort").count() shouldBe 7
+        val restoredHeaders = page.locator("$frame thead th").all()
+        restoredHeaders.map { it.locator(".dt-sort").textContent().trim() } shouldBe
+            listOf("Pipeline", "Version", "Status", "Started", "Duration", "Rows", "Via", "Caller")
         withClue("the restored table was re-measured") { geometry(frame)["sbw"] shouldBe "${geometry(frame)["measured"]}px" }
         withClue("CSP after Back") { drainOwnCsp().shouldBeEmpty() }
     }

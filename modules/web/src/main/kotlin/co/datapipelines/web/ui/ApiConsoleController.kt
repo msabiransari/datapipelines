@@ -44,7 +44,7 @@ import org.springframework.web.bind.annotation.GetMapping
  * The keys card lived here until 179; it moved to `/api-keys`, the Keys page — its route is
  * `MCP_KEY_OWN`, every member with a workspace, and keys v2 (A15) made it the ONE creation
  * path for every kind, the `mcp` key included. The per-endpoint table shows each path's
- * ASSOCIATED key names with a manage link for the workspace admin and super admin. What
+ * applicable key bindings by name with a manage link for the workspace admin and super admin. What
  * stays is the endpoints inventory and the MCP connection card — and the `mcp` key an
  * agent presents at `/mcp` is created on the Keys page too.
  */
@@ -81,19 +81,14 @@ class ApiConsoleController(
         val names = pins.names
         val served = pins.served
 
-        // "Associated keys" is the EXACT-NODE set, which is what the REST surface reports and
-        // what a reader can act on ("this path has bindings"). It is deliberately NOT the
-        // EFFECTIVE authorization — that walks ancestors and takes the nearest node with any
-        // binding (EndpointAuthorizer), and zero bindings does not mean nobody can call the
-        // endpoint: a `user` key pinned to this workspace with `execute` still may.
         val allBindings = bindings.findByWorkspace(workspaceId)
-        val boundByPath = allBindings.groupBy { it.pathPrefix }
         // 179: the column names the keys, so the key ids resolve to names in one batch —
         // the workspace's API keys, not the caller's.
         val keyNames =
             apiKeys
                 .findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT)
                 .associate { it.id to it.name }
+        val keyGroups = ApiConsoleKeyGroups(allBindings, keyNames)
 
         model.addAttribute(
             "endpoints",
@@ -109,15 +104,7 @@ class ApiConsoleController(
                     servedVersion = served[endpoint.id]?.version,
                     servedDraft = served[endpoint.id]?.draft ?: false,
                     timeoutSeconds = endpoint.current?.body?.timeoutSeconds,
-                    // #1037: the row's OWN method's grants only. A GET row's "associated keys"
-                    // are its GET node bindings; a mutation row's are its exact entity grants —
-                    // never the sibling method's, which is a different route's authorization.
-                    boundKeyNames =
-                        boundByPath[endpoint.pathPattern]
-                            .orEmpty()
-                            .filter { it.method == endpoint.method }
-                            .mapNotNull { keyNames[it.apiKeyId] }
-                            .sorted(),
+                    keyGroups = keyGroups.forEndpoint(endpoint),
                     enabled = endpoint.isEnabled,
                 )
             },
@@ -139,8 +126,8 @@ class ApiConsoleController(
      * are `{variables}` so the template can chip them without re-parsing a string — the
      * parsed form is already on the row.
      *
-     * [boundKeyNames] are the API keys associated at the EXACT node (179: names, not a
-     * count — the reader's question is "which", not "how many").
+     * [keyGroups] shows the closest bindings for a GET route's concrete paths or the exact
+     * grants on a mutation route.
      */
     data class EndpointRow(
         /** #786: the API's id — the row links to its versions page, `/api-console/endpoints/{id}`. */
@@ -154,8 +141,14 @@ class ApiConsoleController(
         val servedVersion: Int?,
         val servedDraft: Boolean,
         val timeoutSeconds: Int?,
-        val boundKeyNames: List<String>,
+        val keyGroups: List<KeyGroup>,
         val enabled: Boolean,
+    )
+
+    /** The names and optional source and condition of one applicable binding. */
+    data class KeyGroup(
+        val names: List<String>,
+        val label: String?,
     )
 
     /**

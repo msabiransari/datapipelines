@@ -91,6 +91,7 @@ class PublishedMutationAuthoringFixtures(
         name: String,
         nodes: String,
         requestBody: String? = null,
+        parameters: String = "{}",
     ) {
         val declared = requestBody?.let { ""","request_body":$it""" }.orEmpty()
         val (status, body) =
@@ -98,7 +99,7 @@ class PublishedMutationAuthoringFixtures(
                 "POST",
                 "/api/v1/pipelines",
                 """{"name":"$name","display_name":"${name.substringAfterLast('/')}","description":"#1040 fixture",""" +
-                    """"parameters":{},"nodes":$nodes$declared}""",
+                    """"parameters":$parameters,"nodes":$nodes$declared}""",
             )
         withClue("create $name: $body") { status shouldBe 201 }
         val id = idOf(body)

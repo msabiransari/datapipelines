@@ -30,6 +30,7 @@ import java.util.UUID
 class ExecutionHistoryPartialControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
+    private val actorNames = mockk<ActorNames>().also { every { it.lookup(any()) } returns emptyMap() }
 
     /**
      * Only §8's draft-run markers read this: no release timestamps in these fixtures, so every run
@@ -40,7 +41,7 @@ class ExecutionHistoryPartialControllerTest {
             every { it.releasedAtFor(any(), any()) } returns emptyMap()
         }
     private val controller =
-        ExecutionHistoryPartialController(ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines))
+        ExecutionHistoryPartialController(ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines, actorNames))
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -140,6 +141,47 @@ class ExecutionHistoryPartialControllerTest {
         controller.listPartial(null, null, after.toString(), before.toString(), 0, model)
 
         verify { executions.findAll(workspaceId, null, null, after, before, limit = 21, offset = 0) }
+    }
+
+    @Test
+    fun `date only bounds include the first day and exclude the before day`() {
+        authenticate()
+        every { executions.findVisible(workspaceId, userId, null, null, any(), any(), any(), any()) } returns emptyList()
+
+        controller.listPartial(null, null, "2026-09-01", "2026-09-02", 0, model)
+
+        verify {
+            executions.findVisible(
+                workspaceId,
+                userId,
+                null,
+                null,
+                Instant.parse("2026-09-01T00:00:00Z"),
+                Instant.parse("2026-09-01T23:59:59.999999Z"),
+                limit = 21,
+                offset = 0,
+            )
+        }
+    }
+
+    @Test
+    fun `caller names use a single lookup for the actors on the visible page`() {
+        authenticate(workspaceAdmin = true)
+        val keyRun = record().copy(executedBy = UUID.randomUUID())
+        val overflow = record().copy(executedBy = UUID.randomUUID())
+        every { executions.findAll(workspaceId, any(), any(), any(), any(), any(), any()) } returns
+            (List(19) { record() } + keyRun + overflow)
+        every { actorNames.lookup(setOf(userId, keyRun.executedBy)) } returns
+            mapOf(keyRun.executedBy to "integration key (API key)")
+
+        controller.listPartial(null, null, null, null, 0, model)
+
+        model["callers"] shouldBe
+            mapOf(
+                userId to ActorNames.fallback(userId),
+                keyRun.executedBy to "integration key (API key)",
+            )
+        verify(exactly = 1) { actorNames.lookup(any()) }
     }
 
     @Test

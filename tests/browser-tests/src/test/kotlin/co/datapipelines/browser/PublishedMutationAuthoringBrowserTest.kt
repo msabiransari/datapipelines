@@ -4,6 +4,7 @@ import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -50,11 +51,15 @@ class PublishedMutationAuthoringBrowserTest : BrowserSuite() {
         withClue("the database holds exact method grants, and no GET node, for the write-only key") {
             grantsOf(writer) shouldBe routes.sorted()
         }
+        assertConsoleKeyAssignments(ids)
 
         // 3 — the external client.
         callRoutes(fx, writer, reader)
+        page.navigate("$baseUrl/executions")
+        page.locator("#execution-table").innerText().shouldContain("pm-reader (API key)")
 
         // Un-tick ONE grant: exactly that method is refused, the sibling method at the path is still served.
+        page.navigate("$baseUrl/api-keys")
         editGrants("pm-writer") { form -> form.locator("input[name=grants][value=\"DELETE $STATE\"]").uncheck() }
         grantsOf(writer) shouldBe (routes - "DELETE $STATE").sorted()
         val refused = fx.call(writer, "DELETE", "/api$STATE", "pm-delete-revoked")
@@ -72,7 +77,100 @@ class PublishedMutationAuthoringBrowserTest : BrowserSuite() {
             rowFor("pm-writer").locator("[data-verb=key-revoke]").click()
         }
         awaitUnauthorized(fx, writer)
+
+        mint("pm-nearest", bind = ORDERS)
+        page.navigate("$baseUrl/api-console")
+        val readKeys = consoleKeys(ids.getValue("GET $ORDERS"))
+        readKeys shouldContain "pm-nearest"
+        readKeys shouldNotContain "pm-reader"
+        readKeys shouldNotContain "Inherited from"
     }
+
+    private fun assertConsoleKeyAssignments(ids: Map<String, String>) {
+        page.navigate("$baseUrl/api-console")
+        val readKeys = consoleKeys(ids.getValue("GET $ORDERS"))
+        readKeys shouldContain "pm-reader"
+        readKeys shouldContain "Inherited from /api/pm1040"
+        readKeys shouldNotContain "pm-writer"
+
+        val writeKeys = consoleKeys(ids.getValue("POST $ORDERS"))
+        writeKeys shouldContain "pm-writer"
+        writeKeys shouldNotContain "pm-reader"
+        writeKeys shouldNotContain "Inherited from"
+    }
+
+    @Test
+    fun `the console shows path parameter bindings and their fallback for other values`() {
+        startTrace()
+        val suffix = generatedPassword("s").take(8).lowercase().filter { it.isLetterOrDigit() }
+        val user = seedLocalUser(uniqueEmail("api-regions-$suffix"), generatedPassword("pw"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        createWorkspace("api-regions-$suffix")
+        val fx = PublishedMutationAuthoringFixtures(page, baseUrl, suffix)
+        val prefix = "/reports-$suffix/v1"
+        val summaryId = seedRegionalRoutes(fx, prefix, suffix)
+
+        page.navigate("$baseUrl/api-console")
+        consoleKeys(summaryId) shouldContain "none"
+        page.navigate("$baseUrl/api-keys")
+        val east = mint("east-reader", bind = "$prefix/east")
+        fx.call(east, "GET", "/api$prefix/east/summary").statusCode() shouldBe 200
+        fx.call(east, "GET", "/api$prefix/west/summary").statusCode() shouldBe 403
+
+        page.navigate("$baseUrl/api-console")
+        val eastOnly = consoleKeys(summaryId)
+        eastOnly shouldContain "east-reader"
+        eastOnly shouldContain "region = east"
+        eastOnly shouldContain "/api$prefix/east"
+        eastOnly shouldNotContain "none"
+
+        page.navigate("$baseUrl/api-keys")
+        val all = mint("regional-reader", bind = prefix)
+        fx.call(all, "GET", "/api$prefix/east/summary").statusCode() shouldBe 403
+        fx.call(all, "GET", "/api$prefix/west/summary").statusCode() shouldBe 200
+
+        page.navigate("$baseUrl/api-console")
+        val both = consoleKeys(summaryId)
+        both shouldContain "east-reader"
+        both shouldContain "region = east"
+        both shouldContain "regional-reader"
+        both shouldContain "Other values"
+
+        page.navigate("$baseUrl/api-keys")
+        val eastSummary = mint("east-summary-reader", bind = "$prefix/east/summary")
+        fx.call(eastSummary, "GET", "/api$prefix/east/summary").statusCode() shouldBe 200
+        fx.call(east, "GET", "/api$prefix/east/summary").statusCode() shouldBe 403
+        page.navigate("$baseUrl/api-console")
+        val deeper = consoleKeys(summaryId)
+        deeper shouldContain "east-summary-reader"
+        deeper shouldContain "/api$prefix/east/summary"
+        deeper shouldNotContain "east-reader"
+    }
+
+    private fun seedRegionalRoutes(
+        fx: PublishedMutationAuthoringFixtures,
+        prefix: String,
+        suffix: String,
+    ): String {
+        fx.seedTarget()
+        val templateId = template(suffix, "regions")
+        val name = pipeline(suffix, "regions")
+        fx.sqlTemplate(templateId, "SELECT 1 AS n")
+        fx.pipeline(
+            name,
+            "[${dql("summary", templateId, fx.datasource)}]",
+            parameters = """{"region":{"type":"STRING","required":false}}""",
+        )
+        val summary = fx.publish("$prefix/{region}/summary", "GET", name)
+        fx.publish("$prefix/east/detail", "GET", name)
+        fx.publish("$prefix/east/summary/leaf", "GET", name)
+        fx.releaseOverRest(summary)
+        return summary
+    }
+
+    private fun consoleKeys(endpointId: String): String =
+        page.locator("tr:has(a[href='/api-console/endpoints/$endpointId']) td").last().innerText()
 
     /** Step 1 — the POST and GET version pages at one path: method, exact pin, body contract, keys label; both released. */
     private fun walkVersionPages(
