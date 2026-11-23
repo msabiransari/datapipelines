@@ -4,6 +4,7 @@ import com.microsoft.playwright.Page
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -50,11 +51,15 @@ class PublishedMutationAuthoringBrowserTest : BrowserSuite() {
         withClue("the database holds exact method grants, and no GET node, for the write-only key") {
             grantsOf(writer) shouldBe routes.sorted()
         }
+        assertConsoleKeyAssignments(ids)
 
         // 3 — the external client.
         callRoutes(fx, writer, reader)
+        page.navigate("$baseUrl/executions")
+        page.locator("#execution-table").innerText().shouldContain("pm-reader (API key)")
 
         // Un-tick ONE grant: exactly that method is refused, the sibling method at the path is still served.
+        page.navigate("$baseUrl/api-keys")
         editGrants("pm-writer") { form -> form.locator("input[name=grants][value=\"DELETE $STATE\"]").uncheck() }
         grantsOf(writer) shouldBe (routes - "DELETE $STATE").sorted()
         val refused = fx.call(writer, "DELETE", "/api$STATE", "pm-delete-revoked")
@@ -72,7 +77,30 @@ class PublishedMutationAuthoringBrowserTest : BrowserSuite() {
             rowFor("pm-writer").locator("[data-verb=key-revoke]").click()
         }
         awaitUnauthorized(fx, writer)
+
+        mint("pm-nearest", bind = ORDERS)
+        page.navigate("$baseUrl/api-console")
+        val readKeys = consoleKeys(ids.getValue("GET $ORDERS"))
+        readKeys shouldContain "pm-nearest"
+        readKeys shouldNotContain "pm-reader"
+        readKeys shouldNotContain "Inherited from"
     }
+
+    private fun assertConsoleKeyAssignments(ids: Map<String, String>) {
+        page.navigate("$baseUrl/api-console")
+        val readKeys = consoleKeys(ids.getValue("GET $ORDERS"))
+        readKeys shouldContain "pm-reader"
+        readKeys shouldContain "Inherited from /api/pm1040"
+        readKeys shouldNotContain "pm-writer"
+
+        val writeKeys = consoleKeys(ids.getValue("POST $ORDERS"))
+        writeKeys shouldContain "pm-writer"
+        writeKeys shouldNotContain "pm-reader"
+        writeKeys shouldNotContain "Inherited from"
+    }
+
+    private fun consoleKeys(endpointId: String): String =
+        page.locator("tr:has(a[href='/api-console/endpoints/$endpointId']) td").last().innerText()
 
     /** Step 1 — the POST and GET version pages at one path: method, exact pin, body contract, keys label; both released. */
     private fun walkVersionPages(

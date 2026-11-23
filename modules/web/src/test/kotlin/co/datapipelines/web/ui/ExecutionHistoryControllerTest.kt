@@ -25,8 +25,9 @@ class ExecutionHistoryControllerTest {
     private val pipelines = mockk<PipelineRepository>()
     private val executions = mockk<ExecutionRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
+    private val actorNames = mockk<ActorNames>().also { every { it.lookup(any()) } returns emptyMap() }
     private val controller =
-        ExecutionHistoryController(pipelines, ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines))
+        ExecutionHistoryController(pipelines, ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines, actorNames))
 
     private val workspaceId = UUID.randomUUID()
 

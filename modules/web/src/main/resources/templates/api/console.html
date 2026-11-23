@@ -65,12 +65,11 @@
           </td>
           <td class="num" th:text="${e.timeoutSeconds != null ? e.timeoutSeconds + ' s' : '—'}">30 s</td>
           <td>
-            <!-- 179 (D17): the API keys ASSOCIATED at this exact path, by name — the count
-                 chip this replaced answered "how many" when the operator's question is
-                 "which". The manage link is the admins' route to the association verb. -->
             <span class="app-chips" th:if="${not #lists.isEmpty(e.boundKeyNames)}">
               <span class="app-chip app-chip-mono" th:each="k : ${e.boundKeyNames}" th:text="${k}">ci</span>
             </span>
+            <span class="app-path" th:if="${e.inheritedKeyPath != null and not #lists.isEmpty(e.boundKeyNames)}"
+                  th:text="${'Inherited from ' + e.inheritedKeyPath}">Inherited from /api/nyc</span>
             <span class="app-chip app-chip-warn" th:if="${#lists.isEmpty(e.boundKeyNames)}"><i class="ds-status"></i>none</span>
             <a th:if="${canAdminWorkspace == true or isSuperAdmin == true}" class="ds-button ds-button-ghost ds-button-sm"
                th:href="@{/api-keys}">Manage</a>

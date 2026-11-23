@@ -5,13 +5,13 @@
   <div class="app-page-h">
     <div>
       <h1 class="ds-headline">Executions</h1>
-      <p class="app-page-sub">Every run in this workspace, newest first — what started it, how long it took
-        and how many rows it returned.</p>
+      <p class="app-page-sub">Pipeline runs you can see in this workspace, newest first. Dates and times use UTC.</p>
     </div>
   </div>
 
   <div class="ds-card u-mb-lg">
-    <form id="execution-filters" hx-get="/partials/executions" hx-trigger="change from:select, submit" hx-target="#execution-table" hx-swap="innerHTML" class="app-filters">
+    <form id="execution-filters" hx-get="/partials/executions" hx-trigger="change, submit" hx-sync="this:replace"
+          hx-target="#execution-table" hx-swap="innerHTML" class="app-filters">
       <div class="ds-field">
         <label class="ds-field-label" for="pipeline_id">Pipeline</label>
         <select id="pipeline_id" name="pipeline_id" class="ds-select app-filter-select">
@@ -29,7 +29,7 @@
         </select>
       </div>
       <div class="ds-field">
-        <label class="ds-field-label" for="started_after">After</label>
+        <label class="ds-field-label" for="started_after">On or after</label>
         <input type="date" id="started_after" name="started_after" class="ds-input app-filter-date" th:value="${selectedStartedAfter}">
       </div>
       <div class="ds-field">

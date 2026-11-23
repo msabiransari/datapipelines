@@ -1,17 +1,21 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator.LocatorOptions
+import com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat
+import com.microsoft.playwright.options.SelectOption
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * Golden path 7's page half: the execution history screen renders with its filter bar —
- * the pipeline dropdown and the status set — and shows the honest empty state when the
- * workspace has no runs. (The row/pagination half needs a real execution, which needs
- * the pipeline editor's Phase-2 rebuild — deferred in TEST-GAP-2026-09.md.)
+ * Execution history's first paint, visibility, filtering and pagination in a real browser.
  */
 class ExecutionHistoryBrowserTest : BrowserSuite() {
     @Test
@@ -29,10 +33,7 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
 
         page.navigate("$baseUrl/executions")
         page.waitForURL("**/executions")
-        // The page model's two filter inputs: pipelines for the dropdown, statuses for the bar.
         page.locator("select").first().isVisible() shouldBe true
-        // The empty state rides the htmx-loaded partial — wait for ITS arrival, not
-        // the page's initial HTML.
         page.waitForSelector("text=No executions found")
     }
 
@@ -57,7 +58,6 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
         page.waitForURL("**/dashboard")
         page.navigate("$baseUrl/executions")
         page.waitForURL("**/executions")
-        // The htmx-loaded partial carries the rows — wait for the scheduled run's row.
         // Scoped to #execution-table: the filter bar's <select> options carry the same names.
         page
             .locator("#execution-table")
@@ -66,23 +66,64 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
             .waitFor()
         val table = page.locator("#execution-table").innerText()
         table.shouldContain("SCHEDULE")
+        table.shouldContain("System")
         table.shouldContain(scheduledPipeline)
         // The absence is the assertion that can fail: R3 widens SCHEDULED rows only.
         table.shouldNotContain(ownPipeline)
     }
 
+    @Test
+    fun `date and status changes refresh history and the pager keeps those filters`() {
+        startTrace()
+        val viewer = seedActor("history-date-filter", role = "viewer")
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val midnight = today.atStartOfDay(ZoneOffset.UTC).toInstant()
+        val previousRuns = (1L..21L).map { midnight.minus(it, ChronoUnit.MICROS) }
+        val pipeline =
+            seedPipelineAndRuns(
+                "test/execdates-${viewer.userId}",
+                viewer.userId,
+                scheduledRun = false,
+                starts = listOf(midnight) + previousRuns,
+            )
+        login(viewer.email, viewer.oneTimePassword)
+        page.waitForURL("**/dashboard")
+
+        val table = page.locator("#execution-table")
+        page.navigate("$baseUrl/executions?started_before=$today")
+        assertThat(table).containsText("Browser User")
+        assertThat(table).not().containsText("$today 00:00")
+
+        page.locator("#pipeline_id").selectOption(SelectOption().setLabel(pipeline))
+        page.locator("#started_after").fill(today.minusDays(1).toString())
+        page.locator("#started_before").fill("")
+        assertThat(table).containsText("$today 00:00")
+
+        page.locator("#started_before").fill(today.toString())
+        assertThat(table).not().containsText("$today 00:00")
+        assertThat(table.locator("tbody tr.app-row-clickable")).hasCount(20)
+        table.locator("button", LocatorOptions().setHasText("Next")).click()
+        assertThat(table.locator("tbody tr.app-row-clickable")).hasCount(1)
+        assertThat(table).containsText("Browser User")
+
+        page.locator("#status").selectOption("FAILED")
+        assertThat(table).containsText("No executions found")
+        page.locator("#status").selectOption("SUCCESS")
+        assertThat(table.locator("tbody tr.app-row-clickable")).hasCount(20)
+        assertThat(table).not().containsText("$today 00:00")
+    }
+
     /**
-     * One pipeline (draft v1 — the executions' FK needs only the version row) plus ONE
-     * execution: a `SCHEDULE` run or an interactive `UI` run of [actorId]'s, per [scheduledRun].
-     * The pipeline lives in the `default` workspace the seeded memberships grant. Returns the
-     * pipeline NAME, which the history row renders when the join resolves.
+     * One pipeline in the default workspace, with executions at [starts] attributed to
+     * the System actor for schedules or [actorId] for interactive runs.
      */
     private fun seedPipelineAndRuns(
         name: String,
         actorId: UUID,
         scheduledRun: Boolean,
+        starts: List<Instant> = listOf(Instant.now().minus(1, ChronoUnit.HOURS)),
     ): String {
-        val executionId = UUID.randomUUID()
+        val actor = if (scheduledRun) "(SELECT id FROM users WHERE kind = 'system')" else "'$actorId'"
         DriverManager
             .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
             .use { connection ->
@@ -100,16 +141,19 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
                           FROM pipelines WHERE name = '$name'
                         """.trimIndent(),
                     )
-                    statement.execute(
-                        """
-                        INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status,
-                                                         executed_by, triggered_via, started_at, completed_at,
-                                                         duration_ms, root_execution_id)
-                        SELECT '$executionId', id, 1, 'SUCCESS', '$actorId', '${if (scheduledRun) "SCHEDULE" else "UI"}',
-                               NOW() - interval '1 hour', NOW() - interval '59 minutes', 60000, '$executionId'
-                          FROM pipelines WHERE name = '$name'
-                        """.trimIndent(),
-                    )
+                    starts.forEach { started ->
+                        val executionId = UUID.randomUUID()
+                        statement.execute(
+                            """
+                            INSERT INTO pipeline_executions (execution_id, pipeline_id, pipeline_version, status,
+                                                             executed_by, triggered_via, started_at, completed_at,
+                                                             duration_ms, root_execution_id)
+                            SELECT '$executionId', id, 1, 'SUCCESS', $actor, '${if (scheduledRun) "SCHEDULE" else "UI"}',
+                                   '$started', '${started.plusSeconds(60)}', 60000, '$executionId'
+                              FROM pipelines WHERE name = '$name'
+                            """.trimIndent(),
+                        )
+                    }
                 }
             }
         return name
