@@ -23,13 +23,13 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import java.time.Instant
-import java.util.UUID
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import java.time.Instant
+import java.util.UUID
 
 /**
  * §16 over mocked services: own-key management, the create request's role (never scopes, #215),
@@ -50,7 +50,15 @@ class AuthControllerTest {
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
     private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
 
-    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints, AuthoringGuard(true), ManagedEndpointKeys.NONE)
+    private val endpointKeys =
+        EndpointKeyService(
+            apiKeyService,
+            bindingRepository,
+            auditSink,
+            publishedEndpoints,
+            AuthoringGuard(true),
+            ManagedEndpointKeys.NONE,
+        )
     private val controller = AuthController(apiKeyService, apiKeyRepository, userService, endpointKeys)
 
     private val userId = UUID.randomUUID()

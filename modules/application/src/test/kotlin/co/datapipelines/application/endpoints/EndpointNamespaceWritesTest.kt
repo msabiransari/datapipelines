@@ -27,62 +27,64 @@ import java.util.UUID
 class EndpointNamespaceWritesTest {
     private val authorizer = EndpointAuthorizer()
 
+    /** One row per rule of the deciding node: what the case shows, the GET rows, and whether the key may write. */
+    private val decidingNodeCases =
+        listOf(
+            Triple("a marked node admits a route published beneath it later", listOf(marked("/school/v1", KEY)), true),
+            Triple("the marked node may be the root of the key's workspace", listOf(marked("/", KEY)), true),
+            Triple("an unmarked binding of the key is not a namespace grant", listOf(plain("/school/v1", KEY)), false),
+            Triple("no binding on any ancestor admits nothing", emptyList(), false),
+            Triple(
+                "another key's ORDINARY nearer binding shadows the upper opt-in",
+                listOf(marked("/school/v1", KEY), plain("/school/v1/orders", OTHER)),
+                false,
+            ),
+            Triple(
+                "the key's OWN ordinary nearer binding shadows its upper opt-in",
+                listOf(marked("/school/v1", KEY), plain("/school/v1/orders", KEY)),
+                false,
+            ),
+            Triple(
+                "a deeper explicit opt-in admits where the upper one is shadowed",
+                listOf(plain("/school/v1", OTHER), marked("/school/v1/orders", KEY)),
+                true,
+            ),
+            Triple(
+                "another key's marked row at the same node is never borrowed",
+                listOf(plain("/school/v1", KEY), marked("/school/v1", OTHER)),
+                false,
+            ),
+            Triple(
+                "an ordinary key at the same node does not shadow the marked one",
+                listOf(marked("/school/v1", KEY), plain("/school/v1", OTHER)),
+                true,
+            ),
+            Triple(
+                "a sibling namespace with a similar string prefix is not an ancestor",
+                listOf(marked("/school/v1-beta", KEY)),
+                false,
+            ),
+            Triple(
+                "a foreign workspace's nearer row neither decides nor shadows",
+                listOf(marked("/school/v1", KEY), plain("/school/v1/orders", OTHER, workspace = FOREIGN)),
+                true,
+            ),
+            Triple(
+                "a foreign workspace's marked row grants nothing here",
+                listOf(marked("/school/v1", KEY, workspace = FOREIGN)),
+                false,
+            ),
+            Triple(
+                "an exact mutation grant on the path never decides the node",
+                listOf(marked("/school/v1", KEY), exact("/school/v1/orders", OTHER)),
+                true,
+            ),
+        )
+
     @Test
     fun `the deciding node is the nearest node carrying any GET binding, and only the presenting key's mark counts`() {
-        val cases =
-            listOf(
-                Triple("a marked node admits a route published beneath it later", listOf(marked("/school/v1", KEY)), true),
-                Triple("the marked node may be the root of the key's workspace", listOf(marked("/", KEY)), true),
-                Triple("an unmarked binding of the key is not a namespace grant", listOf(plain("/school/v1", KEY)), false),
-                Triple("no binding on any ancestor admits nothing", emptyList(), false),
-                Triple(
-                    "another key's ORDINARY nearer binding shadows the upper opt-in",
-                    listOf(marked("/school/v1", KEY), plain("/school/v1/orders", OTHER)),
-                    false,
-                ),
-                Triple(
-                    "the key's OWN ordinary nearer binding shadows its upper opt-in",
-                    listOf(marked("/school/v1", KEY), plain("/school/v1/orders", KEY)),
-                    false,
-                ),
-                Triple(
-                    "a deeper explicit opt-in admits where the upper one is shadowed",
-                    listOf(plain("/school/v1", OTHER), marked("/school/v1/orders", KEY)),
-                    true,
-                ),
-                Triple(
-                    "another key's marked row at the same node is never borrowed",
-                    listOf(plain("/school/v1", KEY), marked("/school/v1", OTHER)),
-                    false,
-                ),
-                Triple(
-                    "an ordinary key at the same node does not shadow the marked one",
-                    listOf(marked("/school/v1", KEY), plain("/school/v1", OTHER)),
-                    true,
-                ),
-                Triple(
-                    "a sibling namespace with a similar string prefix is not an ancestor",
-                    listOf(marked("/school/v1-beta", KEY)),
-                    false,
-                ),
-                Triple(
-                    "a foreign workspace's nearer row neither decides nor shadows",
-                    listOf(marked("/school/v1", KEY), plain("/school/v1/orders", OTHER, workspace = FOREIGN)),
-                    true,
-                ),
-                Triple(
-                    "a foreign workspace's marked row grants nothing here",
-                    listOf(marked("/school/v1", KEY, workspace = FOREIGN)),
-                    false,
-                ),
-                Triple(
-                    "an exact mutation grant on the path never decides the node",
-                    listOf(marked("/school/v1", KEY), exact("/school/v1/orders", OTHER)),
-                    true,
-                ),
-            )
         assertAll(
-            cases.map { (name, rows, expected) ->
+            decidingNodeCases.map { (name, rows, expected) ->
                 {
                     withClue(name) {
                         authorizer.allowsNamespaceWrites("/school/v1/orders", KEY, WORKSPACE, rows) shouldBe expected

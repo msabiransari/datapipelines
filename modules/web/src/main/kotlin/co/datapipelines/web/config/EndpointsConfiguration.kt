@@ -8,9 +8,6 @@ import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointGrants
-import co.datapipelines.auth.ApiKeyRepository
-import co.datapipelines.auth.WorkspaceRepository
-import co.datapipelines.web.bootstrap.DemoManagedEndpointKey
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
@@ -27,11 +24,13 @@ import co.datapipelines.application.endpoints.PublishedMutationDigests
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.WorkspaceLiveness
+import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.executor.ExecutionRepository
@@ -48,6 +47,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.bootstrap.DemoManagedEndpointKey
 import co.datapipelines.web.endpoints.CaptureRecorders
 import co.datapipelines.web.endpoints.MutationRequestRules
 import co.datapipelines.web.endpoints.PublishedEndpointServeService

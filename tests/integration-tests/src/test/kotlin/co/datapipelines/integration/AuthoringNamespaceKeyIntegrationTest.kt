@@ -939,7 +939,12 @@ class AuthoringNamespaceKeyIntegrationTest {
     /** The documented operator inventory (metadata-db §4.14), run verbatim: one list per row. */
     private fun inventory(): List<List<String?>> = rows(INVENTORY).map { it.take(INVENTORY_IDENTITY_COLUMNS) }
 
-    private fun count(sql: String): Int = rows(sql).first().first().orEmpty().toInt()
+    private fun count(sql: String): Int =
+        rows(sql)
+            .first()
+            .first()
+            .orEmpty()
+            .toInt()
 
     private fun rows(sql: String): List<List<String?>> =
         DriverManager.getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password).use { c ->

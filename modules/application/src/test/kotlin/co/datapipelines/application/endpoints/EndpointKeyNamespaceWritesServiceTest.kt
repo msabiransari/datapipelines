@@ -70,7 +70,9 @@ class EndpointKeyNamespaceWritesServiceTest {
     fun `allow true is refused for a key the deployment manages, before anything is written`() {
         val managed = ManagedEndpointKeys { keyId, workspace -> keyId == KEY && workspace == WORKSPACE }
         val refused =
-            shouldThrow<DatapipelinesException> { service(managed = managed).setNamespaceWrites(principal(), KEY, "/school/v1", allow = true) }
+            shouldThrow<DatapipelinesException> {
+                service(managed = managed).setNamespaceWrites(principal(), KEY, "/school/v1", allow = true)
+            }
         refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
         refused.details["reason"] shouldBe "managed_key"
         verify(exactly = 0) { bindings.setNamespaceWrites(any(), any(), any(), any(), any()) }
