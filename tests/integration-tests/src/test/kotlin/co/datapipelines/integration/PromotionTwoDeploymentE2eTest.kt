@@ -873,6 +873,65 @@ class PromotionTwoDeploymentE2eTest {
         assertEquals("RELEASED:2", uatPin("POST"), "uat is unchanged")
     }
 
+    /**
+     * #1111 (auth.md §7.7) — the namespace-writes opt-in is a development credential's, never promotion content: dev's
+     * marked GET binding travels as the ordinary binding of its key NAME, so uat binds it unmarked; and a re-promotion
+     * binds through the ordinary insert, which never touches a marker the receiver already holds. Asserted on both
+     * databases.
+     */
+    @Test
+    @Order(73)
+    fun `a marked binding promotes as an ordinary binding, and a re-promotion keeps the receiver's own marker`() {
+        createPipelineOn(portDev, NS_PIPELINE, dqlNode("read", DATASOURCE, LEAF_TEMPLATE))
+        val devGet = publishOn(portDev, NS_PATH, "GET", NS_PIPELINE, 1)
+        val devKey = mintOn(portDev, NS_KEY)
+        val uatKey = mintOn(portUat, NS_KEY)
+        given()
+            .port(portDev)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .body("""{"api_key_id": "$devKey", "path_prefix": "$NS_PATH", "allow": true}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+        val marks = { jdbc: Jdbc, key: String ->
+            jdbc.scalar(
+                "SELECT coalesce(string_agg(method || ':' || allow_namespace_writes::text, ','), '') FROM endpoint_key_bindings " +
+                    "WHERE api_key_id = '$key' AND path_prefix = '$NS_PATH'",
+            )
+        }
+        assertEquals("GET:true", marks(devJdbc, devKey), "dev holds the opt-in")
+
+        promoteOrExplain(NS_PIPELINE)
+        assertAll(
+            { assertEquals("GET:false", marks(uatJdbc, uatKey), "uat binds the key NAME, as an ordinary GET binding") },
+            { assertEquals("GET:true", marks(devJdbc, devKey), "the sender's own row is untouched") },
+        )
+
+        // A marker uat already holds (a dormant grant kept from an earlier posture) survives a re-push of the same entry.
+        uatJdbc.execute(
+            "UPDATE endpoint_key_bindings SET allow_namespace_writes = TRUE WHERE api_key_id = '$uatKey' AND path_prefix = '$NS_PATH'",
+        )
+        // …and one dev withdrew never travels either: the re-push carries the name only.
+        given()
+            .port(portDev)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .body("""{"api_key_id": "$devKey", "path_prefix": "$NS_PATH", "allow": false}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+        bumpAndRelease(NS_PIPELINE)
+        movePinOn(portDev, devGet, NS_PIPELINE, 2)
+        promoteOrExplain(NS_PIPELINE)
+        assertAll(
+            { assertEquals("GET:true", marks(uatJdbc, uatKey), "the receiver's own marker is the receiver's") },
+            { assertEquals("GET:false", marks(devJdbc, devKey), "dev's withdrawal stands on dev") },
+        )
+    }
+
     /** dev's configured promotion target (the shared properties' nested Target) — swapped only by Order 72. */
     private fun devPromotionTarget(): Any {
         val properties = checkNotNull(dev).getBean(Class.forName("co.datapipelines.auth.PromotionProperties"))
@@ -1757,6 +1816,9 @@ class PromotionTwoDeploymentE2eTest {
         private const val API_PIPELINE = "test/promo_e2e_api"
         private const val API_PATH = "/promo/v1/applications"
         private const val API_WRITER = "promo-e2e-writer"
+        private const val NS_PIPELINE = "test/promo_e2e_ns"
+        private const val NS_PATH = "/promo/v1/namespace"
+        private const val NS_KEY = "promo-e2e-dev-namespace"
         private const val GUARD_PROBE_SECONDS = 4L
         private const val GUARD_PROBE_INTERVAL_MS = 20L
         private const val GUARD_WRITER_TIMEOUT_SECONDS = 30L
