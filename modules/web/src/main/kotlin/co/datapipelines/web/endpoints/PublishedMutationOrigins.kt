@@ -1,6 +1,6 @@
 package co.datapipelines.web.endpoints
 
-import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
+import co.datapipelines.application.endpoints.EndpointGrants
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.PublishedMutationReservation
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
@@ -14,8 +14,12 @@ import java.util.UUID
 /**
  * The polling rule of a run a published mutation started (#1039; published-mutation-apis §2, §6): it is readable ONLY
  * through the grant that initiated it — the same key, under the same concrete business path, while that path still
- * resolves to the same route entity for the same method in a live workspace and the key still holds that entity's
- * grant. Everything else is `404 result.execution_not_found`, the answer an unknown id gets.
+ * resolves to the same route entity for the same method in a live workspace and the key still holds a grant that
+ * admits that entity and method NOW: its exact route grant, or (#1111) its namespace-writes opt-in at the deciding
+ * node while the deployment's authoring capability is on — the same [EndpointGrants] decision the serve path's
+ * visibility applies. Everything else is `404 result.execution_not_found`, the answer an unknown id gets. A route
+ * deleted and recreated inside a namespace is callable as a new route, but its id differs from the origin's, so the
+ * old runs stay unreadable.
  *
  * Which branch applies is decided by [originOf]: a reservation row for the id in the key's workspace, started by THIS
  * key. A run another key started is not this key's origin, so the caller falls back to the framework rule, whose
@@ -25,7 +29,8 @@ import java.util.UUID
 class PublishedMutationOrigins(
     private val origins: PublishedMutationReservationRepository,
     private val registry: EndpointRegistry,
-    private val bindings: EndpointKeyBindingRepository,
+    /** #1111 — the serve path's own grant decision, so polling can never be wider or narrower than calling. */
+    private val grants: EndpointGrants,
     private val workspaceLiveness: WorkspaceLiveness,
     private val urls: PublishedMutationUrls,
 ) {
@@ -44,7 +49,7 @@ class PublishedMutationOrigins(
         businessPath: String,
         principal: AuthenticatedPrincipal,
     ) {
-        val keyId = requireNotNull(principal.keyId) { "an origin is only ever found for a key" }
+        requireNotNull(principal.keyId) { "an origin is only ever found for a key" }
         val granted =
             origin.businessPath == businessPath &&
                 workspaceLiveness.isActive(origin.workspaceId) &&
@@ -53,9 +58,7 @@ class PublishedMutationOrigins(
                     .match(businessPath, origin.method)
                     ?.endpoint
                     ?.id == origin.endpointId &&
-                bindings.findMutationGrantsByKey(keyId, origin.workspaceId).any {
-                    it.endpointId == origin.endpointId && it.method == origin.method
-                }
+                grants.at(businessPath, principal, origin.workspaceId).mayMutate(origin.endpointId, origin.method)
         if (!granted) throw ApiErrors.executionNotFound(origin.executionId.toString())
     }
 

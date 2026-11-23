@@ -73,6 +73,7 @@ class EndpointPostureSourceWiringTest {
                 authoringGuard = authoring,
                 workspaceLiveness = WorkspaceLiveness { true },
                 mutations = mockk(),
+                grants = mockk(),
             )
         withClue("authoring off: a DRAFT API version or pin is not served, whatever mail's posture says") {
             serve.servable(PipelineVersionStatus.DRAFT) shouldBe false

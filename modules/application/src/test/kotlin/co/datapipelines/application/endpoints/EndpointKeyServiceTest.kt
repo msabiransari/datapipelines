@@ -9,6 +9,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
@@ -20,11 +21,11 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import java.time.Instant
+import java.util.UUID
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
-import java.time.Instant
-import java.util.UUID
 
 /**
  * Minting a key together with its endpoint bindings (§5.2/§7.7).
@@ -44,7 +45,7 @@ class EndpointKeyServiceTest {
     private val bindings = mockk<EndpointKeyBindingRepository>(relaxed = true)
     private val audit = mockk<AuditEventSink>(relaxed = true)
     private val publishedEndpoints = mockk<PublishedEndpointRepository>()
-    private val service = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints)
+    private val service = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints, AuthoringGuard(true), ManagedEndpointKeys.NONE)
 
     @Test
     fun `an endpoint key is minted with its bindings, in one call`() {

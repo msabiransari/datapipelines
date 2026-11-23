@@ -112,6 +112,11 @@ data class LegacyEndpointColumns(
  * recreated route that later reuses the pattern (the grant follows the entity's id, and dies with
  * it). It can never shadow an inherited GET grant, and no later GET binding widens it: the two
  * grant shapes are resolved by method, never against each other (published-mutation-apis §2).
+ *
+ * [allowNamespaceWrites] (#1111, V69) is the GET row's deployment-local opt-in: while the deployment's authoring
+ * capability is on, this key may also call every live mutation route beneath [pathPrefix] where this node is the
+ * NEAREST node carrying any GET binding on the request path ([EndpointAuthorizer.allowsNamespaceWrites]). A mutation
+ * row never carries it (the table's CHECK); it never travels with promotion, and an ordinary bind never writes it.
  */
 data class EndpointKeyBinding(
     val pathPrefix: String,
@@ -121,4 +126,5 @@ data class EndpointKeyBinding(
     val createdAt: Instant,
     val method: EndpointMethod = EndpointMethod.GET,
     val endpointId: UUID? = null,
+    val allowNamespaceWrites: Boolean = false,
 )

@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.ManagedEndpointKeys
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
@@ -16,6 +17,7 @@ import co.datapipelines.auth.KeyKindNotMintableException
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -27,6 +29,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
@@ -40,9 +45,6 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
-import java.time.Duration
-import java.time.Instant
-import java.util.UUID
 
 /**
  * 091 — `/settings/api-keys` is a LINK now (ui-screens.md §4.10); 179 repointed it at the
@@ -238,7 +240,7 @@ class ApiKeysAdminControllerTest {
         ApiKeysAdminController(
             apiKeyService,
             apiKeyRepository,
-            EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints),
+            EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints, AuthoringGuard(true), ManagedEndpointKeys.NONE),
             publishing,
             ApiKeyRows(bindingRepository, dashboardBindingRepository),
             bindingRepository,

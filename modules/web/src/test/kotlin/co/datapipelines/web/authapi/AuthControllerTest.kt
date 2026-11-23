@@ -2,6 +2,7 @@ package co.datapipelines.web.authapi
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.ManagedEndpointKeys
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
@@ -14,6 +15,7 @@ import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.requestlimits.StrictRequestBodies
 import io.kotest.assertions.throwables.shouldThrow
@@ -21,13 +23,13 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import java.time.Instant
+import java.util.UUID
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
-import java.time.Instant
-import java.util.UUID
 
 /**
  * §16 over mocked services: own-key management, the create request's role (never scopes, #215),
@@ -48,7 +50,7 @@ class AuthControllerTest {
     private val auditSink = mockk<AuditEventSink>(relaxed = true)
     private val publishedEndpoints = mockk<co.datapipelines.application.endpoints.PublishedEndpointRepository>()
 
-    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints)
+    private val endpointKeys = EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints, AuthoringGuard(true), ManagedEndpointKeys.NONE)
     private val controller = AuthController(apiKeyService, apiKeyRepository, userService, endpointKeys)
 
     private val userId = UUID.randomUUID()

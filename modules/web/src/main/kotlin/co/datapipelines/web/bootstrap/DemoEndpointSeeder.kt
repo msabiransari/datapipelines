@@ -358,12 +358,11 @@ class DemoEndpointSeeder(
         (existing - wantedPaths).forEach { prefix -> keyService.unbind(actor, keyId, prefix) }
     }
 
-    /** Live `endpoint`-kind keys of the managed name, oldest first — the managed row is the first. */
-    private fun liveManagedKeys(demoId: UUID) =
-        keyRepository
-            .findByWorkspaceAndName(demoId, MANAGED_NAME)
-            .filter { it.kind == ApiKeyKind.ENDPOINT }
-            .sortedBy { it.createdAt }
+    /**
+     * Live `endpoint`-kind keys of the managed name, oldest first — the managed row is the first. The rule is
+     * [DemoManagedEndpointKey]'s, stated once (#1111: the namespace-writes refusal reads the same identity).
+     */
+    private fun liveManagedKeys(demoId: UUID) = DemoManagedEndpointKey.liveManagedKeys(keyRepository, demoId)
 
     /** Revokes every live managed key in the workspace; returns how many went. */
     private fun revokeManagedKeys(

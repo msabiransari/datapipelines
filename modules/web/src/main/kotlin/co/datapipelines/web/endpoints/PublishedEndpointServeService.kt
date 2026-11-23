@@ -1,9 +1,9 @@
 package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointAuthorizer
+import co.datapipelines.application.endpoints.EndpointGrants
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointMethod
-import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.EndpointServeAudit
@@ -61,7 +61,8 @@ import kotlin.time.Duration.Companion.seconds
  * `GET` is the branch that serves, unchanged in its order: session refusal → match → liveness → pointer → read-only
  * → authorise → validate → run. A non-GET method never runs in this build: it answers the session refusal, then the
  * VISIBILITY computation — a method is visible iff a live route of it matches AND the presenting key holds a grant
- * for it (the GET ancestor walk, or the mutation grant naming the route entity) — then the opaque `404` (nothing
+ * for it (the GET ancestor walk; the mutation grant naming the route entity, or on an authoring deployment the key's
+ * namespace-writes opt-in at the deciding node, #1111) — then the opaque `404` (nothing
  * visible) or `405` with `Allow` = exactly the visible methods, then the pin eligibility `503`, then the
  * `endpoint.mutations_disabled` `503` of `datapipelines.endpoints.mutations-enabled` (§7: refused BEFORE any durable
  * business work; both flag branches answer it in this build, with distinct messages, until #1039 replaces the gate
@@ -101,8 +102,8 @@ class PublishedEndpointServeService(
     private val versions: PublishedEndpointVersionRepository,
     /** #786 — the pinned pipeline, by its portable name, and the exact version's status. */
     private val pipelineRepository: PipelineRepository,
-    private val bindings: EndpointKeyBindingRepository,
-    private val authorizer: EndpointAuthorizer,
+    bindings: EndpointKeyBindingRepository,
+    authorizer: EndpointAuthorizer,
     private val readOnlyRule: ReadOnlyPipelineRule,
     private val pipelines: PipelineService,
     private val runner: RecordingExecutionRunner,
@@ -127,6 +128,12 @@ class PublishedEndpointServeService(
      * surface alone; a mutation then answers `503 endpoint.mutations_disabled` and nothing runs.
      */
     private val mutations: PublishedMutationService? = null,
+    /**
+     * #1111 — the one effective grant decision ([EndpointGrants]): GET's ancestor walk, and a mutation's exact route
+     * grant OR namespace grant. The bean in production; built from this service's own collaborators where a test builds
+     * the surface by hand, so both answer the same rule.
+     */
+    private val grants: EndpointGrants = EndpointGrants(bindings, authorizer, authoring),
 ) {
     private val log = LoggerFactory.getLogger(PublishedEndpointServeService::class.java)
 
@@ -361,7 +368,9 @@ class PublishedEndpointServeService(
 
     /**
      * The methods THIS key can call at [path]: a live route of the method whose grant the key holds — the GET
-     * ancestor walk for GET, an exact route-entity grant for a mutation (§4.4 "visible"). A path's entities share
+     * ancestor walk for GET; for a mutation an exact route-entity grant OR, on an authoring deployment, the key's
+     * namespace-writes opt-in at the deciding node (#1111, [EndpointGrants]) (§4.4 "visible"). The same decision runs
+     * before an idempotent retry is replayed, because a retry passes through here first. A path's entities share
      * one workspace (the conflict refusal is per method ACROSS workspaces, so a second workspace can never publish
      * at a matching pattern), which is why one liveness answer covers the map; a dead workspace's path is unknown
      * to every key, the 404 rule again.
@@ -383,15 +392,14 @@ class PublishedEndpointServeService(
         // unknown to every key, the 404 rule again.
         if (!workspaceLiveness.isActive(workspaceId)) return emptyMap()
 
-        val keyId = requireNotNull(principal.keyId) { "an API-key principal always carries its key id" }
-        val mutationGrants by lazy {
-            bindings.findMutationGrantsByKey(keyId, workspaceId).mapNotNull { it.endpointId }.toSet()
-        }
+        requireNotNull(principal.keyId) { "an API-key principal always carries its key id" }
+        // One snapshot for every method of this path: at most two binding reads per request (EndpointGrants).
+        val granted = grants.at(path, principal, workspaceId)
         return live.filterValues { endpoint ->
             if (endpoint.method == EndpointMethod.GET) {
-                authorize(path, principal, endpoint) == null
+                granted.read() is EndpointAuthorizer.Decision.Allowed
             } else {
-                endpoint.id in mutationGrants
+                granted.mayMutate(endpoint.id, endpoint.method)
             }
         }
     }
@@ -579,12 +587,9 @@ class PublishedEndpointServeService(
         principal: AuthenticatedPrincipal,
         endpoint: PublishedEndpoint,
     ): Outcome.Refused? {
-        val ancestors = EndpointPath.ancestors(path)
         // #191 — the endpoint's OWN workspace: the query already filters to it (D11 — filter in
         // the query), and the authorizer re-checks in memory as the fail-closed backstop.
-        val decision =
-            authorizer.authorize(path, principal, endpoint.workspaceId, bindings.findByPrefixes(ancestors, endpoint.workspaceId))
-        return when (decision) {
+        return when (val decision = grants.at(path, principal, endpoint.workspaceId).read()) {
             is EndpointAuthorizer.Decision.Allowed -> null
             is EndpointAuthorizer.Decision.Refused -> Outcome.Refused(HTTP_FORBIDDEN, decision.code, decision.message)
         }
