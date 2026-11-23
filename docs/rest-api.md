@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.135 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
+**Status:** v2.136 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-11-22
@@ -2369,7 +2369,10 @@ path with no binding on any ancestor serves no one until a key is bound to it** 
 A browser session is refused `401` before anything resolves — CSRF processing included. What is
 VISIBLE to the presenting key is, per method: the `GET` route iff the ancestor walk above admits
 it, and a mutation route iff the key holds that route's **exact grant** (one entity — method plus
-full pattern; never inherited, never the sibling method's). The refusal discipline is opaque: a
+full pattern; never inherited, never the sibling method's) **or**, on a deployment whose authoring capability is
+on, a **namespace opt-in** that decides the path (#1111: the key's own GET binding, marked "allow namespace
+writes", at the nearest node carrying any GET binding — [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings);
+set over §19.5). The two are one decision for the serve path, every identical retry and the polling below. The refusal discipline is opaque: a
 method that is not visible is simply absent — a `405 endpoint.method_not_allowed`'s `Allow` lists
 only the VISIBLE methods, and a path where NO method is visible answers the ordinary `404`
 `endpoint.not_found` with no `Allow`. A visible, granted mutation is then admitted as §19.3a states; the gate
@@ -2497,10 +2500,11 @@ answer is stored — a retry re-reads the execution and the result store, so res
 retention are independent; terminal status polling outlives the result.
 
 **Polling a mutation-started run.** `status_url` and `result_url` are the §19.3 paging routes under the concrete
-business path the client called. They serve only the INITIATING key, and only while it still holds the
-originating route-and-method grant — a write-only key polls its own run without any `GET` grant, and a `GET`
-grant on another route never substitutes. Another key, another route, another workspace, a revoked grant or a
-disabled route is the ordinary opaque `404`. The status projection relays no parameter values and no failure
+business path the client called. They serve only the INITIATING key, and only while it still holds a grant
+for the originating route and method — its exact grant, or a namespace opt-in that still decides the path on an
+authoring deployment (#1111) — a write-only key polls its own run without any `GET` grant, and a `GET`
+grant on another route never substitutes. Another key, another route, another workspace, a revoked grant (a
+withdrawn or suspended namespace opt-in included) or a disabled route is the ordinary opaque `404`. The status projection relays no parameter values and no failure
 text; a zero-caller run's result route answers `204`. A retry is re-authorised like a new request and reveals
 no prior result: a disabled or unpublished route is the opaque `404`, and so is a revoked grant when the key holds
 no other method on the path; when it still holds another, the retry is `405 endpoint.method_not_allowed` whose
@@ -2617,7 +2621,8 @@ names only the caller's own tree), and at serve time a binding decides only for 
 its own workspace ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)). The key is
 named by **`api_key_id`** (the `/api-keys` page's shape —
 unambiguous, workspace-scoped, `endpoint` kind required) or, kept for REST compatibility, by
-**`api_key_name`** — which resolves within the caller's OWN keys only, exactly as before:
+**`api_key_name`** — which resolves within the caller's OWN keys of the ACTIVE workspace only (#1111; before it, the
+first same-named key the caller owned in any workspace):
 `api_keys.name` carries no uniqueness constraint, so "the key named `ci`" is ambiguous
 deployment-wide and a surface that resolved it across owners would pick one person's credential
 to widen. Promotion carries endpoint rows and their bindings **of the source workspace, by key
@@ -2636,6 +2641,30 @@ endpoint.promotion.method_unsupported` (`details.unsupported_routes` naming each
 receiver refuses an entry it cannot import exactly with the same code
 ([Pipeline Contract §13.14](pipeline-contract.md#1314-published-endpoints)).
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
+
+**Allow namespace writes (#1111).** On the GET node shape (`method` omitted or `GET`) the binding body takes an
+optional **`allow`** — a strict JSON boolean, the "allow namespace writes" opt-in of
+[Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings). It is a REST-only, one-time setup step for
+a development deployment; no MCP tool and no Keys-page control writes it.
+
+| `allow` | Effect | Refusals (nothing written) |
+|---|---|---|
+| `true` | Creates the key's GET binding at the node already marked, or marks the existing one — one atomic statement. The key may then call every live `POST`, `PUT` and `DELETE` beneath the node while the deployment's authoring capability is on, routes published later included | `409 endpoint.authoring_disabled` (authoring off — a receiver); `400 endpoint.path_invalid` (malformed, or neither the root nor at or above a path the caller's workspace publishes); `403 endpoint.key_kind_refused` with `details.reason: "managed_key"` (the demo workspace's seeded public key) |
+| `false` | Clears the marker on the key's existing GET binding at the node; at a node where the key holds none, succeeds and creates nothing. Works with authoring off and after the last route under the node is gone | `400 endpoint.path_invalid` (malformed) |
+| omitted | The ordinary bind: creates an unmarked binding, or leaves an existing one — marker included — unchanged | as before |
+| `null`, `"true"`, `1`, an object… | — | `400 pipeline.execution.invalid_parameter_type`, `details.reason: "wrong_type"`, `details.path: "allow"` |
+| any value beside `method` `POST`/`PUT`/`DELETE` | — | `400 pipeline.execution.invalid_parameter_type`, `details.reason: "allow_with_method"`, `details.path: "allow"` — an exact grant never carries the marker |
+
+The explicit forms answer `201` with the three identifiers (`path_prefix`, `api_key_name`, `api_key_id`) plus
+**`allow`** — the marker as stored after the request — and **`bound`** — whether the key now holds the GET binding
+(`false` on both for a `false` at an absent node). The omitted form keeps the historical three-field answer.
+Repeating either explicit value is harmless. Each explicit request is audited `endpoint.key_namespace_writes`
+with the requested and the resulting state. `DELETE /api/v1/endpoints/bindings` (method `GET`) removes the
+binding and its opt-in together. Promotion carries the key's binding by name only: it lands unmarked on the
+receiver, a receiver's own marker survives a re-push, and a namespace opt-in never becomes exact grants — a
+promoted write under it is the opaque `404` on the receiver until the receiver's administrator grants the exact
+route (or dev granted it before promotion). The HTTP `Allow` response header is unrelated: it still lists the
+methods visible to the caller (§19.3).
 
 ### 19.5a Authoring a mutation route (#1040)
 
@@ -2705,7 +2734,7 @@ that it forwards `DELETE` content unchanged — or publishes the operation as a 
 | 401 | No or invalid API key; a browser session |
 | 403 | Key not bound / wrong workspace / wrong key kind |
 | 404 | No endpoint matches. **The same body whether the path is unknown or the endpoint is disabled** — otherwise the registry is enumerable one URL at a time |
-| 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
+| 405 | A method the addressed path does not serve THIS caller (#1037): some method is visible (a live route plus a grant the presenting key holds — exact, or since #1111 a namespace opt-in on an authoring deployment) but the requested one is not published there or not granted — `Allow` carries exactly the visible methods |
 | 406 | An `Accept` this surface cannot satisfy |
 | 409 | A mutation's `Idempotency-Key` reused with a different request (`idempotency.key_reused_for_different_request`); a mutation run that ended `FAILED`, `ABORTED` or `OUTCOME_UNKNOWN`, with its bounded code (§19.3a); a `GET` route whose pin is not side-effect-free at publish (`endpoint.pipeline_not_readonly`) |
 | 410 | A mutation run that succeeded and whose result has expired — `result.expired` with `status: SUCCESS` (#1039) |
@@ -3455,6 +3484,7 @@ A workspace administrator's temporary, private capture of what a published `POST
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-23 | v2.136 | 1111 (#1111, authoring namespace key) | **Additive.** §19.5: the binding body's optional strict boolean `allow` ("allow namespace writes") on the GET node shape — `true` creates or marks the key's GET binding (authoring deployments only; `409 endpoint.authoring_disabled`, `403 endpoint.key_kind_refused` `managed_key`, `400 endpoint.path_invalid`), `false` clears it and creates nothing at an absent node, omitted keeps the ordinary bind; explicit null, a non-boolean or `allow` beside a mutation method is `400 pipeline.execution.invalid_parameter_type` (`wrong_type` / `allow_with_method`); the explicit forms answer `allow` and `bound`. By-name binding resolves the caller's keys of the ACTIVE workspace only. §19.3 / §19.3a / §19.6: a mutation is visible, replayable and pollable under the union of the exact grant and a namespace opt-in that decides the path while authoring is on. No route, permission or status added. |
 | 2026-11-22 | v2.135 | 1043 (#1043) | **Additive.** New **§26 Runtime capture of published mutations**: `GET`/`POST /api/v1/endpoints/{id}/captures`, `POST …/captures/{captureId}/stop` and `GET /api/v1/executions/{id}/capture`, session-only (`execution.capture.manage` / `execution.capture.read`; every key refused), `Cache-Control: no-store`, the admission-time decision and its retry/replay reuse, the byte budget and omission markers, `capture_status` (`recording` / `complete` / `incomplete`) and the four `execution.capture.*` refusals. A published mutation's ordinary history keeps no node value (§19.3a's run) — status, codes, timing, counts and keys only. |
 | 2026-11-22 | v2.134 | 1040 (#1040) | **Additive.** §18.1's inventory gains `endpoint_capabilities` (methods, `exact_pin`, `request_body_modes`, `method_grants`); a receiver that predates it answers none and the sender refuses a method route before building the batch. §18.2's `endpoints` arm documents the method entry (`method`, `pipeline_version`, `pipeline_body_hash`, `request_body`, `grants`; `bindings` empty) imported on the EXACT pipeline version — absent route → v1 RELEASED, same pin → unchanged, another pin → a new RELEASED current version — and its refusals (`pipeline.import.version_conflict`, `endpoint.pipeline_version.not_found` / `.not_eligible`, `endpoint.promotion.key_missing`, `endpoint.promotion.method_unsupported`). §19.5's promotion paragraph replaces #1037's "only GET routes travel". New §19.5a: the authoring surface (`request_body` on every management read, REST and MCP; the version page and draft dialog; the Keys page's exact method grants), rollout, recovery, limits, repeat semantics and `DELETE` content under RFC 9110 §9.3.5 (supported: the application's own listener; no proxy promised). No route, permission or status added. |
 | 2026-11-21 | v2.133 | 1039 (#1039) | **§19 (additive — the mutation surface answered only `503` before):** published `POST`, `PUT` and `DELETE` are served (new §19.3a): a required `Idempotency-Key` (`400 endpoint.request.idempotency_key_invalid` entry), a durable reservation before any business SQL, replay from the original execution and pin, `409 idempotency.key_reused_for_different_request`, `503 idempotency.reservation_unavailable` (also a release or execution record the store did not confirm) / `endpoint.dependency_unavailable` (also the original pin's lookup on a retry or takeover), the fingerprint over the typed values the ORIGINAL pin binds (defaults applied), a retry's `406` result negotiation, the start-window takeover, the terminal-state table (`200`/`202`/`409`/`410`/`503`), polling from the initiating grant only (`204` for a zero-caller result; a retry under a revoked grant `404`, or `405` with a bounded `Allow` while another method stays visible) and `mutations-enabled` withholding fresh requests only. A form or multipart body is `415` unless it declares zero length. §19.6 gains the `204`, `409` and `410` rows; §19.7 no longer lists `POST`. The Status line, left at v2.128 by later rows, now reads the latest version. |
