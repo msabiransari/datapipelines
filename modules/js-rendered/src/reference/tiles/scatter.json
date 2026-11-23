@@ -1,0 +1,656 @@
+[
+ {
+  "id": "plain",
+  "title": "One series: a point per row",
+  "document": {
+   "display_name": "Revenue by visits",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     }
+    },
+    "title": {
+     "text": "Revenue by visits"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    12,
+    18,
+    25,
+    31,
+    40,
+    46,
+    52,
+    60,
+    67,
+    75,
+    82,
+    90
+   ],
+   "y": [
+    3.1,
+    4.0,
+    4.4,
+    5.2,
+    6.8,
+    6.1,
+    7.5,
+    8.2,
+    8.0,
+    9.6,
+    10.4,
+    11.2
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 12,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "series",
+  "title": "Three series, one switched off",
+  "document": {
+   "display_name": "Revenue by visits and channel",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Channel"
+     }
+    },
+    "title": {
+     "text": "Revenue by visits and channel"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    12,
+    18,
+    25,
+    31,
+    40,
+    46,
+    52,
+    60,
+    67,
+    75,
+    82,
+    90
+   ],
+   "y": [
+    3.1,
+    4.0,
+    4.4,
+    5.2,
+    6.8,
+    6.1,
+    7.5,
+    8.2,
+    8.0,
+    9.6,
+    10.4,
+    11.2
+   ],
+   "s": [
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner"
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE",
+   "s": "STRING"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [
+   "string:Partner"
+  ],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [
+    "string:Partner"
+   ],
+   "dots": 0,
+   "points": 8,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "bubble",
+  "title": "Bubbles: size by orders, larger first",
+  "document": {
+   "display_name": "Revenue by visits, sized by orders",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Channel"
+     },
+     "size": {
+      "field": "z"
+     }
+    },
+    "title": {
+     "text": "Revenue by visits, sized by orders"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    12,
+    18,
+    25,
+    31,
+    40,
+    46,
+    52,
+    60,
+    67,
+    75,
+    82,
+    90
+   ],
+   "y": [
+    3.1,
+    4.0,
+    4.4,
+    5.2,
+    6.8,
+    6.1,
+    7.5,
+    8.2,
+    8.0,
+    9.6,
+    10.4,
+    11.2
+   ],
+   "s": [
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner",
+    "Online",
+    "Retail",
+    "Partner"
+   ],
+   "z": [
+    5,
+    40,
+    12,
+    80,
+    22,
+    9,
+    60,
+    31,
+    15,
+    100,
+    48,
+    70
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE",
+   "s": "STRING",
+   "z": "BIGINT"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "points": 12,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "shade",
+  "title": "Coloured by margin (diverging)",
+  "document": {
+   "display_name": "Revenue by visits, coloured by margin",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     },
+     "color": {
+      "field": "m",
+      "aggregate": "sum",
+      "type": "quantitative",
+      "scale": "diverging",
+      "mid": 0
+     }
+    },
+    "title": {
+     "text": "Revenue by visits, coloured by margin"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    12,
+    18,
+    25,
+    31,
+    40,
+    46,
+    52,
+    60,
+    67,
+    75,
+    82,
+    90
+   ],
+   "y": [
+    3.1,
+    4.0,
+    4.4,
+    5.2,
+    6.8,
+    6.1,
+    7.5,
+    8.2,
+    8.0,
+    9.6,
+    10.4,
+    11.2
+   ],
+   "m": [
+    -4.0,
+    -2.5,
+    -1.0,
+    0.0,
+    0.8,
+    1.6,
+    2.2,
+    3.0,
+    -3.2,
+    1.1,
+    2.7,
+    -0.4
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE",
+   "m": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "points": 12,
+   "labels": "none"
+  }
+ },
+ {
+  "id": "empty",
+  "title": "No rows",
+  "document": {
+   "display_name": "Revenue by visits",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     }
+    },
+    "title": {
+     "text": "Revenue by visits"
+    }
+   }
+  },
+  "columns": {
+   "x": [],
+   "y": []
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data"
+  }
+ },
+ {
+  "id": "refused",
+  "title": "Nine series: refused",
+  "document": {
+   "display_name": "Revenue by visits and region",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Channel"
+     }
+    },
+    "title": {
+     "text": "Revenue by visits and region"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+   ],
+   "y": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18
+   ],
+   "s": [
+    "North",
+    "North",
+    "South",
+    "South",
+    "East",
+    "East",
+    "West",
+    "West",
+    "Central",
+    "Central",
+    "Online",
+    "Online",
+    "Retail",
+    "Retail",
+    "Partner",
+    "Partner",
+    "Other",
+    "Other"
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE",
+   "s": "STRING"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "code": "chart.too_many_series"
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "Hostile names (text, never markup)",
+  "document": {
+   "display_name": "<b>bold?</b> & <i>title</i>",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "config": {
+    "mark": {
+     "type": "scatter"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "quantitative",
+      "title": "Visits"
+     },
+     "y": {
+      "field": "y",
+      "type": "quantitative",
+      "title": "Revenue"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null,
+      "title": "Channel"
+     }
+    },
+    "title": {
+     "text": "<b>bold?</b> & <i>title</i>",
+     "subtitle": "<script>alert(0)</script>"
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "y": [
+    3,
+    4,
+    5,
+    5,
+    2,
+    6,
+    1,
+    6,
+    2
+   ],
+   "s": [
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(2)>",
+    "<img src=x onerror=alert(2)>",
+    "<img src=x onerror=alert(2)>",
+    "\"><svg onload=alert(3)>",
+    "\"><svg onload=alert(3)>",
+    "\"><svg onload=alert(3)>"
+   ]
+  },
+  "types": {
+   "x": "DOUBLE",
+   "y": "DOUBLE",
+   "s": "STRING"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0,
+   "points": 9,
+   "labels": "none"
+  }
+ }
+]

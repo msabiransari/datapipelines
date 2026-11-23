@@ -1,5 +1,6 @@
 package co.datapipelines.browser
 
+import com.google.gson.JsonParser
 import com.microsoft.playwright.BrowserContext
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.PlaywrightException
@@ -493,6 +494,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                 "bar" to { ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Bar") },
                 "line" to { withMark(ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Line"), "line") },
                 "area" to { withMark(ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Area"), "area") },
+                "scatter" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Scatter")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(SCATTER_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -505,5 +512,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         }
 
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
+
+        /** Scatter's config over the same two INTEGER columns: a point per row, no aggregate (brief 1062 A.8). */
+        const val SCATTER_CONFIG =
+            """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
+                """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
     }
 }
