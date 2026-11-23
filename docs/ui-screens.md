@@ -2098,16 +2098,18 @@ Two cards.
 1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
    for pipeline names and one for released versions (never a query per row, the rule
    `PipelineNames` was written for). Columns: path, pipeline, timeout, **API keys**.
-   - The method is always **GET**: `PublishedEndpointController` refuses everything else with
-     `Allow: GET`, so it is a fact about the surface rather than a column that could vary.
+   - The path cell shows the route's HTTP method. GET, POST, PUT and DELETE routes at the
+     same path have separate rows.
    - The version shown is the **released** one, not `pipelines.current_version`. An endpoint
      pins a PIPELINE and serves its latest release, so a draft number would describe something
      no call will ever run. A pipeline with no release renders "no released version" — an
      endpoint can outlive the release it was published against, and that is worth seeing.
-   - **API keys** names the keys bound at the nearest GET node in the route's declared path
-     tree, with the ancestor path shown for inherited bindings (#1114). For a mutation the
-     column lists grants for its exact route entity and method. The **Manage** link (admins
-     only) leads to the association editor on `/api-keys`.
+   - **API keys** shows the nearest binding on the concrete paths a GET route matches.
+     Inherited bindings show their source path. Bindings that apply to specific path parameter
+     values show those values and their source, with the closest match taking precedence.
+     A broader binding can apply to the remaining values (#1114). For a mutation the column
+     lists grants for its exact route entity and method. The **Manage** link (admins only)
+     leads to the association editor on `/api-keys`.
    - **There is no "calls in the last 24 h" column, and the mock has one.** Nothing in this
      system records endpoint serves: no counter column on `published_endpoints`, no Micrometer
      counter, no query. The only trace is an append-only `endpoint.served` audit row whose one

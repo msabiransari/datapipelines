@@ -162,7 +162,7 @@ class ApiConsoleRenderTest {
         served,
         draft,
         timeout,
-        boundKeyNames,
+        if (boundKeyNames.isEmpty()) emptyList() else listOf(ApiConsoleController.KeyGroup(boundKeyNames, label = null)),
         enabled,
     )
 
