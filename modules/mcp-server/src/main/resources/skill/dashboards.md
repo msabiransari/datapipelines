@@ -197,12 +197,13 @@ fourth its colour (`color` as a shade, as the bar's), or `color` can split the p
   per group) or pick another type. A row with a null `x`, `y` or size is not drawn.
 - `mark_count` counts the rows drawn.
 
-**On every type:**
-- **`fields` instead of `color`:** `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}],
-  "type": "quantitative", "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
+**On every type, except where an item names its types:**
+- **`fields` instead of `color`** (bar, line and area only; a scatter's `y` takes one `field` and no `aggregate`):
+  `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
+  "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  tooltip detail.
+  scatter's `y`, a tooltip detail.
 - **`encoding.tooltip`:** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
 - **`scale`:** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no

@@ -19,7 +19,8 @@ import org.junit.jupiter.api.Test
  * primitives; near a point (within 24 px) its ring in its series' colour and its card (D9), beyond 24 px neither; the
  * legend switch hides a series, the DOM is then the primitives the engine hands for the same input with that series
  * hidden, and the value axis's tick texts are no longer those before (the fixture `hidden-owner`: series A owns both
- * ends of y); the keys walk the points in row order. Nothing is asserted about the x axis's places (D4).
+ * ends of y); the keys walk the points in row order (D5: a point's key row is its input row), on one series and on two
+ * series whose rows interleave. Nothing is asserted about the x axis's places (D4).
  *
  * No application is booted. The serving code is [ChartTestPage]'s: by request interception on an origin of its own the
  * page receives the engine (scatter's template among its files), the interaction layer, `css/app.css` and its fonts,
@@ -28,7 +29,8 @@ import org.junit.jupiter.api.Test
  * ends with its console errors, page errors, dialogs, policy violations, aborted requests and `style` attributes at 0.
  *
  * The oracle is the test's: the cards' texts are written here from the fixtures' rows, the reach (24) and the ring's
- * share of the text size (0.25) from the look contract's §4.4 and brief 1052 D9, the key plan from the fixture's rows.
+ * share of the text size (0.25) from the look contract's §4.4 and brief 1052 D9, the key plan from the fixture's rows and
+ * D5 (one key row per input row).
  */
 class JsRenderedScatterBrowserTest {
     @Test
@@ -118,30 +120,58 @@ class JsRenderedScatterBrowserTest {
     }
 
     @Test
-    fun `A7 the keys walk the points in row order - a series per row, its points in the data's order`() {
+    fun `A7 the keys walk the points in row order - one series - a key row is the input row`() {
         open().use { s ->
-            s.draw("hidden-owner", 960, 540)
+            s.draw("one-series", 960, 540)
             s.leave()
             s.page.locator("#chart").focus()
-            // The plan, from the fixture's rows: A owns rows 0 and 1, B rows 2, 3 and 4 (series in the order they appear).
-            // Right enters at the first point and walks A; Down reaches B at its point nearest to A's last; Home takes B's
-            // first; Right walks B; past B's last, Right reaches B's legend entry.
-            val down = (s.read(Checks.NEAREST_JS, listOf(1, listOf(2, 3, 4)))["datum"] as Number).toInt()
-            val plan = listOf("ArrowRight" to 0, "ArrowRight" to 1, "ArrowDown" to down, "Home" to 2, "ArrowRight" to 3, "ArrowRight" to 4)
-            val visited = mutableListOf<Int>()
-            for ((key, datum) in plan) {
-                s.page.keyboard().press(key)
-                val r = s.read(Checks.KEY_JS, listOf(datum, HIDDEN_OWNER_SERIES[datum], HIDDEN_OWNER_Y[datum].toString()))
-                withClue("$key to row $datum: $r") { (r["problems"] as List<*>).shouldBeEmpty() }
-                visited += datum
-            }
-            s.page.keyboard().press("ArrowRight")
-            val entry = s.read(Checks.KEY_ENTRY_JS, "string:B")
-            withClue("past B's last point Right reaches B's legend entry: $entry") { entry["on"] shouldBe true }
+            // The plan (brief 1062 D5: a point's key row is its input row; the layer's rows, brief 1052 D8): Right enters at
+            // row 0; Down walks the rows to the last and stays there; Up goes back one. A row holds one point, so Left, Right
+            // (no legend, no cut text), Home and End stay on it.
+            val plan =
+                listOf("ArrowRight" to 0) + (1..11).map { "ArrowDown" to it } +
+                    listOf("ArrowDown" to 11, "ArrowUp" to 10, "ArrowLeft" to 10, "ArrowRight" to 10, "Home" to 10, "End" to 10)
+            val visited = s.walk(plan) { datum -> listOf("X", ONE_SERIES_X[datum].toString(), "Y", ONE_SERIES_Y[datum].toString()) }
             s.page.keyboard().press("Escape")
-            println("A.7 keys: rows visited $visited, then B's entry")
-            withClue("every row was visited") { visited.toSet() shouldBe (0..4).toSet() }
-            s.clean("after the keys' walk")
+            println("A.7 keys, one series: rows visited $visited")
+            withClue("every row was visited") { visited.toSet() shouldBe (0..11).toSet() }
+            s.clean("after the keys' walk on one series")
+        }
+    }
+
+    @Test
+    fun `A7 the keys walk the points in row order - interleaved series - two points at one place are each reached`() {
+        open().use { s ->
+            s.draw("same-place", 960, 540)
+            s.leave()
+            s.page.locator("#chart").focus()
+            // `same-place`: rows a, b, a; rows 0 and 1 at one place. Down and Up walk rows 0, 1, 2 across the two series and
+            // stay at either end; Right on a row of one point reaches the point's own legend entry.
+            val card = { datum: Int -> SAME_PLACE[datum] }
+            val first =
+                listOf(
+                    "ArrowRight" to 0,
+                    "ArrowDown" to 1,
+                    "ArrowDown" to 2,
+                    "ArrowDown" to 2,
+                    "ArrowUp" to 1,
+                    "ArrowUp" to 0,
+                    "ArrowUp" to 0,
+                    "ArrowLeft" to 0,
+                    "Home" to 0,
+                    "End" to 0,
+                )
+            val visited = s.walk(first, card)
+            s.page.keyboard().press("ArrowRight")
+            withClue("Right on row 0 (series a) reaches a's legend entry") { s.read(Checks.KEY_ENTRY_JS, "string:a")["on"] shouldBe true }
+            s.page.keyboard().press("Escape")
+            visited += s.walk(listOf("ArrowRight" to 0, "ArrowDown" to 1), card)
+            s.page.keyboard().press("ArrowRight")
+            withClue("Right on row 1 (series b) reaches b's legend entry") { s.read(Checks.KEY_ENTRY_JS, "string:b")["on"] shouldBe true }
+            s.page.keyboard().press("Escape")
+            println("A.7 keys, interleaved: rows visited $visited, then a's and b's entries")
+            withClue("every row was visited, both of the two at one place among them") { visited.toSet() shouldBe setOf(0, 1, 2) }
+            s.clean("after the keys' walk on interleaved series")
         }
     }
 
@@ -173,6 +203,24 @@ class JsRenderedScatterBrowserTest {
             x: Double,
             y: Double,
         ) = page.mouse().move(origin.first + x * scale.first, origin.second + y * scale.second)
+
+        /**
+         * Presses each key of [plan] and checks, after each, one focus ring centred on the point of the row it names and
+         * the card shown, the test's own [card] of that row; returns the rows visited.
+         */
+        fun walk(
+            plan: List<Pair<String, Int>>,
+            card: (Int) -> List<String>,
+        ): MutableList<Int> {
+            val visited = mutableListOf<Int>()
+            for ((key, datum) in plan) {
+                page.keyboard().press(key)
+                val r = read(Checks.KEY_JS, listOf(datum, card(datum)))
+                withClue("$key to row $datum: $r") { (r["problems"] as List<*>).shouldBeEmpty() }
+                visited += datum
+            }
+            return visited
+        }
 
         /** The pointer leaves the picture (to a corner of the viewport the picture does not cover). */
         fun leave() = page.mouse().move((VIEW_W - 4).toDouble(), (VIEW_H - 4).toDouble())
@@ -214,10 +262,20 @@ class JsRenderedScatterBrowserTest {
         private const val FAR_PX = 30.0
         private const val RING_SHARE = 0.25
 
-        /** `hidden-owner`'s rows (the fixture file): series and y by row; B's three rows are drawn with A hidden. */
-        private val HIDDEN_OWNER_SERIES = listOf("A", "A", "B", "B", "B")
-        private val HIDDEN_OWNER_Y = listOf(0, 100, 40, 50, 45)
+        /** `hidden-owner`'s B: its three rows are drawn with A hidden (the fixture file). */
         private const val B_ROWS = 3
+
+        /** `one-series`' rows (the fixture file): x and y by row; its card has no heading (no colour channel, D9). */
+        private val ONE_SERIES_X = (1..12).toList()
+        private val ONE_SERIES_Y = listOf(3, 7, 2, 9, 4, 8, 5, 1, 6, 10, 2, 7)
+
+        /** `same-place`'s cards by row, written from the fixture's rows (series a, b, a; x 5, 5, 8; y 5, 5, 2). */
+        private val SAME_PLACE =
+            listOf(
+                listOf("a", "X", "5", "Y", "5"),
+                listOf("b", "X", "5", "Y", "5"),
+                listOf("a", "X", "8", "Y", "2"),
+            )
 
         /** Every drawn form a saved scatter can take (series, size, shade, units, tooltip, log, time, hostile texts). */
         private val DOM_FIXTURES =
@@ -443,22 +501,10 @@ private object Checks {
     const val VALUE_TICKS_JS =
         """() => ({ ticks: [...document.querySelectorAll('#chart text.dp-tick[text-anchor="end"]')].map((t) => t.textContent) })"""
 
-    /** Of the rows `among`, the one whose point is nearest row `from`'s (the first of two equally near). */
-    val NEAREST_JS =
-        fn(
-            "[from, among]",
-            """
-            const a = byDatum(from);
-            let best = -1, bd = Infinity;
-            for (const d of among) { const b = byDatum(d), x = Math.hypot(b.shape.x - a.shape.x, b.shape.y - a.shape.y); if (x < bd) { bd = x; best = d; } }
-            return { datum: best };
-            """.trimIndent(),
-        )
-
-    /** After a key: one focus ring, around row `datum`'s point; the card's heading the series, its kept value y. */
+    /** After a key: one focus ring, centred on row `datum`'s point and around it; the card shown is `card`, whole. */
     val KEY_JS =
         fn(
-            "[datum, series, y]",
+            "[datum, card]",
             """
             const p = [], m = byDatum(datum);
             const rings = added().filter((e) => /\bdp-focus\b/.test(cls(e)));
@@ -466,10 +512,10 @@ private object Checks {
             else {
               const f = ["x", "y", "width", "height"].map((a) => Number(rings[0].getAttribute(a)));
               if (m.shape.x < f[0] || m.shape.x > f[0] + f[2] || m.shape.y < f[1] || m.shape.y > f[1] + f[3]) p.push("the focus ring " + f + " is not around row " + datum + "'s point");
+              if (!near(f[0] + f[2] / 2, m.shape.x, 0.02) || !near(f[1] + f[3] / 2, m.shape.y, 0.02)) p.push("the focus ring " + f + " is not centred on row " + datum + "'s point " + m.shape.x + "," + m.shape.y);
             }
             const c = shown();
-            if (c[0] !== series) p.push("the card's heading " + c[0] + ", the series " + series);
-            if (!c.includes(y)) p.push("the card " + JSON.stringify(c) + " has no " + y);
+            if (JSON.stringify(c) !== JSON.stringify(card)) p.push("the card " + JSON.stringify(c) + ", the row's " + JSON.stringify(card));
             return { problems: p, card: c };
             """.trimIndent(),
         )

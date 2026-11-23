@@ -236,15 +236,16 @@
    * clamped to the axes' ends (D4), filled with its series' colour or its shade's step, ringed in the canvas colour.
    * Every radius and the ring are scaled by the distance the frame kept (hand.pad), so no circle crosses the plot's
    * edge. With size the larger marks are drawn first. The lookup holds one entry per mark, in the rows' order; a mark's
-   * key row (brief 1052 D8) is its series' position, as the line's keys walk one series per row: Right and Left walk a
-   * series' points in the data's order, Down and Up reach the next or previous series.
+   * key row (brief 1052 D8) is its input's row number (brief 1062 D5), the number its datum carries, so the keys walk the
+   * points in the data's order: a row not drawn or of a hidden series leaves a gap, and no other row's number moves. Two
+   * points at one place are told apart by the keys only (look contract §4.4: the pointer shows the first, Up and Down
+   * reach each).
    */
   function marks(m, hand, h) {
-    var theme = h.theme, titles = new Map(), colours = new Map(), keyRows = new Map();
+    var theme = h.theme, titles = new Map(), colours = new Map();
     for (var s = 0; s < m.series.length; s++) {
       titles.set(m.series[s].id, m.series[s].title);
       colours.set(m.series[s].id, m.series[s].colour);
-      keyRows.set(m.series[s].id, s);
     }
     var asked = m.layout.pad(h), kept = hand.pad;
     var k = kept && asked > 0 ? Math.min(1, kept.x / asked, kept.y / asked) : 1;
@@ -257,7 +258,7 @@
       var cx = r2(xs.scale(clamp(w.x, xs.lo, xs.hi))), cy = r2(vs.scale(clamp(w.y, vs.lo, vs.hi)));
       var r = r2((m.sized ? w.d / 2 : point) * k);
       drawn.push({ at: drawn.length, d: m.sized ? w.d : 0, prim: P.circle({ role: "mark", cx: cx, cy: cy, r: r, fill: fill, color: css, stroke: "--chart-canvas", strokeColor: theme.css("--chart-canvas"), strokeWidth: ring, series: w.series, datum: w.row }) });
-      lookup.push({ series: w.series, datum: w.row, shape: { kind: "point", x: cx, y: cy, r: r }, row: keyRows.get(w.series), key: true, near: true, emphasis: "ring", card: card(m, w, i, fill, css, titles.get(w.series)) });
+      lookup.push({ series: w.series, datum: w.row, shape: { kind: "point", x: cx, y: cy, r: r }, row: w.row, key: true, near: true, emphasis: "ring", card: card(m, w, i, fill, css, titles.get(w.series)) });
     }
     if (m.sized) {
       drawn.sort(function (a, b) {

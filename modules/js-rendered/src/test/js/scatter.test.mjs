@@ -6,10 +6,14 @@
 //       x ends over every series (D4); authored domains; the axis titles and their unit; the two caps (D6, D10).
 //   A.3 the marks: centres at the handed scales' places of the clamped values; diameters by D5 (the extreme sizes as
 //       literal numbers); the ring; no circle crossing the plot's edge over the sweep; larger marks first.
-//   A.4 the lookup and the card (D9).   A.5 the legend, the scale and a hidden series (D6, D7, D8; I7).
+//   A.4 the lookup and the card (D9); the keys (D5: a point's key row is its input row), their plan read from the
+//       interaction layer's own pure function (keyTarget), which this module does not own and only loads.
+//   A.5 the legend, the scale and a hidden series (D6, D7, D8; I7).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { engine, inputOf, chartFixtures } from "./engine.mjs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { engine, inputOf, chartFixtures, MODULE } from "./engine.mjs";
 import { plant } from "./forms.mjs";
 import { expectedScatterMarks, WIDTHS, HEIGHTS, TOL } from "./geometry.mjs";
 
@@ -18,6 +22,13 @@ const SPY_FROM = 'R.type("scatter", { channels: CHANNELS, model: model, marks: m
 const SPY_TO = 'R.type("scatter", { channels: CHANNELS, model: model, marks: function (m, hand, h) { if (R.spy) R.spy(m, hand); return marks(m, hand, h); },';
 const E = engine((s) => plant(s, SCATTER, SPY_FROM, SPY_TO));
 const FX = Object.fromEntries(chartFixtures().filter((f) => f.wire === "scatter").map((f) => [f.name, f.fixture]));
+/**
+ * The interaction layer's pure half, loaded as its own Node test loads it (modules/web chart-interactions.test.mjs). It
+ * is an input of jsRenderedTest (build.gradle.kts), so a change of the layer runs this suite again.
+ */
+const LAYER = join(MODULE, "../web/src/main/resources/static/js/datapipelines-chart-interactions.js");
+const I = createRequire(import.meta.url)(LAYER)._internal;
+const KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
 
 /** A render with what the template was handed: {r, m, hand} (m and hand are null when marks was not called). */
 function draw(fx, w = 960, h = 540, extra = {}) {
@@ -290,13 +301,8 @@ test("A.4: one entry per mark, (series, datum) unique and carried by a mark of t
       assert.equal(e.emphasis, "ring");
       assert.equal(e.shape.kind, "point");
     }
-    // The keys (brief 1052 D8): a key row per series, at the series' position; in a row, the points in the data's order.
-    const ids = r.summary.series.map((x) => x.id);
-    for (const e of r.index.marks) assert.equal(e.row, ids.indexOf(e.series), name + ": " + e.datum + "'s key row is its series' position");
-    for (const row of new Set(r.index.marks.map((e) => e.row))) {
-      const datums = r.index.marks.filter((e) => e.row === row).map((e) => e.datum);
-      same(datums, datums.slice().sort((a, b) => a - b), name + ": the keys' order in row " + row);
-    }
+    // The keys (brief 1062 D5): a point's key row is its input's row number, the number its datum carries.
+    for (const e of r.index.marks) assert.equal(e.row, e.datum, name + ": row " + e.datum + "'s key row is " + e.datum + ", got " + e.row);
     n += r.index.marks.length;
   }
   assert.ok(n > 1100, "entries: " + n);
@@ -359,7 +365,88 @@ test("A.4: a row drawn at an axis's end shows its TRUE values; two points at one
   const s = draw(FX["same-place"]).r, [a, b] = s.index.marks;
   same([a.shape.x, a.shape.y], [b.shape.x, b.shape.y], "rows 0 and 1 share a place");
   assert.equal(E.lookup.at(s.index, a.shape.x, a.shape.y, 24), 0, "the pointer shows the first");
-  same(s.index.marks.map((m) => [m.datum, m.row, m.key]), [[0, 0, true], [1, 1, true], [2, 0, true]], "the keys reach each: a's rows 0 and 2 in row 0, b's row 1 in row 1");
+  same(s.index.marks.map((m) => [m.datum, m.row, m.key]), [[0, 0, true], [1, 1, true], [2, 2, true]], "the keys reach each: one key row per input row");
+});
+
+// ------------------------------------------------------------------------------------------------------ D5 the keys
+
+/** The interaction layer's model of a draw, as the page builds it. */
+const layerModel = (r) => I.modelOf(E, r, E.measure.measurer(null).fn);
+/** A target as the plans below write it: a mark by its datum, a legend entry as "entry:<id>", a cut text as "cut:<n>". */
+const said = (t) => (t === null ? "none" : t.kind === "mark" ? String(t.datum) : t.kind === "entry" ? "entry:" + t.id : "cut:" + t.n);
+
+/**
+ * The key plan the layer gives (keyTarget) from every drawn point, key by key, in KEYS' order, written as one line per
+ * point "<datum>: <Left> <Right> <Up> <Down> <Home> <End>"; then the target the first key enters at. The plans in the
+ * test below are pinned from the rule (D5 with the layer's rows of brief 1052 D8), not from the function.
+ */
+function plan(r) {
+  const m = layerModel(r), lines = [];
+  for (const e of r.index.marks) {
+    const from = { kind: "mark", id: e.series, datum: e.datum };
+    lines.push(e.datum + ": " + KEYS.map((k) => said(I.keyTarget(m, from, k).target)).join(" "));
+  }
+  return { lines, enter: said(I.keyTarget(m, null, "ArrowRight").target) };
+}
+
+test("D5: the keys walk the points in the data's order: the plan of keyTarget, key by key, for the four cases", () => {
+  // (1) One series, twelve rows, no legend: Up and Down walk the rows; a row holds one target, so Left, Home and End
+  // stay on it, and Right stays too (no legend entry, no cut text to go to).
+  same(plan(draw(FX["one-series"]).r), {
+    lines: [
+      "0: 0 0 0 1 0 0", "1: 1 1 0 2 1 1", "2: 2 2 1 3 2 2", "3: 3 3 2 4 3 3", "4: 4 4 3 5 4 4", "5: 5 5 4 6 5 5",
+      "6: 6 6 5 7 6 6", "7: 7 7 6 8 7 7", "8: 8 8 7 9 8 8", "9: 9 9 8 10 9 9", "10: 10 10 9 11 10 10", "11: 11 11 10 11 11 11",
+    ],
+    enter: "0",
+  }, "one series");
+  // (2) Two series whose rows interleave (a, b, a), rows 0 and 1 at one place: Down and Up reach each of the two; Right
+  // on a row of one goes to the point's own legend entry.
+  same(plan(draw(FX["same-place"]).r), {
+    lines: ["0: 0 entry:string:a 0 1 0 0", "1: 1 entry:string:b 0 2 1 1", "2: 2 entry:string:a 1 2 2 2"],
+    enter: "0",
+  }, "interleaved series");
+  // (3) A series hidden by the legend switch (A, rows 0 and 1): its points are no targets; B keeps rows 2, 3 and 4.
+  same(plan(draw(FX["hidden-owner"], 960, 540, { hidden: ["string:A"] }).r), {
+    lines: ["2: 2 entry:string:B 2 3 2 2", "3: 3 entry:string:B 2 4 3 3", "4: 4 entry:string:B 3 4 4 4"],
+    enter: "2",
+  }, "a hidden series");
+  // (4) Rows not drawn (a null x, a null y, a null size: rows 1, 2 and 3) among rows drawn: the numbers keep their gap.
+  same(plan(draw(FX["null-rows"]).r), { lines: ["0: 0 0 0 4 0 0", "4: 4 4 0 4 4 4"], enter: "0" }, "rows not drawn");
+});
+
+test("D5: a key row is the ORIGINAL input row: rows not drawn and a hidden series leave gaps, no number moves", () => {
+  same(draw(FX["null-rows"]).r.index.marks.map((e) => [e.datum, e.row]), [[0, 0], [4, 4]], "rows 1 to 3 are not drawn");
+  same(draw(FX["hidden-owner"], 960, 540, { hidden: ["string:A"] }).r.index.marks.map((e) => [e.datum, e.row]), [[2, 2], [3, 3], [4, 4]], "A hidden");
+  same(draw(FX["domain-linear"]).r.index.marks.map((e) => e.row), draw(FX["domain-linear"]).r.index.marks.map((e) => e.datum), "rows outside a domain keep theirs");
+});
+
+test("D5: every drawn point of every shown series is reached by the keys from no target, on every fixture", () => {
+  const keyOf = (t) => (t.kind === "mark" ? t.id + "@" + t.datum : said(t));
+  let reached = 0;
+  const cases = Object.entries(FX).map(([n, fx]) => [n, fx, []]);
+  cases.push(["hidden-owner A off", FX["hidden-owner"], ["string:A"]], ["hidden-wide Wide off", FX["hidden-wide"], ["string:Wide"]]);
+  for (const [name, fx, hidden] of cases) {
+    for (const [w, h] of [[960, 540], [360, 240]]) {
+      const r = draw(fx, w, h, { hidden }).r;
+      if (r.state !== "rendered") continue;
+      const m = layerModel(r), seen = new Map(), queue = [null];
+      while (queue.length > 0) {
+        const t = queue.shift();
+        for (const k of KEYS) {
+          const next = I.keyTarget(m, t, k).target;
+          if (next !== null && !seen.has(keyOf(next))) {
+            seen.set(keyOf(next), next);
+            queue.push(next);
+          }
+        }
+      }
+      const want = r.index.marks.map((e) => e.series + "@" + e.datum).sort();
+      same([...seen.keys()].filter((k) => k.includes("@")).sort(), want, `${name} ${w} x ${h}: every point reached`);
+      reached += want.length;
+    }
+  }
+  console.log("D5 reached: " + reached + " points");
+  assert.ok(reached > 2000, "points reached: " + reached);
 });
 
 // ----------------------------------------------------------------------------------------- A.5 legend and scale

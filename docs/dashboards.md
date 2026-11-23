@@ -180,20 +180,21 @@ each as `{field: [values]}` (§2.1.2).
   after the value on the card, never on a tick. At most 1,000 rows drawn (`chart.too_many_marks` above); aggregate in
   the query when there are more.
 
-  **On every family's shapes (#989):**
-  - `y.fields` (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each field a series in the list's
-    order; it replaces `field`, and `color` is then refused (the fields are the series). With `aggregate: "count"`
-    neither is written.
+  **On every family's shapes, except where an item names its families (#989):**
+  - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
+    field a series in the list's order; it replaces `field`, and `color` is then refused (the fields are the series).
+    With `aggregate: "count"` neither is written. Scatter's `y` is a position: one `field`, no `fields`, no
+    `aggregate`.
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
-    quantitative position and on a tooltip detail.
+    quantitative position (scatter's `x` and `y` among them) and on a tooltip detail.
   - `encoding.tooltip`: at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
     show.
   - `scale: {domain?, type?: "linear" | "log", zero?}` on the value and on a quantitative position. `zero: true`
     makes the axis hold zero; a bar's and an area's value always holds it (`zero: false` is refused by their
-    schema), a line's does not by default. `type: "log"` is admitted on an unstacked bar and on a line; a value at
-    or below zero is then not drawn (`chart.rule.log-nonpositive`, §6.1). A shape inside a layer object is judged by
-    that layer's mark (bar and area hold zero, line and point do not; log is refused on an area), any other by the
-    chart's family.
+    schema), a line's does not by default, nor either axis of a scatter. `type: "log"` is admitted on an unstacked bar,
+    on a line and on both axes of a scatter; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
+    §6.1). A shape inside a layer object is judged by that layer's mark (bar and area hold zero, line and point do
+    not; log is refused on an area), any other by the chart's family.
 
   **The skeleton's shapes (#1050):** `shade` (above) and three shapes used by types that come later: `size`
   `{field, range?}` (a mark's diameter by a numeric field, `range` two numbers from 4 to 64, increasing:
