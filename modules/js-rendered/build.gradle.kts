@@ -6,8 +6,9 @@
 //
 // Two Node tasks (record §5.5, brief 985 D10):
 //   jsRenderedTest — the engine's Node suite (`node --test`, src/test/js/*.test.mjs). A plain, CACHEABLE task with a
-//     CLOSED input list: the engine (src/main/resources), the tests (src/test/js), the fixtures (src/test/fixtures) and
-//     the `node --version` string; its one output is the counts file. A recorded green run (up to date here, or from
+//     CLOSED input list: the engine (src/main/resources), the tests (src/test/js), the fixtures (src/test/fixtures), the
+//     interaction layer's one file that scatter.test.mjs loads (modules/web) and the `node --version` string; its one
+//     output is the counts file. A recorded green run (up to date here, or from
 //     the build cache under --build-cache) is not run again for the same inputs (R15); an edit outside those inputs
 //     never re-runs it. A machine without node FAILS it (unlike modules/web's editorJsTest, which skips): the engine
 //     has no other test of its geometry.
@@ -78,6 +79,12 @@ tasks.register("jsRenderedTest") {
     inputs.dir(engineResources).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("engine")
     inputs.dir(jsTests).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("tests")
     inputs.dir(jsFixtures).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("fixtures")
+    // scatter.test.mjs pins the keys' plan through the interaction layer's pure half (brief 1062 r2 R1), a file of
+    // modules/web: an input, so a change of the layer runs this cached suite again instead of serving its old result.
+    inputs
+        .file(rootProject.file("modules/web/src/main/resources/static/js/datapipelines-chart-interactions.js"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("interactionLayer")
     inputs.property("nodeVersion", nodeVersion)
     outputs.file(jsRenderedTestResult).withPropertyName("result")
     outputs.cacheIf { true }
@@ -335,7 +342,7 @@ val jsRenderedReference =
             if (sinks.values.any { it != 0 }) throw GradleException("jsRenderedReference: reference.js names a markup or code sink: $sinks")
 
             // 5. The tiles: one file per type, every tile with its hand-written expect.
-            listOf("bar", "line", "area").forEach { wire ->
+            listOf("bar", "line", "area", "scatter").forEach { wire ->
                 @Suppress("UNCHECKED_CAST")
                 val tiles = groovy.json.JsonSlurper().parse(File(source, "tiles/$wire.json")) as List<Map<String, Any?>>
                 val missing = tiles.filter { it["expect"] !is Map<*, *> || (it["expect"] as Map<*, *>).isEmpty() }.map { it["id"] }

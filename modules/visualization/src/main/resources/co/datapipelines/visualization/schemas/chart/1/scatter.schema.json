@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/scatter.schema.json",
+  "$comment": "Lane 1062 (design record 2026-11-14-js-rendered-charts §4.2, §4.5 row scatter). Served at /schemas/chart/1/scatter.schema.json.",
+  "title": "datapipelines chart document, version 1, family scatter",
+  "description": "A skeleton document whose config is a scatter config (record §4.5 row scatter): one point per row over two continuous axes, no aggregation; a row with a null x or y is not drawn. With size it is the bubble chart.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "scatter"
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "skeleton.schema.json#/$defs/position"
+        },
+        "y": {
+          "$ref": "#/$defs/y"
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        },
+        "size": {
+          "$ref": "skeleton.schema.json#/$defs/size"
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
+        }
+      }
+    },
+    "y": {
+      "description": "The skeleton's position narrowed to a number axis: the value side of the shared layout has no time form (#1067).",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/position"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "quantitative"
+        }
+      }
+    },
+    "color": {
+      "description": "Series by a column's values (nominal, ordinal), or colour by value (quantitative: the shade, one series). The object's own type selects which, so a refusal names the one it meant.",
+      "if": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "quantitative"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/$defs/shade"
+      },
+      "else": {
+        "$ref": "#/$defs/series"
+      }
+    },
+    "shade": {
+      "description": "The skeleton's shade: a point's value is the aggregate over its one row (write sum); sequential or diverging around mid.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/shade"
+        }
+      ]
+    },
+    "series": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legend"
+        }
+      }
+    }
+  }
+}

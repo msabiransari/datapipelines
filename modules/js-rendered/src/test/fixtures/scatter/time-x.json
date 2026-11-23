@@ -1,0 +1,72 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "a time x (DATE) with a month format; a text that is not a date is a null position",
+ "document": {
+  "display_name": "time-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal",
+     "title": "Day",
+     "format": "month"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    }
+   },
+   "title": {
+    "text": "time-x"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-15",
+   "2024-02-10",
+   "2024-03-05",
+   "2024-04-20",
+   "2024-05-01",
+   "not a date"
+  ],
+  "y": [
+   3,
+   5,
+   2,
+   8,
+   6,
+   4
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "y": "DECIMAL"
+ }
+}

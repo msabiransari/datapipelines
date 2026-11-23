@@ -23,10 +23,10 @@ test("the test types' sweep is not vacuous (floors), and the product's fixture s
   for (const n of NAMES) assert.ok(n.startsWith("test_"), n + " starts with test_");
   // The underscore directory keeps them out of chartFixtures() (G6's count: 91 at brief 1050's base, and its twelve
   // shaded bars; brief 1053's fifteen two-sided bars and one sequential bar of seven steps; brief 1011's bar and area
-  // stacks beyond the number range).
+  // stacks beyond the number range; brief 1062's thirty-five scatter fixtures).
   const product = chartFixtures();
   assert.equal(product.filter((f) => f.wire.startsWith("test_") || f.wire === "_types").length, 0);
-  assert.equal(product.length, 121);
+  assert.equal(product.length, 156);
 });
 
 const seen = { pictures: 0, rendered: 0, texts: 0, marks: 0, levels: new Set(), states: new Set() };

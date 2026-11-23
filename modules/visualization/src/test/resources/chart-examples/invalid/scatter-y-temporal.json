@@ -1,0 +1,69 @@
+{
+ "display_name": "scatter-y-temporal",
+ "description": "brief 1062 D2: y is a number axis (#1067: no time form on the value side)",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "day",
+     "type": "DATE"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "weight",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "margin",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING"
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "scatter"
+  },
+  "encoding": {
+   "x": {
+    "field": "units",
+    "type": "quantitative",
+    "title": "Units"
+   },
+   "y": {
+    "field": "day",
+    "type": "temporal"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

@@ -87,7 +87,37 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter")
+    }
+
+    @Test
+    fun `scatter's descriptor is two positions, a series or a shade, a size and the tooltip, under the point policy`() {
+        val position = mapOf("node" to "shape", "name" to "position")
+        ChartType.SCATTER.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to true, "node" to position),
+                mapOf("key" to "y", "required" to true, "node" to position),
+                mapOf(
+                    "key" to "color",
+                    "required" to false,
+                    "node" to
+                        mapOf(
+                            "node" to "oneOf",
+                            "of" to
+                                listOf(
+                                    mapOf("shape" to "series", "types" to listOf("nominal", "ordinal")),
+                                    mapOf("shape" to "shade", "types" to listOf("quantitative")),
+                                ),
+                        ),
+                ),
+                mapOf("key" to "size", "required" to false, "node" to mapOf("node" to "shape", "name" to "size")),
+                mapOf(
+                    "key" to "tooltip",
+                    "required" to false,
+                    "node" to mapOf("node" to "list", "min" to 0, "max" to 6, "of" to mapOf("node" to "shape", "name" to "detail")),
+                ),
+            )
+        ChartType.SCATTER.policy shouldBe ChartMarkPolicy.POINT
     }
 
     @Test

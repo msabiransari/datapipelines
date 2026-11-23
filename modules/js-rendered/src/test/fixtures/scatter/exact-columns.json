@@ -1,0 +1,79 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "x, y and size from exact columns (BIGINTEGER, BIGDECIMAL): placed by Number(text), written from the text",
+ "document": {
+  "display_name": "exact-columns",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "BIGINTEGER",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "BIGDECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "z",
+      "type": "BIGINTEGER",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "size": {
+     "field": "z"
+    }
+   },
+   "title": {
+    "text": "exact-columns"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "9007199254740993",
+   "9007199254740995",
+   "9007199254741001"
+  ],
+  "y": [
+   "1.25",
+   "3.50",
+   "2.125"
+  ],
+  "z": [
+   "1",
+   "12345678901234567890",
+   "5"
+  ]
+ },
+ "types": {
+  "x": "BIGINTEGER",
+  "y": "BIGDECIMAL",
+  "z": "BIGINTEGER"
+ }
+}

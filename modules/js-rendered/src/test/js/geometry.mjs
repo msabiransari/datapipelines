@@ -128,6 +128,34 @@ export function expectedLineMarks(fx, hiddenIds) {
 }
 
 /**
+ * I3's expected count for a scatter fixture (brief 1062 D3, D11), computed by this test from the delivered columns,
+ * never by the engine: one mark per row, no aggregation. A row is no mark when its series is null; when its x or y is
+ * null (a time x: not a date text "YYYY-MM-DD…"), or its size is null where the chart has one; when x, y or the size is
+ * not a finite number (an exact column's text read by Number); on a log axis, when its value is 0 or less. A shade's
+ * value never removes a row. The rows of a hidden series are left out.
+ */
+export function expectedScatterMarks(fx, hiddenIds) {
+  const e = fx.document.config.encoding, x = e.x, y = e.y, given = e.color || null, size = e.size || null;
+  const color = given !== null && given.type !== "quantitative" ? given : null;
+  const col = (f) => (f && Object.prototype.hasOwnProperty.call(fx.columns, f) ? fx.columns[f] : []);
+  const X = col(x.field), Y = col(y.field), C = color ? col(color.field) : null, Z = size ? col(size.field) : null;
+  const absent = (v) => v === null || v === undefined;
+  const logX = x.type !== "temporal" && x.scale && x.scale.type === "log", logY = y.scale && y.scale.type === "log";
+  let n = 0;
+  for (let i = 0; i < Y.length; i++) {
+    if (C && absent(C[i])) continue;
+    if (absent(X[i]) || absent(Y[i]) || (Z && absent(Z[i]))) continue;
+    if (x.type === "temporal" && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(String(X[i]))) continue;
+    const xn = x.type === "temporal" ? 1 : Number(X[i]), yn = Number(Y[i]), zn = Z ? Number(Z[i]) : 0;
+    if (!Number.isFinite(xn) || !Number.isFinite(yn) || !Number.isFinite(zn)) continue;
+    if ((logX && !(xn > 0)) || (logY && !(yn > 0))) continue;
+    const sid = C ? typeof C[i] + ":" + String(C[i]) : "measure";
+    if (!hiddenIds.includes(sid)) n++;
+  }
+  return n;
+}
+
+/**
  * D7's widths and heights: every level is met. The record's three heights (100, 200, 480) and, since #985 R1, the
  * compact and full level heights themselves (140, 240), where the refusal found texts meeting and leaving the frame.
  */
