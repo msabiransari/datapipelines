@@ -599,11 +599,15 @@ class AuthoringNamespaceKeyIntegrationTest {
     @Test
     @Order(35)
     fun `the database refuses the opt-in on an exact route grant`() {
+        // Self-contained: the row is this test's own INSERT, so the refusal can never pass vacuously over zero rows (an
+        // UPDATE of an earlier test's grant did, whenever that test had not written it). PostgreSQL evaluates the CHECK
+        // before the primary key, so an existing grant of the same key at the route cannot answer first.
         val refused =
             shouldThrow<SQLException> {
                 sql(
-                    "UPDATE endpoint_key_bindings SET allow_namespace_writes = TRUE " +
-                        "WHERE api_key_id = '${reader.id}' AND method = 'POST'",
+                    "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, method, endpoint_id, created_by, " +
+                        "allow_namespace_writes) VALUES ('$ORDERS', '${reader.id}', '$DEFAULT_WORKSPACE', 'POST', " +
+                        "'${routes.getValue("orders POST")}', '$ADMIN_USER', TRUE)",
                 )
             }
         refused.message.orEmpty() shouldContain "chk_endpoint_key_bindings_namespace_writes"
