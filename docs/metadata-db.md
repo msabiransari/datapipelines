@@ -764,7 +764,7 @@ CREATE INDEX idx_endpoint_key_bindings_endpoint ON endpoint_key_bindings(endpoin
   ```
 
   It reads no key hash, prefix material or request data. Add `AND k.workspace_id = b.workspace_id` to list only rows the serve path can honour (below).
-- **Rows whose key belongs to another workspace are ignored (#1111).** Every binding read the serve path makes joins the key and requires `k.workspace_id = b.workspace_id`, so a mismatched row neither authorises nor shadows: it is excluded from the deciding-node walk and from exact authorization, and the legitimate nearest ancestor decides as if it were absent. No supported write creates such a row (every bind resolves the key in the caller's active workspace); a historical one is kept for inspection, not deleted at upgrade. **Count-only preflight** for an operator's own database:
+- **Rows whose key belongs to another workspace are ignored (#1111).** Every binding read that authorises (the serve path's node walk and exact grants, run polling) or exports (the promotion batch) joins the key and requires `k.workspace_id = b.workspace_id`, so a mismatched row neither authorises, shadows nor travels: it is excluded from the deciding-node walk and from exact authorization, and the legitimate nearest ancestor decides as if it were absent. No supported write creates such a row (every bind resolves the key in the caller's active workspace); a historical one is kept for inspection, not deleted at upgrade. **Count-only preflight** for an operator's own database:
 
   ```sql
   SELECT count(*) FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE k.workspace_id <> b.workspace_id

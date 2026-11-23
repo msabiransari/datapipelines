@@ -312,7 +312,8 @@ class EndpointPersistenceIntegrationTest {
             INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
             VALUES (:id, :owner, :owner, 'foreign key', 'x', :ws, 'endpoint', 'api_caller')
             """.trimIndent(),
-            mapOf("id" to foreignKey, "owner" to userId, "ws" to workspaceId),
+            // #1111: the foreign workspace's OWN key — a key of another workspace bound here is a mismatched row (below).
+            mapOf("id" to foreignKey, "owner" to userId, "ws" to foreignWorkspace),
         )
         jdbc.update(
             "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by)" +
@@ -330,6 +331,18 @@ class EndpointPersistenceIntegrationTest {
         bindings.findByWorkspace(workspaceId).map { it.pathPrefix } shouldContainExactlyInAnyOrder listOf("/lending", "/lending/home")
         bindings.findByWorkspace(foreignWorkspace).map { it.apiKeyId } shouldBe listOf(foreignKey)
         bindings.findByWorkspace(UUID.randomUUID()).shouldBeEmpty()
+
+        // #1111: a row whose key belongs to ANOTHER workspace than the row (no supported write makes one) is excluded in
+        // SQL from every read the serve path and promotion make — it answers in neither workspace.
+        jdbc.update(
+            "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by)" +
+                " VALUES ('/lending/home', :key, :ws, :owner)",
+            mapOf("key" to foreignKey, "ws" to workspaceId, "owner" to userId),
+        )
+        bindings.findByPrefixes(listOf("/lending/home", "/lending", "/"), workspaceId).map { it.apiKeyId } shouldContainExactlyInAnyOrder
+            listOf(keyId, keyId)
+        bindings.findByWorkspace(workspaceId).map { it.apiKeyId } shouldContainExactlyInAnyOrder listOf(keyId, keyId)
+        bindings.findByPrefixes(listOf("/lending/home"), foreignWorkspace).shouldBeEmpty()
     }
 
     @Test
