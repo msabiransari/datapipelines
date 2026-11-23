@@ -64,6 +64,11 @@ internal object PipelineToolPayloads {
                 // 140 — the §3.3 release checks, passed through verbatim: validation is the
                 // server's (§12.12), exactly as for nodes; the tool assembles, never judges.
                 args.listArg("checks")?.let { put("checks", it) }
+                // #1100 — the §3.4 request-body declaration, forwarded as the schema admitted it: the
+                // shared input schema owns its shape (an object; `required` a JSON boolean) and the
+                // contract owns its meaning (`{}` and unknown inner keys read as `{"required": false}`).
+                // Absent, the document declares no body — on an update that removes the declaration.
+                args.objectArg("request_body")?.let { put("request_body", it) }
             }
         return ExecutorJson.write(body)
     }
@@ -129,6 +134,33 @@ internal object PipelineToolPayloads {
             "declaration point: the full parameter map, defaults applied, is the render context for every template " +
             "the pipeline references."
 
+    /** The §6.2.4 `request_body` description (#1100, pipeline-contract §3.4), restated verbatim by both tools. */
+    const val REQUEST_BODY_DESCRIPTION: String =
+        "Optional declaration that the pipeline accepts ONE JSON object or array of objects per execution " +
+            "(pipeline-contract §3.4) — supplied apart from parameters (pipelines_execute request_body) and read " +
+            "only by a SCRIPT node whose inputs bind '@request_body'; such a node is refused without this " +
+            "declaration. required is a JSON boolean, false by default: true refuses an execution that supplies " +
+            "no body, false lets it run with the input absent. {} declares an optional body; unknown inner keys " +
+            "are ignored. Omit request_body for a pipeline that takes no body — pipelines_update replaces the " +
+            "whole document, so omitting it there removes the declaration."
+
+    /** The §6.2.4 `request_body.required` description (#1100). */
+    const val REQUEST_BODY_REQUIRED_DESCRIPTION: String =
+        "true: an execution without a body is refused (pipeline.execution.request_body_invalid, reason " +
+            "required). false (the default): the body is optional."
+
+    /**
+     * The §6.2.4 `request_body` property, shared verbatim by both input schemas (#1100).
+     *
+     * An open inner object on purpose: the contract ignores an unknown inner key (a later addition
+     * is not a breaking change), so the schema refuses only what the contract cannot read — a
+     * declaration that is not an object (a scalar, an array, null) and a `required` that is not a
+     * JSON boolean. The tools' top level stays `additionalProperties: false`.
+     */
+    val REQUEST_BODY_PROPERTY: String =
+        """{"type": "object", "description": "$REQUEST_BODY_DESCRIPTION", "properties": """ +
+            """{"required": {"type": "boolean", "default": false, "description": "$REQUEST_BODY_REQUIRED_DESCRIPTION"}}}"""
+
     /** The §6.2.4 `checks` description (140, pipeline-contract §3.3), restated verbatim by both tools. */
     const val CHECKS_DESCRIPTION: String =
         "Release checks (pipeline-contract §3.3): at most 20 objects, each {id, name, datasource, sql, expected} — " +
@@ -175,7 +207,10 @@ class PipelinesCreateTool(
                     "DATE parameters, no period parameter, no window calculator) is refused " +
                     "pipeline.validation.door_unacknowledged until you pass door_acknowledged: true. Returns the " +
                     "created pipeline with server-assigned id and version 1, which lands as a DRAFT: run it straight " +
-                    "away, then STOP — a human releases it from the UI, and no tool releases anything.",
+                    "away, then STOP — a human releases it from the UI, and no tool releases anything. Optional " +
+                    "request_body declares that the pipeline accepts one JSON object or array of objects per " +
+                    "execution, read by a SCRIPT node binding '@request_body': {\"required\": true} refuses an " +
+                    "execution without one; required defaults to false.",
             schema = SCHEMA,
         )
 
@@ -227,6 +262,7 @@ class PipelinesCreateTool(
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
                 "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
                 "checks": {"type": "array", "description": "${PipelineToolPayloads.CHECKS_DESCRIPTION}"},
+                "request_body": ${PipelineToolPayloads.REQUEST_BODY_PROPERTY},
                 "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"},
                 "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
@@ -273,7 +309,9 @@ class PipelinesUpdateTool(
                     "included (calculators_list has the kinds); no extra arguments are needed for one. The same " +
                     "entry-point checks apply: a body naming a table this key never datasources_get_columns'd is " +
                     "refused pipeline.validation.table_not_learned, and a raw-date door is refused " +
-                    "pipeline.validation.door_unacknowledged until door_acknowledged: true.",
+                    "pipeline.validation.door_unacknowledged until door_acknowledged: true. Every update sends the WHOLE " +
+                    "document: request_body (the body declaration; required defaults to false) is kept only if you " +
+                    "send it again, so carry it forward from pipelines_get — omitting it removes the declaration.",
             schema = SCHEMA,
         )
 
@@ -318,6 +356,7 @@ class PipelinesUpdateTool(
                 "settings": {"type": "object", "description": "Pipeline-level execution settings (e.g., tempdb engine)."},
                 "nodes": {"type": "array", "description": "${PipelineToolPayloads.NODES_DESCRIPTION}"},
                 "checks": {"type": "array", "description": "${PipelineToolPayloads.CHECKS_DESCRIPTION}"},
+                "request_body": ${PipelineToolPayloads.REQUEST_BODY_PROPERTY},
                 "door_acknowledged": {"type": "boolean", "description": "${DoorAcknowledgment.ARG_DESC}"}
               },
               "additionalProperties": false

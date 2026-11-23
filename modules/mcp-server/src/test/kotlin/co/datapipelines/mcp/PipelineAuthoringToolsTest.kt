@@ -14,6 +14,7 @@ import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
@@ -109,6 +110,63 @@ class PipelineAuthoringToolsTest {
             { stored.captured shouldContain "\"name\":\"monthly_revenue\"" },
             { McpTools.readTree(payload["body"].toString())["nodes"].size() shouldBe 1 },
         )
+    }
+
+    @Test
+    fun `create stores the request_body declaration canonically - an empty or unknown-keyed one reads as optional`() {
+        // #1100: the declaration reaches the SAVED body through the service's canonical serialization.
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
+        every { pipelines.findDraftDetail(any(), McpFixtures.PIPELINE_ID) } returns draftDetail(version = 1)
+        val cases =
+            listOf(
+                mapOf("required" to true) to """{"required":true}""",
+                mapOf("required" to false) to """{"required":false}""",
+                emptyMap<String, Any?>() to """{"required":false}""",
+                mapOf("later_addition" to "x") to """{"required":false}""",
+            )
+        cases.forEach { (declaration, canonical) ->
+            val stored = slot<String>()
+            every {
+                pipelines.create(any(), any(), capture(stored), McpFixtures.USER, CreateLifecycle.DRAFT, WriteSurface.MCP)
+            } returns McpFixtures.pipelineRecord(version = null)
+
+            createTool().call(McpArguments(args.rawMap() + mapOf("request_body" to declaration)), ctx)
+
+            withClue("declaration $declaration") {
+                McpTools.readTree(stored.captured)["request_body"] shouldBe McpTools.readTree(canonical)
+            }
+        }
+    }
+
+    @Test
+    fun `an update without request_body stores a body without the member`() {
+        every { validator.validateOrThrow(any(), any(), allowDraftPipelineReferences = true) } answers { firstArg() }
+        val written = slot<Pipeline>()
+        every { drafts.write(any(), McpFixtures.PIPELINE_ID, capture(written), any(), "h", McpFixtures.USER, WriteSurface.MCP) } throws
+            co.datapipelines.typesystem.DatapipelinesException(PipelineErrorCodes.Execution.NOT_FOUND, "stop here", emptyMap())
+
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+            updateTool().call(
+                McpArguments(args.rawMap() + mapOf("id" to McpFixtures.PIPELINE_ID.toString(), "expected_hash" to "h")),
+                ctx,
+            )
+        }
+        written.captured.requestBody shouldBe null
+
+        shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+            updateTool().call(
+                McpArguments(
+                    args.rawMap() +
+                        mapOf(
+                            "id" to McpFixtures.PIPELINE_ID.toString(),
+                            "expected_hash" to "h",
+                            "request_body" to mapOf("required" to true),
+                        ),
+                ),
+                ctx,
+            )
+        }
+        written.captured.requestBody?.required shouldBe true
     }
 
     @Test
