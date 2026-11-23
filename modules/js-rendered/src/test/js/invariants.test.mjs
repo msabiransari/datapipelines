@@ -4,13 +4,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
-import { violations, expectedBarMarks, expectedLineMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
+import { violations, expectedBarMarks, expectedLineMarks, expectedScatterMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
 
+/**
+ * I3's oracle by wire (brief 1062 D11): the expected count from the rows, and how the held marks are counted in a
+ * rendered result. A bar's marks are its rectangles (the primitives the checker saw); a line's and an area's are their
+ * points, which the index holds every one of (§4.9); a type that finds its marks by their own shape (the index's
+ * second form) holds them in index.marks. A type lane adds one entry; a wire missing here fails, naming it.
+ */
+const fromPrimitives = (r, v) => v.marks;
+const fromPoints = (r) => r.index.series.reduce((n, s) => n + s.at.length, 0);
+const fromLookup = (r) => r.index.marks.length;
+const ORACLE = {
+  bar: { expected: expectedBarMarks, held: fromPrimitives, what: "primitives" },
+  line: { expected: expectedLineMarks, held: fromPoints, what: "index" },
+  area: { expected: expectedLineMarks, held: fromPoints, what: "index" },
+  scatter: { expected: expectedScatterMarks, held: fromLookup, what: "index's marks" },
+};
+
+test("I3's oracle table holds every wire of the fixtures", () => {
+  for (const wire of new Set(FIXTURES.map((f) => f.wire))) assert.ok(Object.prototype.hasOwnProperty.call(ORACLE, wire), "no I3 oracle for the wire " + wire);
+});
+
 /** Non-vacuity floors: the fixture set, the frames, and what the checker saw. */
-const FLOOR = { fixtures: 121, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
+const FLOOR = { fixtures: 156, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
 
 test("the invariant sweep is not vacuous (floors)", () => {
   assert.ok(FIXTURES.length >= FLOOR.fixtures, "chart fixtures: " + FIXTURES.length);
@@ -34,12 +54,12 @@ for (const f of FIXTURES) {
         seen.texts += v.texts;
         seen.marks += v.marks;
         const hidden = r.summary.series.filter((s) => s.hidden).map((s) => s.id);
-        const bar = f.wire === "bar";
-        const expected = r.state === "rendered" ? (bar ? expectedBarMarks : expectedLineMarks)(f.fixture, hidden) : 0;
+        const oracle = ORACLE[f.wire];
+        if (oracle === undefined) throw new Error("no I3 oracle for the wire " + f.wire);
+        const expected = r.state === "rendered" ? oracle.expected(f.fixture, hidden) : 0;
         if (r.summary.marks !== expected) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the rows give " + expected });
-        // A bar's marks are its rectangles; a line's are its points, which the index holds every one of (§4.9).
-        const held = bar ? v.marks : r.state === "rendered" ? r.index.series.reduce((n, s) => n + s.at.length, 0) : 0;
-        if (r.state === "rendered" && held !== r.summary.marks) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the " + (bar ? "primitives" : "index") + " hold " + held });
+        const held = r.state === "rendered" ? oracle.held(r, v) : 0;
+        if (r.state === "rendered" && held !== r.summary.marks) v.violations.push({ inv: "I3", what: "summary.marks " + r.summary.marks + ", the " + oracle.what + " hold " + held });
         for (const x of v.violations) bad.push(`${x.inv} at ${w}x${h}: ${x.what}`);
       }
     }

@@ -34,14 +34,14 @@ class ChartSchemaValidatorTest {
     }
 
     /**
-     * #989: the family registry is a `oneOf` over bar, line and area, so a refused config also fails the two OTHER
+     * #989: the family registry is a `oneOf` over bar, line, area and scatter (#1062), so a refused config also fails the OTHER
      * branches; their problems (a bar's `config.mark.type` against `line`, a line's `encoding.x` against bar's shapes)
      * are not the document's. Each family's refusal is its own schema's plus the registry's one `oneOf` at `/config`.
      */
     @Test
     fun `a family's refusal names its own schema's problems and never another family's registry branch`() {
         val unknownKey = setOf(ChartSchemaProblem("additionalProperties", "/config"), ChartSchemaProblem("oneOf", "/config"))
-        for (file in listOf("valid/bar-log.json", "valid/line-log.json", "valid/area-stacked.json")) {
+        for (file in listOf("valid/bar-log.json", "valid/line-log.json", "valid/area-stacked.json", "valid/scatter-plain.json")) {
             val body = example(file)
             withClue("$file conforms") { ChartSchemaValidator().validate(body).shouldBeEmpty() }
             (body.path("config") as com.fasterxml.jackson.databind.node.ObjectNode).put("bogus_attr", 1)

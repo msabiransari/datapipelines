@@ -1,0 +1,94 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "two series, Wide has twelve-digit values, drawn with Wide hidden: the value labels narrow and the plot moves",
+ "document": {
+  "display_name": "hidden-wide",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "hidden-wide"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6
+  ],
+  "y": [
+   123456789012,
+   234567890123,
+   345678901234,
+   3,
+   5,
+   4
+  ],
+  "s": [
+   "Wide",
+   "Wide",
+   "Wide",
+   "Narrow",
+   "Narrow",
+   "Narrow"
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "s": "STRING"
+ },
+ "hidden": [
+  "string:Wide"
+ ]
+}

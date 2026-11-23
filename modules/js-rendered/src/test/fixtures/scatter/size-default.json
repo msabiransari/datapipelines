@@ -1,0 +1,91 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "size with the default range: the largest mark at each corner of the extent",
+ "document": {
+  "display_name": "size-default",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "z",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "size": {
+     "field": "z"
+    }
+   },
+   "title": {
+    "text": "size-default"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   100,
+   0,
+   100,
+   50,
+   25,
+   75
+  ],
+  "y": [
+   0,
+   0,
+   100,
+   100,
+   50,
+   60,
+   30
+  ],
+  "z": [
+   10,
+   10,
+   10,
+   10,
+   1,
+   4,
+   7
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "z": "DECIMAL"
+ }
+}

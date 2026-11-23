@@ -388,6 +388,80 @@
    "layer": "save",
    "code": "chart.measure.not_numeric",
    "pointer": "/config/encoding/color/field"
+  },
+  "valid/scatter-plain.json": {
+   "valid": true
+  },
+  "valid/scatter-series.json": {
+   "valid": true
+  },
+  "valid/scatter-shade.json": {
+   "valid": true
+  },
+  "valid/scatter-size.json": {
+   "valid": true
+  },
+  "valid/scatter-log.json": {
+   "valid": true
+  },
+  "valid/scatter-time-x.json": {
+   "valid": true
+  },
+  "invalid/scatter-y-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/type",
+   "note": "brief 1062 D2: y is a number axis (#1067: no time form on the value side)"
+  },
+  "invalid/scatter-x-nominal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type",
+   "note": "a position is quantitative or temporal"
+  },
+  "invalid/scatter-size-range-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.size.range_invalid",
+   "pointer": "/config/encoding/size/range",
+   "note": "a size range is increasing"
+  },
+  "invalid/scatter-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: log refused beside scale.zero"
+  },
+  "invalid/scatter-log-domain-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/x/scale/domain",
+   "note": "G4: a log range is greater than 0"
+  },
+  "invalid/scatter-shade-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field",
+   "note": "a shade on a text column"
+  },
+  "invalid/scatter-tooltip-seven.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/tooltip",
+   "note": "G7: 6 entries at most"
+  },
+  "invalid/scatter-unknown-field.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown",
+   "pointer": "/config/encoding/size/field",
+   "note": "a size field is a column of the input"
   }
  }
 }

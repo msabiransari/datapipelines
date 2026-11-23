@@ -1,0 +1,147 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "six tooltip lines, carried on each card in order",
+ "document": {
+  "display_name": "tooltip-six",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "a",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "b",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "c",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "d",
+      "type": "INTEGER",
+      "nullable": true
+     },
+     {
+      "name": "e",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "f",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "tooltip": [
+     {
+      "field": "a"
+     },
+     {
+      "field": "b",
+      "unit": "m"
+     },
+     {
+      "field": "c",
+      "format": "date"
+     },
+     {
+      "field": "d",
+      "title": "D"
+     },
+     {
+      "field": "e"
+     },
+     {
+      "field": "f",
+      "format": "compact"
+     }
+    ]
+   },
+   "title": {
+    "text": "tooltip-six"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2
+  ],
+  "y": [
+   2,
+   1
+  ],
+  "a": [
+   "p",
+   "q"
+  ],
+  "b": [
+   1.5,
+   2.5
+  ],
+  "c": [
+   "2024-01-01",
+   "2024-06-30"
+  ],
+  "d": [
+   7,
+   8
+  ],
+  "e": [
+   "e1",
+   "e2"
+  ],
+  "f": [
+   1000000,
+   2000000
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "a": "STRING",
+  "b": "DECIMAL",
+  "c": "DATE",
+  "d": "INTEGER",
+  "e": "STRING",
+  "f": "DECIMAL"
+ }
+}

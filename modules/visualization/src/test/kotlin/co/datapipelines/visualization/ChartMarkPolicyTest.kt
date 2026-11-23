@@ -37,7 +37,12 @@ class ChartMarkPolicyTest {
         ChartMarkPolicy.entries.map { Triple(it.wire, it.alwaysZero, it.logAdmitted) } shouldBe
             listOf(Triple("bar", true, true), Triple("line", false, true), Triple("area", true, false), Triple("point", false, true))
         ChartType.entries.associate { it.wire to it.policy } shouldBe
-            mapOf("bar" to ChartMarkPolicy.BAR, "line" to ChartMarkPolicy.LINE, "area" to ChartMarkPolicy.AREA)
+            mapOf(
+                "bar" to ChartMarkPolicy.BAR,
+                "line" to ChartMarkPolicy.LINE,
+                "area" to ChartMarkPolicy.AREA,
+                "scatter" to ChartMarkPolicy.POINT,
+            )
     }
 
     @Test

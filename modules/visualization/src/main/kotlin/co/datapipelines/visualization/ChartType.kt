@@ -44,6 +44,12 @@ enum class ChartType(
 
     /** As [LINE], filled down to zero or to the series below it (§4.5 row `area`; lane F5, #989). */
     AREA("area", ChartChannelNodes.lineFamily, ChartMarkPolicy.AREA),
+
+    /**
+     * One point per row over two continuous axes, coloured by series or by value, sized by a third measure (§4.5 row
+     * `scatter`; lane T1, #1062). A scatter with `size` is the bubble chart.
+     */
+    SCATTER("scatter", ChartChannelNodes.scatter, ChartMarkPolicy.POINT),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -182,6 +188,29 @@ private object ChartChannelNodes {
             ),
             ChartChannel("y", required = true, node = ChannelNode.Shape("value")),
             ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+            ChartChannel("tooltip", required = false, node = tooltip),
+        )
+
+    /**
+     * Scatter's channels (§4.5 row `scatter`): `x` and `y` positions (the schema narrows `y` to quantitative, brief 1062
+     * D2), `color` a series or a shade, `size` the shape `size`, `tooltip` the shared list.
+     */
+    val scatter: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("position")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("position")),
+            ChartChannel(
+                "color",
+                required = false,
+                node =
+                    ChannelNode.OneOf(
+                        listOf(
+                            ShapeAlternative("series", listOf("nominal", "ordinal")),
+                            ShapeAlternative("shade", listOf("quantitative")),
+                        ),
+                    ),
+            ),
+            ChartChannel("size", required = false, node = ChannelNode.Shape("size")),
             ChartChannel("tooltip", required = false, node = tooltip),
         )
 }

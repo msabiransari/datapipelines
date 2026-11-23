@@ -1,0 +1,85 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "long series names and ten-digit tick texts",
+ "document": {
+  "display_name": "long-labels",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "A long x axis title over ten-digit numbers"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "A long y axis title over ten-digit numbers"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "long-labels"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1234567890,
+   2345678901,
+   3456789012,
+   4567890123
+  ],
+  "y": [
+   9876543210,
+   8765432109,
+   7654321098,
+   6543210987
+  ],
+  "s": [
+   "A series name that is long enough to be cut in the legend",
+   "A series name that is long enough to be cut in the legend",
+   "Another very long series name that keeps on going",
+   "Another very long series name that keeps on going"
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "s": "STRING"
+ }
+}

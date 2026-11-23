@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line` or `area` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area` or `scatter` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -173,6 +173,30 @@ to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a 
 - **A line never stacks** (leave `stack` out). An area may: with `color` or `fields`, `stack` is `"zero"`,
   `"normalize"` (format `percent`) or `null`; without them, leave it out.
 
+**Scatter?** A `scatter` shows how two measures of the same rows relate: one point per row, never aggregated, at its
+`x` and `y`. A third measure can set each point's size (`size`: the bubble chart, the area following the value), a
+fourth its colour (`color` as a shade, as the bar's), or `color` can split the points into series (at most 8).
+
+```json
+"config": {
+  "mark": { "type": "scatter" },
+  "encoding": {
+    "x": { "field": "visits", "type": "quantitative", "format": "compact" },
+    "y": { "field": "revenue", "type": "quantitative", "format": "currency(EUR)" },
+    "size": { "field": "orders" },
+    "color": { "field": "channel", "type": "nominal", "sort": "ascending" }
+  }
+}
+```
+
+- `x` and `y` are positions with no `aggregate` and no `sort`: `x` `quantitative` or `temporal`, `y` `quantitative`
+  only. A log `scale` is allowed on both; `zero` is false unless you write it.
+- `size` is `{field, range?}`: a numeric column, `range` the smallest and largest diameter (default `[6, 40]`,
+  each 4 to 64, increasing).
+- At most **1,000 rows** are drawn; above that the chart is refused. With more rows, aggregate in the query (a row
+  per group) or pick another type. A row with a null `x`, `y` or size is not drawn.
+- `mark_count` counts the rows drawn.
+
 **On every type:**
 - **`fields` instead of `color`:** `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}],
   "type": "quantitative", "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
@@ -181,7 +205,7 @@ to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a 
   tooltip detail.
 - **`encoding.tooltip`:** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
 - **`scale`:** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
-  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar or a line only, with no
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
   `zero`; a value at or below zero is then not drawn.
 
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each
@@ -198,7 +222,7 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | drop `scale.domain` on a normalized stack; else make it increasing, and include zero on a bar, an area or beside `zero: true` |
 | `chart.scale.log_unsupported` | use a linear scale — a log scale is refused on an area, on a stacked or normalized value and beside `scale.zero` |
 | `chart.scale.domain_log` | a log `domain` must be greater than 0 and increasing |
-| `chart.shade.mid_invalid` / `chart.size.range_invalid` | a shade's `mid` must be a finite number; a size's `range` must increase (both for types that come later) |
+| `chart.shade.mid_invalid` / `chart.size.range_invalid` | a shade's `mid` must be a finite number; a scatter's `size.range` must increase |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
 

@@ -27,3 +27,4 @@
 types/bar.js
 types/line.js
 types/area.js
+types/scatter.js

@@ -1,0 +1,85 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "x and y with two different units and a tooltip line with a unit of its own",
+ "document": {
+  "display_name": "units",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "w",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "Distance",
+     "unit": "km"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Speed",
+     "unit": "km/h"
+    },
+    "tooltip": [
+     {
+      "field": "w",
+      "title": "Weight",
+      "unit": "kg"
+     }
+    ]
+   },
+   "title": {
+    "text": "units"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1200,
+   3700,
+   2500
+  ],
+  "y": [
+   40,
+   75,
+   55
+  ],
+  "w": [
+   3,
+   4,
+   5
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "w": "DECIMAL"
+ }
+}
