@@ -3,7 +3,7 @@
 **Status:** v1.76 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-11-22
+**Last updated:** 2026-11-23
 
 ---
 
@@ -760,10 +760,10 @@ CREATE INDEX idx_endpoint_key_bindings_endpoint ON endpoint_key_bindings(endpoin
 - **Inventory of opt-ins (read-only, no secret columns).** What a deployment's operator runs to see every stored opt-in, active or dormant (a receiver's rows are dormant: stored, never admitting):
 
   ```sql
-  SELECT b.workspace_id, b.path_prefix, b.api_key_id, k.name, b.created_by, b.created_at FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE b.allow_namespace_writes ORDER BY b.workspace_id, b.path_prefix, b.api_key_id
+  SELECT b.workspace_id, b.path_prefix, b.api_key_id, k.name, b.created_by, b.created_at FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE b.allow_namespace_writes AND k.workspace_id = b.workspace_id AND k.kind = 'endpoint' ORDER BY b.workspace_id, b.path_prefix, b.api_key_id
   ```
 
-  It reads no key hash, prefix material or request data. Add `AND k.workspace_id = b.workspace_id` to list only rows the serve path can honour (below).
+  It reads no key hash, prefix material or request data. It lists only endpoint keys whose workspace matches the binding; inspect mismatched rows separately with the preflight below.
 - **Rows whose key belongs to another workspace are ignored (#1111).** Every binding read that authorises (the serve path's node walk and exact grants, run polling) or exports (the promotion batch) joins the key and requires `k.workspace_id = b.workspace_id`, so a mismatched row neither authorises, shadows nor travels: it is excluded from the deciding-node walk and from exact authorization, and the legitimate nearest ancestor decides as if it were absent. No supported write creates such a row (every bind resolves the key in the caller's active workspace); a historical one is kept for inspection, not deleted at upgrade. **Count-only preflight** for an operator's own database:
 
   ```sql
@@ -780,7 +780,7 @@ CREATE INDEX idx_endpoint_key_bindings_endpoint ON endpoint_key_bindings(endpoin
   COMMIT;   -- or ROLLBACK; if the count differs or approval is withheld
   ```
 
-  A caller cannot reach a foreign key through the API to clean it up (by id and by name both resolve within the active workspace). `AuthoringNamespaceKeyIntegrationTest` runs these three statements verbatim.
+  A caller cannot reach a foreign key through the API to clean it up (by id and by name both resolve within the active workspace). `AuthoringNamespaceKeyIntegrationTest` exercises the inventory, preflight count and cleanup SQL. A guard that extracts the statements directly from this document is tracked in [#1129](https://github.com/msabiransari/datapipelines/issues/1129).
 - **Rolling back V69:** §7.8.
 
 ### 4.15 `lake_tables`

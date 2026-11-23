@@ -625,6 +625,12 @@ class AuthoringNamespaceKeyIntegrationTest {
         )
         count(MISMATCH_PREFLIGHT) shouldBe 3
 
+        withClue("the opt-in inventory includes valid grants and excludes mismatched key/workspace pairs") {
+            val stored = inventory()
+            stored shouldContain listOf(DEFAULT_WORKSPACE, NS, dev.id, "ns-dev")
+            stored.any { it[0] == DEFAULT_WORKSPACE && it[2] == foreign.id } shouldBe false
+        }
+
         withClue("a mismatched nearer row does not shadow the legitimate opt-in") {
             mutate(dev, "POST", "$ORDERS?tag=mismatch-dev", "mismatch-dev").statusCode() shouldBe 200
         }
@@ -1122,7 +1128,8 @@ class AuthoringNamespaceKeyIntegrationTest {
         private const val INVENTORY =
             "SELECT b.workspace_id, b.path_prefix, b.api_key_id, k.name, b.created_by, b.created_at " +
                 "FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id " +
-                "WHERE b.allow_namespace_writes ORDER BY b.workspace_id, b.path_prefix, b.api_key_id"
+                "WHERE b.allow_namespace_writes AND k.workspace_id = b.workspace_id AND k.kind = 'endpoint' " +
+                "ORDER BY b.workspace_id, b.path_prefix, b.api_key_id"
         private const val INVENTORY_IDENTITY_COLUMNS = 4
 
         /** metadata-db §4.14 — the count-only preflight of rows whose key belongs to another workspace. */
