@@ -455,10 +455,9 @@ abstract class FontLedgerHistory : ValueSource<String, FontLedgerHistory.Paramet
 tasks.named<Test>("test") {
     // #1058: the single-fork suite (the lane check's -Pdp.test.forks=1) keeps about 270 MB of Konsist PSI plus the
     // packaged-docs fixtures live and ended at the conventions' 1 GiB ceiling, so it died with "Java heap space" at
-    // whichever test allocated next. This module needs more than the default, so it states its own ceiling the way
-    // tests/integration-tests (6g) and modules/scripting (512m) do. A fixed value, not the dp.test.heap property:
-    // gradle.properties always defines that property (1g), so a fallback behind it would never apply.
-    maxHeapSize = "1536m"
+    // whichever test allocated next. The web suite defaults to 1536m for Gate A and CI. A command-line
+    // -Pdp.test.heap (2g in the lane check) takes precedence over that web-specific default.
+    maxHeapSize = gradle.startParameter.projectProperties["dp.test.heap"] ?: "1536m"
     inputs.property(
         "fontLedgerHistory",
         providers.of(FontLedgerHistory::class.java) {
