@@ -1,0 +1,82 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "a null shade under count: 0, on the scale beside the 1 of a row with a value",
+ "document": {
+  "display_name": "shade-null-count",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "color": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "count",
+     "scale": "sequential"
+    }
+   },
+   "title": {
+    "text": "shade-null-count"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3
+  ],
+  "y": [
+   1,
+   2,
+   3
+  ],
+  "v": [
+   5,
+   null,
+   9
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "v": "DECIMAL"
+ }
+}

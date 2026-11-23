@@ -1,0 +1,83 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "twelve points, one series: no legend",
+ "document": {
+  "display_name": "one-series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    }
+   },
+   "title": {
+    "text": "one-series"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12
+  ],
+  "y": [
+   3,
+   7,
+   2,
+   9,
+   4,
+   8,
+   5,
+   1,
+   6,
+   10,
+   2,
+   7
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL"
+ }
+}

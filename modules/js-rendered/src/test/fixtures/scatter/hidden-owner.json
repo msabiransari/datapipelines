@@ -1,0 +1,91 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "two series, A owns both ends of x and of y, drawn with A hidden: the value axis is B's, the model's x ends stay",
+ "document": {
+  "display_name": "hidden-owner",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "hidden-owner"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   100,
+   30,
+   60,
+   45
+  ],
+  "y": [
+   0,
+   100,
+   40,
+   50,
+   45
+  ],
+  "s": [
+   "A",
+   "A",
+   "B",
+   "B",
+   "B"
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "s": "STRING"
+ },
+ "hidden": [
+  "string:A"
+ ]
+}

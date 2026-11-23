@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.90 (frozen contract — additive-only changes after this point)
+**Status:** v1.91 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-22
@@ -2077,7 +2077,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area or scatter), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2089,7 +2089,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2157,7 +2157,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line or area), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area or scatter), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2169,7 +2169,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3164,6 +3164,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.91 | 1062 (#1062, js-rendered T1) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the fourth chart family, scatter; the `tests` description's `mark_count` names a scatter's rows drawn. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-22 | v1.90 | 1040 (#1040) | **§6.2.23–§6.2.25 (additive):** `endpoints_create`, `endpoints_list` and `endpoints_get` answer `pipeline_version` (the current version's exact pin) and `request_body` (`mode` + the reading SCRIPT transformers, `null` with no current version or an unresolvable pin) — what an author must see before acting on a route; the REST management read carries the same spelling (rest-api §19.5a). The status line, stale at v1.85 since v1.86, is brought to this entry. No tool, input or permission change. |
 | 2026-11-21 | v1.89 | 1038 r4 (#1038) | **§6.2.3 / template writes:** a body fixture saved with `templates_create`/`_update` keeps member order, repeated members and exact numbers through stored tests, `templates_get`, re-save and release (#1080). |
 | 2026-11-21 | v1.88 | 1038 r3 (#1038) | **§6.2.3:** `request_body`'s byte budget counts canonical bytes, as framework execute does. **§6.2.3 / §6.2.43 / template writes:** body fixtures in `templates_evaluate` `input` and `templates_create`/`_update` `tests` are bound from the exact argument text (a repeated member refused, exact fractions); body-case diagnostics are bounded. |

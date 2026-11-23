@@ -1,0 +1,78 @@
+{
+ "display_name": "scatter-log-domain-zero",
+ "description": "G4: a log range is greater than 0",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "day",
+     "type": "DATE"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "weight",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "margin",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING"
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "scatter"
+  },
+  "encoding": {
+   "x": {
+    "field": "units",
+    "type": "quantitative",
+    "title": "Units",
+    "scale": {
+     "type": "log",
+     "domain": [
+      0,
+      100
+     ]
+    }
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "title": "Amount",
+    "format": "compact"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

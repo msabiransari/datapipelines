@@ -1,0 +1,145 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "eight series, three points each: a switch legend of dots",
+ "document": {
+  "display_name": "eight-series",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "color": {
+     "field": "s",
+     "type": "nominal",
+     "sort": null,
+     "title": "Series"
+    }
+   },
+   "title": {
+    "text": "eight-series"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   0,
+   10,
+   20,
+   1,
+   11,
+   21,
+   2,
+   12,
+   22,
+   3,
+   13,
+   23,
+   4,
+   14,
+   24,
+   5,
+   15,
+   25,
+   6,
+   16,
+   26,
+   7,
+   17,
+   27
+  ],
+  "y": [
+   1,
+   8,
+   15,
+   22,
+   6,
+   13,
+   20,
+   4,
+   11,
+   18,
+   2,
+   9,
+   16,
+   23,
+   7,
+   14,
+   21,
+   5,
+   12,
+   19,
+   3,
+   10,
+   17,
+   1
+  ],
+  "s": [
+   "Alpha",
+   "Alpha",
+   "Alpha",
+   "Bravo",
+   "Bravo",
+   "Bravo",
+   "Charlie",
+   "Charlie",
+   "Charlie",
+   "Delta",
+   "Delta",
+   "Delta",
+   "Echo",
+   "Echo",
+   "Echo",
+   "Foxtrot",
+   "Foxtrot",
+   "Foxtrot",
+   "Golf",
+   "Golf",
+   "Golf",
+   "Hotel",
+   "Hotel",
+   "Hotel"
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "s": "STRING"
+ }
+}

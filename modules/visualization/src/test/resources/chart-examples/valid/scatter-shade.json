@@ -1,0 +1,78 @@
+{
+ "display_name": "Amount against units by margin",
+ "description": "Colour by value, diverging around 0.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "day",
+     "type": "DATE"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "weight",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "margin",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING"
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "scatter"
+  },
+  "encoding": {
+   "x": {
+    "field": "units",
+    "type": "quantitative",
+    "title": "Units"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "title": "Amount",
+    "format": "compact"
+   },
+   "color": {
+    "field": "margin",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "scale": "diverging",
+    "mid": 0
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

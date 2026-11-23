@@ -1,0 +1,79 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "sizes 0, 5e-324, 1e-323: 6, 28.60, 40",
+ "document": {
+  "display_name": "sizes-tiny-three",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "z",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "size": {
+     "field": "z"
+    }
+   },
+   "title": {
+    "text": "sizes-tiny-three"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3
+  ],
+  "y": [
+   1,
+   2,
+   1
+  ],
+  "z": [
+   0,
+   5e-324,
+   1e-323
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "z": "DECIMAL"
+ }
+}

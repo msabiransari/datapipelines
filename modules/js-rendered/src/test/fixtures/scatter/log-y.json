@@ -1,0 +1,76 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "log on y with rows of 0 or less: not drawn, one chart.rule.log-nonpositive",
+ "document": {
+  "display_name": "log-y",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y",
+     "scale": {
+      "type": "log"
+     }
+    }
+   },
+   "title": {
+    "text": "log-y"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7
+  ],
+  "y": [
+   0,
+   -1,
+   2,
+   20,
+   200,
+   2000,
+   9
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL"
+ }
+}

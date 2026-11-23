@@ -1,0 +1,83 @@
+{
+ "display_name": "Amount against units, log",
+ "description": "A log scale on both axes, and units.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "day",
+     "type": "DATE"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "weight",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "margin",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING"
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "scatter"
+  },
+  "encoding": {
+   "x": {
+    "field": "units",
+    "type": "quantitative",
+    "title": "Units",
+    "unit": "pcs",
+    "scale": {
+     "type": "log"
+    }
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "title": "Amount",
+    "format": "compact",
+    "unit": "EUR",
+    "scale": {
+     "type": "log",
+     "domain": [
+      1,
+      100000
+     ]
+    }
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

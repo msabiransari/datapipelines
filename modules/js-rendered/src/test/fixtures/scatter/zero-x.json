@@ -1,0 +1,70 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "scale.zero on x: the x axis holds zero",
+ "document": {
+  "display_name": "zero-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X",
+     "scale": {
+      "zero": true
+     }
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    }
+   },
+   "title": {
+    "text": "zero-x"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   50,
+   60,
+   70,
+   80
+  ],
+  "y": [
+   5,
+   6,
+   7,
+   8
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL"
+ }
+}

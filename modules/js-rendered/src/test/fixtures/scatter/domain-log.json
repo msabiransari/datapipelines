@@ -1,0 +1,105 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "log domains on x [10, 1000] and y [1, 100], rows below, on and above each end; the largest size on a row outside",
+ "document": {
+  "display_name": "domain-log",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "z",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X",
+     "scale": {
+      "type": "log",
+      "domain": [
+       10,
+       1000
+      ]
+     }
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y",
+     "scale": {
+      "type": "log",
+      "domain": [
+       1,
+       100
+      ]
+     }
+    },
+    "size": {
+     "field": "z"
+    }
+   },
+   "title": {
+    "text": "domain-log"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   2,
+   10,
+   100,
+   1000,
+   5000,
+   100,
+   100
+  ],
+  "y": [
+   10,
+   10,
+   10,
+   10,
+   10,
+   0.5,
+   500
+  ],
+  "z": [
+   1,
+   2,
+   3,
+   2,
+   9,
+   4,
+   5
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "z": "DECIMAL"
+ }
+}

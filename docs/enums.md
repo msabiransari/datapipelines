@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.65 (living document — updated as enums evolve)
+**Status:** v1.66 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1420,6 +1420,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `bar` | Bars over categories or time bands, vertical or horizontal (the quantitative channel decides), grouped or stacked by a colour channel; channels `x`, `y` (each a band or a value), `color` (series or shade), `tooltip` (up to six details) |
 | `line` | A line per series over categories (a band) or a continuous axis (a position: time or a number), smooth by default, a dot on each line's last point, the series' names at the lines' ends for 2 to 4 series (#989); channels `x` (a band or a position; a temporal `x` is always a position), `y` (a value: one field or 2 to 8 `fields`, linear or log), `color` (series), `tooltip` (up to six details) |
 | `area` | As `line`, each series filled down to zero, or stacked on the series below it (zero or normalized), with a fade from the line down (#989); the value axis always holds zero and has no log scale; channels as `line` |
+| `scatter` | One point per row over two continuous axes, no aggregation; with `size` it is the bubble chart (#1062); channels `x` (a position: a number or time axis), `y` (a position narrowed to a number axis, linear or log), `color` (series or shade), `size` (diameters from `range`, the area following the value), `tooltip` (up to six details) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
 
@@ -1429,6 +1430,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-22 | v1.66 | 1062 (#1062, js-rendered T1) | **§63 `ChartType`:** row `scatter`, with its enum entry, schema file, template and fixtures; its `y` is a position narrowed to `quantitative` by the schema. |
 | 2026-11-22 | v1.65 | 1043 (#1043) | **§15:** the three runtime capture audit events `execution.capture.started`, `.stopped` and `.inspected`, mirrored from [Auth §10.1](auth.md#101-events). |
 | 2026-11-20 | v1.64 | 1035 (#1035) | **§10 `ExecutionStatus`:** gains `OUTCOME_UNKNOWN` (V66) — terminal; the family's shared commit was attempted and not acknowledged. Carried on `pipeline_failed`'s `status`; the metric tag `status` gains `outcome_unknown`. |
 | 2026-11-21 | v1.63 | #1034 review F1 | §3 scopes the omitted-output `caller` default to DQL; DML always declares its output explicitly. |

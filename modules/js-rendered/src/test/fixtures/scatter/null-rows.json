@@ -1,0 +1,85 @@
+{
+ "source": [
+  "lane 1062 make-fixtures.mjs"
+ ],
+ "note": "a null x, a null y and a null size among good rows: one chart.rule.null-position",
+ "document": {
+  "display_name": "null-rows",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "z",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y"
+    },
+    "size": {
+     "field": "z"
+    }
+   },
+   "title": {
+    "text": "null-rows"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   null,
+   3,
+   4,
+   5
+  ],
+  "y": [
+   1,
+   2,
+   null,
+   4,
+   5
+  ],
+  "z": [
+   1,
+   2,
+   3,
+   null,
+   5
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL",
+  "z": "DECIMAL"
+ }
+}

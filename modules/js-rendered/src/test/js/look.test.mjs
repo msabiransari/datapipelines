@@ -68,9 +68,8 @@ const A14_FRAMES = [[960, 540], [480, 360], [372, 250], [300, 180], [240, 160], 
  * dead when none of those pictures changes. The test type's fixtures never join chartFixtures(); and with each of these
  * fields changed, every chart fixture's picture equals its base (no product picture reads it).
  */
-const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web",
-  // Brief 1054 D8: no product fixture reads a point's key before scatter.
-  legendKeyPoint: "test_switch" };
+// legendKeyPoint left this table with brief 1062: scatter's legend reads it, so a product picture proves it (D8).
+const A14_ON_TYPE = { radialRings: "test_web", radialTickSpan: "test_web", radialNameShare: "test_web", radialRadiusFloor: "test_web" };
 
 test("A14 (render half): changing any one look field changes the primitives of at least one chart fixture", () => {
   const base = new Map();
