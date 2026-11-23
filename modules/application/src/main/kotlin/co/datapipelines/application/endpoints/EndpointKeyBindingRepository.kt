@@ -16,6 +16,15 @@ import java.util.UUID
  * rather than walking it with a query per level: a five-segment path would otherwise be six
  * round trips before the request is even authorised, which is the cheapest thing a hostile caller
  * could ask the database to do.
+ *
+ * ## A row whose workspace is not its key's own decides nothing (#1111)
+ *
+ * A binding row records the workspace it was written in, and its key carries its own. Before #1111 the by-name bind
+ * resolved the caller's key across every workspace they own, so a row could pair a key with ANOTHER workspace. Such a
+ * row is preserved for an operator to inspect (docs/metadata-db.md §4.14, mismatched binding rows), but the
+ * authorization reads — [findByPrefixes], [findMutationGrantsByKey] — and the promotion/tree read [findByWorkspace]
+ * exclude it IN SQL (`VALID_KEY_WORKSPACE`): it neither decides nor shadows a node, and the nearest legitimate
+ * ancestor decides again.
  */
 class EndpointKeyBindingRepository(
     private val jdbc: NamedParameterJdbcTemplate,
@@ -44,7 +53,8 @@ class EndpointKeyBindingRepository(
     ): List<EndpointKeyBinding> {
         if (prefixes.isEmpty()) return emptyList()
         return jdbc.query(
-            "$SELECT_COLUMNS WHERE path_prefix IN (:prefixes) AND workspace_id = :workspaceId AND method = 'GET'",
+            "$SELECT_COLUMNS WHERE b.path_prefix IN (:prefixes) AND b.workspace_id = :workspaceId AND b.method = 'GET' " +
+                "AND $VALID_KEY_WORKSPACE",
             mapOf("prefixes" to prefixes, "workspaceId" to workspaceId),
             MAPPER,
         )
@@ -64,11 +74,15 @@ class EndpointKeyBindingRepository(
      * has a legitimate use for.
      */
     fun findByWorkspace(workspaceId: UUID): List<EndpointKeyBinding> =
-        jdbc.query("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId), MAPPER)
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE b.workspace_id = :workspaceId AND $VALID_KEY_WORKSPACE",
+            mapOf("workspaceId" to workspaceId),
+            MAPPER,
+        )
 
     /** The grants one key holds — the key detail view, and what a revoke's blast radius is. */
     fun findByKey(apiKeyId: String): List<EndpointKeyBinding> =
-        jdbc.query("$SELECT_COLUMNS WHERE api_key_id = :keyId", mapOf("keyId" to apiKeyId), MAPPER)
+        jdbc.query("$SELECT_COLUMNS WHERE b.api_key_id = :keyId", mapOf("keyId" to apiKeyId), MAPPER)
 
     /**
      * The mutation grants one key holds in [workspaceId] — the (entity, method) pairs the serve
@@ -82,7 +96,8 @@ class EndpointKeyBindingRepository(
         workspaceId: UUID,
     ): List<EndpointKeyBinding> =
         jdbc.query(
-            "$SELECT_COLUMNS WHERE api_key_id = :keyId AND workspace_id = :workspaceId AND method <> 'GET'",
+            "$SELECT_COLUMNS WHERE b.api_key_id = :keyId AND b.workspace_id = :workspaceId AND b.method <> 'GET' " +
+                "AND $VALID_KEY_WORKSPACE",
             mapOf("keyId" to apiKeyId, "workspaceId" to workspaceId),
             MAPPER,
         )
@@ -94,7 +109,7 @@ class EndpointKeyBindingRepository(
      */
     fun findByEndpoint(endpointId: UUID): List<EndpointKeyBinding> =
         jdbc.query(
-            "$SELECT_COLUMNS WHERE endpoint_id = :endpointId",
+            "$SELECT_COLUMNS WHERE b.endpoint_id = :endpointId",
             mapOf("endpointId" to endpointId),
             MAPPER,
         )
@@ -126,6 +141,38 @@ class EndpointKeyBindingRepository(
         ) > 0
 
     /**
+     * Sets the namespace-writes opt-in (#1111) of [apiKeyId]'s GET binding at [pathPrefix] in [workspaceId] in ONE
+     * statement, and answers the stored state that statement produced — never a value read before a concurrent writer
+     * moved it.
+     *
+     * `allow = true` creates the GET node binding already marked, or upgrades the existing one
+     * (`INSERT … ON CONFLICT DO UPDATE`). The upgrade is confined to a row of the SAME workspace: a mismatched
+     * historical row is never promoted, and the answer is then "not bound" — the row it would have marked decides
+     * nothing. `allow = false` clears the marker on an existing row and creates nothing at an absent node (a downgrade
+     * can never introduce a shadowing GET binding), so both forms of false are safe to repeat.
+     */
+    fun setNamespaceWrites(
+        pathPrefix: String,
+        apiKeyId: String,
+        workspaceId: UUID,
+        createdBy: UUID,
+        allow: Boolean,
+    ): NamespaceWritesState {
+        val params =
+            mapOf("prefix" to pathPrefix, "keyId" to apiKeyId, "workspaceId" to workspaceId, "createdBy" to createdBy)
+        val sql = if (allow) UPGRADE_SQL else DOWNGRADE_SQL
+        return jdbc.query(sql, params, STATE_MAPPER).firstOrNull()
+            ?: NamespaceWritesState(allow = false, bound = false, created = false)
+    }
+
+    /** What [setNamespaceWrites] left stored: the marker, whether the key holds the GET binding, and whether it was created. */
+    data class NamespaceWritesState(
+        val allow: Boolean,
+        val bound: Boolean,
+        val created: Boolean,
+    )
+
+    /**
      * Unbinds one key from one grant — inside [workspaceId] only. Every caller already pins
      * the key to the active workspace before it gets here; the predicate makes that a
      * property of the statement rather than of the callers (D11, the #199 review).
@@ -150,9 +197,42 @@ class EndpointKeyBindingRepository(
     private companion object {
         val SELECT_COLUMNS =
             """
-            SELECT path_prefix, api_key_id, workspace_id, method, endpoint_id, created_by, created_at
-              FROM endpoint_key_bindings
+            SELECT b.path_prefix, b.api_key_id, b.workspace_id, b.method, b.endpoint_id, b.created_by, b.created_at,
+                   b.allow_namespace_writes
+              FROM endpoint_key_bindings b
             """.trimIndent()
+
+        /** The row's workspace is its key's own (#1111): a mismatched historical row decides nothing (class KDoc). */
+        const val VALID_KEY_WORKSPACE =
+            "EXISTS (SELECT 1 FROM api_keys k WHERE k.id = b.api_key_id AND k.workspace_id = b.workspace_id)"
+
+        /** Create-or-upgrade in one statement; `xmax = 0` is PostgreSQL's "this row was inserted, not updated". */
+        val UPGRADE_SQL =
+            """
+            INSERT INTO endpoint_key_bindings
+                   (path_prefix, api_key_id, workspace_id, method, endpoint_id, created_by, allow_namespace_writes)
+            VALUES (:prefix, :keyId, :workspaceId, 'GET', NULL, :createdBy, TRUE)
+            ON CONFLICT (path_prefix, api_key_id, method) DO UPDATE SET allow_namespace_writes = TRUE
+             WHERE endpoint_key_bindings.workspace_id = EXCLUDED.workspace_id
+            RETURNING allow_namespace_writes, (xmax = 0) AS created
+            """.trimIndent()
+
+        /** Clear on an existing row only: an absent node stays absent. */
+        val DOWNGRADE_SQL =
+            """
+            UPDATE endpoint_key_bindings SET allow_namespace_writes = FALSE
+             WHERE path_prefix = :prefix AND api_key_id = :keyId AND workspace_id = :workspaceId AND method = 'GET'
+            RETURNING allow_namespace_writes, FALSE AS created
+            """.trimIndent()
+
+        val STATE_MAPPER =
+            RowMapper { rs: ResultSet, _: Int ->
+                NamespaceWritesState(
+                    allow = rs.getBoolean("allow_namespace_writes"),
+                    bound = true,
+                    created = rs.getBoolean("created"),
+                )
+            }
 
         val MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
@@ -166,6 +246,7 @@ class EndpointKeyBindingRepository(
                     // constant and the shape rule holds — fail loudly rather than guess.
                     method = EndpointMethod.valueOf(rs.getString("method")),
                     endpointId = rs.getObject("endpoint_id", UUID::class.java),
+                    allowNamespaceWrites = rs.getBoolean("allow_namespace_writes"),
                 )
             }
     }

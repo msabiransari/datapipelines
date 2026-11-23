@@ -34,7 +34,10 @@ import java.util.UUID
  * This walk is the GET grant of the method era (#1037, published-mutation-apis §2): the rows it
  * reads are GET bindings, fetched so by the repository. A mutation grant never shadows it, is
  * never inherited, and is decided elsewhere — by route entity id against the presenting key's
- * grants — so the two shapes can never answer each other's question.
+ * grants — so the two shapes can never answer each other's question. Since #1111 the same walk
+ * also answers the one inherited mutation grant there is: a GET row marked "allow namespace
+ * writes" at the deciding node ([allowsNamespaceWrites]), honoured only on an authoring
+ * deployment ([EndpointGrants] composes the two halves of a mutation grant).
  *
  * ## Pure
  *
@@ -83,6 +86,31 @@ class EndpointAuthorizer {
         } else {
             bound(principal, deciding, byPrefix.getValue(deciding))
         }
+    }
+
+    /**
+     * The namespace-writes half of a mutation grant (#1111; auth.md §7.7): does the presenting key's OWN row at the
+     * deciding node — the NEAREST node of [requestPath] carrying any GET binding of [endpointWorkspaceId], whichever key
+     * holds it — carry the opt-in?
+     *
+     * The node is chosen over EVERY key's GET rows, exactly as [authorize] chooses it, so an ordinary nearer binding —
+     * another key's or this key's own — shadows a marked node above it, and another key's marked row at the same node
+     * is never borrowed. This answers only the stored grant: the deployment's authoring posture and the key's own
+     * workspace are the caller's to require ([EndpointGrants]), and an exact route grant is decided independently.
+     */
+    fun allowsNamespaceWrites(
+        requestPath: String,
+        keyId: String,
+        endpointWorkspaceId: UUID,
+        bindings: Collection<EndpointKeyBinding>,
+    ): Boolean {
+        val byPrefix =
+            bindings
+                .asSequence()
+                .filter { it.workspaceId == endpointWorkspaceId && it.method == EndpointMethod.GET }
+                .groupBy { it.pathPrefix }
+        val deciding = EndpointPath.ancestors(requestPath).firstOrNull { byPrefix[it]?.isNotEmpty() == true } ?: return false
+        return byPrefix.getValue(deciding).any { it.apiKeyId == keyId && it.allowNamespaceWrites }
     }
 
     /** The bound case: the deciding node's key set is the whole answer. */

@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyRole
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
@@ -41,6 +42,10 @@ class EndpointKeyService(
     private val audit: AuditEventSink,
     /** The published paths of a workspace — what a binding of that workspace may name (#191). */
     private val publishedEndpoints: PublishedEndpointRepository,
+    /** #1111 — the posture an explicit `allow: true` requires (authoring on); no default, so a surface cannot forget it. */
+    private val authoring: AuthoringGuard,
+    /** #1111 — keys the deployment manages itself (the demo public key), never elevated. */
+    private val managedKeys: ManagedEndpointKeys,
 ) {
     /**
      * Issues a key of [kind], binding it at every path in [bindingPaths].
@@ -239,7 +244,73 @@ class EndpointKeyService(
         return added
     }
 
-    /** Unbinds a key from one grant (§6) — the GET node, or with [method] the mutation grant on that route. */
+    /**
+     * Sets the namespace-writes opt-in (#1111; auth.md §7.7) on [apiKeyId]'s GET binding at [pathPrefix] and answers
+     * the stored state the one statement produced ([EndpointKeyBindingRepository.setNamespaceWrites]).
+     *
+     * `allow = true` creates or upgrades the GET node binding. It is refused BEFORE any write when this deployment's
+     * authoring capability is off (`409 endpoint.authoring_disabled`), for a key the deployment manages itself
+     * (`403 endpoint.key_kind_refused`, `details.reason = "managed_key"`), and — the #191 rule of every creating bind —
+     * at a node outside the caller's own published tree (`400 endpoint.path_invalid`). A namespace needs a published
+     * descendant at setup, never the future route it will admit.
+     *
+     * `allow = false` clears the marker on an existing binding and creates nothing at an absent node; it is permitted
+     * with authoring off and without the tree check, so an operator can always retire a retained opt-in, including one
+     * whose last route has gone.
+     */
+    fun setNamespaceWrites(
+        principal: AuthenticatedPrincipal,
+        apiKeyId: String,
+        pathPrefix: String,
+        allow: Boolean,
+    ): EndpointKeyBindingRepository.NamespaceWritesState {
+        val prefix = normalizeBinding(pathPrefix)
+        val workspaceId = principal.requireWorkspace().id
+        if (allow) {
+            if (!authoring.developmentPosture) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Endpoint.AUTHORING_DISABLED,
+                    message =
+                        "This deployment has authoring disabled (${AuthoringGuard.CONFIG_KEY}=false), so a key cannot be " +
+                            "allowed namespace writes here. Grant the exact routes instead; \"allow\": false and unbinding " +
+                            "stay available.",
+                    details = mapOf("path_prefix" to prefix, "config_key" to AuthoringGuard.CONFIG_KEY),
+                )
+            }
+            if (managedKeys.isManaged(apiKeyId, workspaceId)) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                    message =
+                        "This key is managed by the deployment (the demo workspace's public read key) and is never " +
+                            "allowed namespace writes. Mint a dedicated endpoint key for development.",
+                    details = mapOf("reason" to REASON_MANAGED_KEY),
+                )
+            }
+            requireInsideWorkspace(prefix, workspaceId)
+        }
+        val state = bindings.setNamespaceWrites(prefix, apiKeyId, workspaceId, principal.userId, allow)
+        audit.log(
+            event = AUDIT_NAMESPACE_WRITES,
+            userId = principal.userId,
+            keyId = apiKeyId,
+            details =
+                mapOf(
+                    "path_prefix" to prefix,
+                    "workspace_id" to workspaceId.toString(),
+                    "method" to EndpointMethod.GET.name,
+                    "requested" to allow,
+                    "allow" to state.allow,
+                    "bound" to state.bound,
+                    "created" to state.created,
+                ),
+        )
+        return state
+    }
+
+    /**
+     * Unbinds a key from one grant (§6) — the GET node, or with [method] the mutation grant on that route. Unbinding the
+     * GET node also removes its namespace-writes opt-in (#1111): the marker lives on that row.
+     */
     fun unbind(
         principal: AuthenticatedPrincipal,
         apiKeyId: String,
@@ -334,6 +405,8 @@ class EndpointKeyService(
     private companion object {
         const val AUDIT_BOUND = "endpoint.key_bound"
         const val AUDIT_UNBOUND = "endpoint.key_unbound"
+        const val AUDIT_NAMESPACE_WRITES = "endpoint.key_namespace_writes"
+        const val REASON_MANAGED_KEY = "managed_key"
         const val ROOT = "/"
     }
 }

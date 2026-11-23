@@ -7,6 +7,7 @@ import co.datapipelines.application.dependencies.RegistryIncomingRows
 import co.datapipelines.application.dependencies.ReleaseDependencyFamilies
 import co.datapipelines.application.dependencies.ReleasePlanningWalk
 import co.datapipelines.application.endpoints.EndpointAuthorizer
+import co.datapipelines.application.endpoints.EndpointGrants
 import co.datapipelines.application.endpoints.EndpointInvalidationPublisher
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
@@ -23,11 +24,13 @@ import co.datapipelines.application.endpoints.PublishedMutationDigests
 import co.datapipelines.application.endpoints.PublishedMutationReservationRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.WorkspaceLiveness
+import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.dependencies.FamilyDescriptor
 import co.datapipelines.dependencies.FamilyRegistry
 import co.datapipelines.executor.ExecutionRepository
@@ -44,6 +47,7 @@ import co.datapipelines.pipeline.release.ReleaseFamily
 import co.datapipelines.pipeline.release.ResolvedNode
 import co.datapipelines.typesystem.body.StructuredBodyDecoder
 import co.datapipelines.typesystem.guard.MetadataWriterGuard
+import co.datapipelines.web.bootstrap.DemoManagedEndpointKey
 import co.datapipelines.web.endpoints.CaptureRecorders
 import co.datapipelines.web.endpoints.MutationRequestRules
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
@@ -149,7 +153,8 @@ class EndpointsConfiguration {
      * Issuance that writes a key and its bindings together (§5.2) — cross-aggregate, so the
      * service lives in `modules/application` and only its wiring is here. The published-endpoint
      * repository is what #191's bind-time rule reads: a binding of a workspace must name its own
-     * published tree.
+     * published tree. #1111: the authoring posture an explicit `allow: true` requires, and the demo seeder's managed
+     * public key, which is never elevated.
      */
     @Bean
     fun endpointKeyService(
@@ -157,7 +162,16 @@ class EndpointsConfiguration {
         bindings: EndpointKeyBindingRepository,
         audit: AuditEventSink,
         publishedEndpoints: PublishedEndpointRepository,
-    ): EndpointKeyService = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints)
+        authoringGuard: AuthoringGuard,
+        managedKeys: DemoManagedEndpointKey,
+    ): EndpointKeyService = EndpointKeyService(apiKeys, bindings, audit, publishedEndpoints, authoringGuard, managedKeys)
+
+    /** #1111 — the demo seeder's managed key identity, stated once for the seeder and the elevation refusal. */
+    @Bean
+    fun demoManagedEndpointKey(
+        keyRepository: ApiKeyRepository,
+        workspaceRepository: WorkspaceRepository,
+    ): DemoManagedEndpointKey = DemoManagedEndpointKey(keyRepository, workspaceRepository)
 
     /**
      * The §7.7 proof that an execution belongs to the endpoint key asking for its result. Reads
@@ -349,10 +363,10 @@ class EndpointsConfiguration {
     fun publishedMutationOrigins(
         reservations: PublishedMutationReservationRepository,
         registry: EndpointRegistry,
-        bindings: EndpointKeyBindingRepository,
+        grants: EndpointGrants,
         workspaceLiveness: WorkspaceLiveness,
         urls: PublishedMutationUrls,
-    ): PublishedMutationOrigins = PublishedMutationOrigins(reservations, registry, bindings, workspaceLiveness, urls)
+    ): PublishedMutationOrigins = PublishedMutationOrigins(reservations, registry, grants, workspaceLiveness, urls)
 
     /** #1039 — admission, replay and start of a published POST, PUT or DELETE, in the application's execution scope. */
     @Bean
@@ -409,6 +423,17 @@ class EndpointsConfiguration {
     fun endpointAuthorizer(): EndpointAuthorizer = EndpointAuthorizer()
 
     /**
+     * #1111 — the one effective grant decision (GET's walk; a mutation's exact grant OR namespace grant), shared by the
+     * serve path's visibility (fresh calls and retries) and mutation-origin polling.
+     */
+    @Bean
+    fun endpointGrants(
+        bindings: EndpointKeyBindingRepository,
+        authorizer: EndpointAuthorizer,
+        authoringGuard: AuthoringGuard,
+    ): EndpointGrants = EndpointGrants(bindings, authorizer, authoringGuard)
+
+    /**
      * The §4.2 read-only rule. It resolves PIPELINE children through the same
      * [co.datapipelines.pipeline.PipelineResolver] the save-time validator uses, so "what the
      * child pipeline is" has one answer across both.
@@ -447,6 +472,7 @@ class EndpointsConfiguration {
         // answers, so a deactivated workspace's endpoint is unknown within the same TTL as its keys.
         workspaceLiveness: WorkspaceLiveness,
         mutations: PublishedMutationService,
+        grants: EndpointGrants,
     ): PublishedEndpointServeService =
         PublishedEndpointServeService(
             registry = registry,
@@ -466,6 +492,7 @@ class EndpointsConfiguration {
             scope = executionScope,
             workspaceLiveness = workspaceLiveness,
             mutations = mutations,
+            grants = grants,
         )
 
     private fun timeoutBounds(properties: EndpointsProperties) =

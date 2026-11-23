@@ -68,6 +68,13 @@ data class BindEndpointKeyRequest(
     val apiKeyId: String? = null,
     @field:JsonProperty("method") @get:JsonProperty("method") @param:JsonProperty("method")
     val method: String? = null,
+    /**
+     * #1111 — "allow namespace writes" on the GET node binding. Its presence and strict boolean type are checked on the
+     * raw JSON BEFORE this DTO binds (EndpointsController.bind): omitted, explicit `null` and `false` are three
+     * different requests, and a binder would blur the first two.
+     */
+    @field:JsonProperty("allow") @get:JsonProperty("allow") @param:JsonProperty("allow")
+    val allow: Boolean? = null,
 )
 
 /**
@@ -179,8 +186,15 @@ class EndpointsController(
      * 179 (D17): this route moved from `MANAGE_ENDPOINTS` to `API_KEY_BIND` — association
      * is the credential verb now, the workspace admin's and super admin's (auth.md §7.6),
      * on both request shapes. The BY-NAME shape is kept
-     * for REST compatibility: it resolves within the caller's OWN keys, exactly as before
-     * (an admin binding their own named key), and nothing else changed about it.
+     * for REST compatibility: it resolves within the caller's OWN keys of the ACTIVE workspace (#1111 — before it, the
+     * first same-named key the caller owned in ANY workspace), and nothing else changed about it.
+     *
+     * #1111 — `allow` (auth.md §7.7): an optional STRICT boolean on the GET node shape (method omitted or `GET`).
+     * `true` creates or upgrades the key's GET binding with the namespace-writes opt-in (authoring deployments only);
+     * `false` clears it on an existing binding and creates nothing at an absent node; OMITTED is the ordinary bind,
+     * which never changes an existing binding's opt-in. Explicit `null`, a non-boolean, or `allow` beside a mutation
+     * method is `400` with nothing written. The explicit forms answer `allow` (the stored marker) and `bound` (whether
+     * the key now holds the GET binding) beside the three identifiers; the omitted form keeps the historical shape.
      */
     @PostMapping("/bindings")
     @ResponseStatus(HttpStatus.CREATED)
@@ -189,11 +203,44 @@ class EndpointsController(
     fun bind(
         @RequestBody tree: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
+        val allow = allowOf(tree)
         val body = StrictRequestBodies.bind<BindEndpointKeyRequest>(tree)
         val principal = currentPrincipal()
+        val method = methodOf(body.method, "the binding body")
+        if (allow != null && method.isMutation) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "'allow' sets the namespace-writes opt-in of a GET node binding; an exact ${method.name} grant never " +
+                    "carries it. Drop 'allow', or drop 'method'.",
+                mapOf("reason" to REASON_ALLOW_WITH_METHOD, "path" to ALLOW_FIELD),
+            )
+        }
         val key = resolveKey(body.apiKeyId, body.apiKeyName)
-        endpointKeys.bind(principal, key.id, body.pathPrefix, methodOf(body.method, "the binding body"))
-        return ApiResponse.of(mapOf("path_prefix" to body.pathPrefix, "api_key_name" to key.name, "api_key_id" to key.id))
+        val identifiers = mapOf("path_prefix" to body.pathPrefix, "api_key_name" to key.name, "api_key_id" to key.id)
+        if (allow == null) {
+            endpointKeys.bind(principal, key.id, body.pathPrefix, method)
+            return ApiResponse.of(identifiers)
+        }
+        val state = endpointKeys.setNamespaceWrites(principal, key.id, body.pathPrefix, allow)
+        return ApiResponse.of(identifiers + mapOf("allow" to state.allow, "bound" to state.bound))
+    }
+
+    /**
+     * The `allow` field as the request spelled it (#1111): null when OMITTED, else a strict JSON boolean. Read on the
+     * tree before any DTO binding, because a binder maps an explicit `null` to the same value as an absent field —
+     * and those are different requests here (an explicit null is refused, an omission is the ordinary bind).
+     */
+    private fun allowOf(tree: JsonNode): Boolean? {
+        if (!tree.isObject || !tree.has(ALLOW_FIELD)) return null
+        val value = tree.get(ALLOW_FIELD)
+        if (!value.isBoolean) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "'allow' must be true or false when present; omit it for an ordinary binding.",
+                mapOf("reason" to StrictRequestBodies.REASON_WRONG_TYPE, "path" to ALLOW_FIELD, "expected" to "a boolean"),
+            )
+        }
+        return value.booleanValue()
     }
 
     /** §19.5 — unbind. Both addressing forms, exactly as [bind]; `?method=` names the grant, absent meaning GET. */
@@ -263,15 +310,22 @@ class EndpointsController(
      * BY-ID path always had — an `endpoint` binding on a `dashboard` key would write rows nothing
      * reads; the by-name path now refuses it exactly the same way.)
      */
-    private fun requireOwnedKey(name: String) =
-        apiKeys
+    private fun requireOwnedKey(name: String): ApiKey {
+        // #1111 — the caller's eligible keys of the ACTIVE workspace are filtered BEFORE a match is chosen: before it,
+        // the first same-named key the caller owned in any workspace won, and its binding row was written under this
+        // workspace — a key/workspace mismatch no reader should ever have to exclude.
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        return apiKeys
             .findByUser(currentPrincipal().userId)
-            .firstOrNull { it.name == name && !it.isRevoked && it.kind == ApiKeyKind.ENDPOINT }
+            .firstOrNull {
+                it.name == name && !it.isRevoked && it.kind == ApiKeyKind.ENDPOINT && it.workspaceId == workspaceId
+            }
             ?: throw ApiException(
                 PipelineErrorCodes.Auth.API_KEY_INVALID,
                 "No API key named '$name' that you can bind.",
                 mapOf("api_key_name" to name),
             )
+    }
 
     private fun notFound(path: String) =
         ApiException(
@@ -351,5 +405,12 @@ class EndpointsController(
             "reason" to reason,
             "url" to "/api$echoed",
         )
+    }
+
+    private companion object {
+        const val ALLOW_FIELD = "allow"
+
+        /** `allow` beside an exact mutation method: the opt-in lives on the GET node binding only (#1111). */
+        const val REASON_ALLOW_WITH_METHOD = "allow_with_method"
     }
 }

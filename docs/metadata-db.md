@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.75 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.76 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-11-22
@@ -724,7 +724,7 @@ ALTER TABLE published_endpoints ADD CONSTRAINT fk_published_endpoints_current_ve
 
 ### 4.14 `endpoint_key_bindings`
 
-Which API keys authorise which part of the endpoint tree, and — since V65 (#1037) — which exact mutation routes (V11; method grants V65). See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings).
+Which API keys authorise which part of the endpoint tree, and — since V65 (#1037) — which exact mutation routes (V11; method grants V65; the namespace-writes opt-in V69, #1111). See [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings).
 
 ```sql
 CREATE TABLE endpoint_key_bindings (
@@ -735,7 +735,10 @@ CREATE TABLE endpoint_key_bindings (
     endpoint_id      UUID        NULL REFERENCES published_endpoints(id) ON DELETE CASCADE,  -- V65: the mutation grant's entity
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    allow_namespace_writes BOOLEAN NOT NULL DEFAULT FALSE,           -- V69 (#1111): a GET row's "allow namespace writes" opt-in
     CONSTRAINT chk_endpoint_key_bindings_method CHECK (method IN ('GET', 'POST', 'PUT', 'DELETE')),
+    CONSTRAINT chk_endpoint_key_bindings_namespace_writes
+        CHECK (NOT allow_namespace_writes OR method = 'GET'),        -- V69: only a GET row may carry the opt-in
     CONSTRAINT chk_endpoint_key_bindings_shape
         CHECK ((method = 'GET' AND endpoint_id IS NULL) OR (method <> 'GET' AND endpoint_id IS NOT NULL)),
     CONSTRAINT pk_endpoint_key_bindings PRIMARY KEY (path_prefix, api_key_id, method)
@@ -752,7 +755,33 @@ CREATE INDEX idx_endpoint_key_bindings_endpoint ON endpoint_key_bindings(endpoin
 - `api_key_id` is `TEXT` because [`api_keys.id`](#42-api_keys) is the `dpk_…` id itself, not a UUID.
 - `ON DELETE CASCADE` (key): a key that no longer exists cannot authorise anything, and an orphaned binding would show on the endpoints screen as a binding to nothing. Note that ordinary revocation is a soft flag and leaves the row — the cascade is for a genuine row delete.
 - The primary key `(path_prefix, api_key_id, method)` says one key holds each (node, method) grant once — the GET node grant and every mutation grant at the same pattern included — and several keys may hold the same grant.
-- No `updated_at`: a binding is inserted and deleted, never edited.
+- No `updated_at`: a binding is inserted and deleted; since V69 the one column ever updated in place is `allow_namespace_writes`, and each explicit change is in the audit log (`endpoint.key_namespace_writes`, with the resulting state).
+- **`allow_namespace_writes` (V69, #1111) — "allow namespace writes".** `TRUE` on a GET row lets that key call every live POST, PUT and DELETE route beneath the node **while the deployment's authoring capability is on**, wherever this row's node is the nearest node carrying any GET binding on the request path ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)). Only an explicit `"allow": true` on `POST /api/v1/endpoints/bindings` writes `TRUE` (rest-api §19.5), and only on an authoring deployment; `"allow": false` writes `FALSE`. Both are one atomic statement whose `RETURNING` is the state the response and the audit report. The ordinary bind (`INSERT … ON CONFLICT DO NOTHING`) never rewrites an existing row, so issuance, the Keys page, promotion import and older clients never set or clear it. `DEFAULT FALSE` was the backfill: every pre-V69 row reads `FALSE` and no grant widened at upgrade. `chk_endpoint_key_bindings_namespace_writes` keeps it off exact mutation grants. The column is deployment-local: promotion carries `(path_prefix, key name)` only (§5A).
+- **Inventory of opt-ins (read-only, no secret columns).** What a deployment's operator runs to see every stored opt-in, active or dormant (a receiver's rows are dormant: stored, never admitting):
+
+  ```sql
+  SELECT b.workspace_id, b.path_prefix, b.api_key_id, k.name, b.created_by, b.created_at FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE b.allow_namespace_writes ORDER BY b.workspace_id, b.path_prefix, b.api_key_id
+  ```
+
+  It reads no key hash, prefix material or request data. Add `AND k.workspace_id = b.workspace_id` to list only rows the serve path can honour (below).
+- **Rows whose key belongs to another workspace are ignored (#1111).** Every binding read that authorises (the serve path's node walk and exact grants, run polling) or exports (the promotion batch) joins the key and requires `k.workspace_id = b.workspace_id`, so a mismatched row neither authorises, shadows nor travels: it is excluded from the deciding-node walk and from exact authorization, and the legitimate nearest ancestor decides as if it were absent. No supported write creates such a row (every bind resolves the key in the caller's active workspace); a historical one is kept for inspection, not deleted at upgrade. **Count-only preflight** for an operator's own database:
+
+  ```sql
+  SELECT count(*) FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE k.workspace_id <> b.workspace_id
+  ```
+
+  A non-zero count changes no behaviour (the rows are already ignored). To remove them, preview inside one transaction and commit only on explicit operator approval, and only when the deleted count equals the preflight count:
+
+  ```sql
+  BEGIN;
+  SELECT b.workspace_id, b.path_prefix, b.method, b.api_key_id, k.workspace_id AS key_workspace_id FROM endpoint_key_bindings b JOIN api_keys k ON k.id = b.api_key_id WHERE k.workspace_id <> b.workspace_id;
+  DELETE FROM endpoint_key_bindings b USING api_keys k WHERE k.id = b.api_key_id AND k.workspace_id <> b.workspace_id;
+  -- the DELETE reports its row count: it must equal the preflight count
+  COMMIT;   -- or ROLLBACK; if the count differs or approval is withheld
+  ```
+
+  A caller cannot reach a foreign key through the API to clean it up (by id and by name both resolve within the active workspace). `AuthoringNamespaceKeyIntegrationTest` runs these three statements verbatim.
+- **Rolling back V69:** §7.8.
 
 ### 4.15 `lake_tables`
 
@@ -2694,7 +2723,7 @@ table and the test's expected-table list in the same commit.
 | `execution_capture_sessions` | derived | ExecutionCapture | — | — | An administrator's capture windows on THIS deployment's route entities (§4.62): operational diagnosis of local traffic, never authored, never promoted — a promoted route arrives with capture off |
 | `execution_capture_values` | derived | ExecutionCapture | — | `(execution_id, node_id, output_key)` | Private copies of what THIS deployment's captured runs computed (§4.63), bounded by their own expiry; never authored, never transferred |
 | `execution_capture_runs` | derived | ExecutionCapture | — | `execution_id` | A captured run's closing summary on THIS deployment (§4.64); follows its values |
-| `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing |
+| `endpoint_key_bindings` | promotable | EndpointKeyBinding | — | `(path_prefix, api key name)` | Which node a key authorises is authored topology, not local state, so it travels. It is carried by key NAME because [`api_keys`](#42-api_keys) itself is environment-local — a target missing that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed, rather than importing a binding to nothing. `allow_namespace_writes` (V69) is local state and never travels: a binding lands unmarked, and a receiver's own marker survives a re-push |
 | `dashboard_key_bindings` | promotable | DashboardKeyBinding | — | — | The `endpoint_key_bindings` twin's OWN class, by the same reasoning (L5 #367's lane decision, recorded in the handback): a folder binding is authored topology. TODAY it has no promotion carrier (no batch row, no entity registered with the transfer) — the class states what it WOULD travel as; when a batch carries it, it travels by key NAME exactly like its twin |
 | `learned_facts` | environment-local | LearnedFact | — | — | A fact is about an environment-local [`datasources`](#410-datasources) row and was validated against THAT database's live schema (§4.18); the target environment's data may have a different shape, and a fact that has not been checked against it is exactly what the store refuses to start with. Round 2 may export facts as OSI; nothing promotes them |
 | `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
@@ -3025,6 +3054,21 @@ COMMIT;
 
 Dropping the columns drops `idx_published_mutation_reservations_capture` with them. Reservations, replay and polling are untouched: a retry after the rollback replays its original execution exactly as before.
 
+### 7.8 Rolling back V69 (namespace writes, #1111)
+
+**No barrier.** A binary older than V69 never reads `allow_namespace_writes` and its inserts name their columns, so it starts on V69 metadata and serves the exact grants only: every opt-in is simply not honoured, which fails closed. Rolling back loses nothing but the opt-ins themselves. Before removing the column, record them with the §4.14 inventory if they are to be restored by hand later. Stop every V69-aware instance, take a backup, then
+
+```sql
+BEGIN;
+ALTER TABLE endpoint_key_bindings
+    DROP CONSTRAINT chk_endpoint_key_bindings_namespace_writes,
+    DROP COLUMN allow_namespace_writes;
+DELETE FROM flyway_schema_history WHERE version = '69';
+COMMIT;
+```
+
+A pre-V69 binary does not ignore bindings whose key belongs to another workspace (§4.14); run the §4.14 preflight before rolling back.
+
 ---
 
 ## 8. Operational Jobs
@@ -3197,6 +3241,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-23 | v1.76 | V69 (#1111, authoring namespace key) | **V69 — `endpoint_key_bindings.allow_namespace_writes`** (`BOOLEAN NOT NULL DEFAULT FALSE`, the default the backfill) and **`chk_endpoint_key_bindings_namespace_writes`** (`TRUE` on GET rows only). **§4.14**: the column's meaning and writers, the read-only inventory of opt-ins, the rule that a row whose key belongs to another workspace is ignored, with its count-only preflight and transaction-scoped cleanup. **§5A**: the marker never travels. **§7.8** the rollback. |
 | 2026-11-22 | v1.75 | V68 (#1043, runtime capture) | **V68 — runtime capture of published mutations.** New **§4.62 `execution_capture_sessions`** (administrator windows; one open per route entity and method by a partial unique index; deadline stored at start; stop by window id), **§4.63 `execution_capture_values`** (a captured run's private declared outputs or omission markers, outside the business transaction, bounded by the run's byte budget) and **§4.64 `execution_capture_runs`** (the closing summary the capture status derives from). **§4.61** gains `capture_session_id` / `capture_expires_at`, stamped in the reserving transaction after its `INSERT` and open-window `FOR SHARE` waits so a stop orders against admission. **§3** ERD lines, **§5** eight index rows, **§7.7** the rollback, **§8.6** the batched purge. Status line follows the changelog (was a stale v1.72). |
 | 2026-11-21 | v1.74 | V67 (#1039, published mutations) | **V67 — published mutation reservations.** New **§4.61 `published_mutation_reservations`**: one row per admitted published POST/PUT/DELETE, written before the run starts; keyed scope and request digests (no raw key, no body; the request digest over the typed values the original pin binds), the live/retired CHECK, the run's origin (route entity, API version, exact pin, method, business path, credential) and the start claim. §3 ERD, §5 (PK, the scope UNIQUE, the credential index) and §5A (derived) updated. **§7.6 Rolling back V67**: no barrier — an older binary refuses every mutation and never reads the table. |
 | 2026-11-21 | v1.73 | 1038 r4 (#1038) | **§ template_versions:** a body fixture's exact text (member order, repeated members, exact numbers) is stored beside the `jsonb` view in a reserved `$exact` member of `tests_json` `input.inputs`; no schema change, no migration (#1080). |

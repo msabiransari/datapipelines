@@ -422,6 +422,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `endpoint.served` | A published endpoint served a request (074). Details carry the endpoint id, the execution id and the outcome; the key id is the row's own `key_id`. This row is also what proves an endpoint key may read that execution's result |
 | `endpoint.key_bound` | An API key was bound to a node of the endpoint tree |
 | `endpoint.key_unbound` | An API key's binding to a node was removed |
+| `endpoint.key_namespace_writes` (#1111) | An explicit `"allow": true` or `"allow": false` on a key's GET node binding ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)). `details` carry `path_prefix`, `workspace_id`, `method` (`GET`), `requested` (the value sent) and the RESULTING `allow`, `bound` and `created` — the stored state after the one atomic statement, never a value read before it. No credential, no request body |
 | `dashboard.key_bound` (L5, #367) | A `dashboard` key was bound to a folder of the dashboard name space; `details.name_prefix` and `workspace_id` |
 | `dashboard.key_unbound` (L5, #367) | A `dashboard` key's folder binding was removed; `details.name_prefix` |
 | `endpoint.published` | An endpoint was published over a released pipeline. **Retired from new writes by #786** (an API is created as its v1 DRAFT, `endpoint.draft_saved`); kept for the history rows written before it |

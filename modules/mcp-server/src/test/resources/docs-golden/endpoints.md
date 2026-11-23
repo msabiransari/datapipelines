@@ -89,11 +89,30 @@ at `/finance` authorises everything beneath it — until some node deeper down c
 binding, which then decides for that subtree alone. A mutation grant names exactly ONE route
 entity (`method` + pattern): a sibling method at the same pattern, or a recreated route at the
 same one, is NOT covered — the grant follows the entity. **An endpoint with no grant for the
-caller's method cannot be called**: serving is by key only, so ask a person to grant it — a
+caller's method (and no namespace opt-in, below) cannot be called**: serving is by key only, so ask a person to grant it — a
 mutation grant is a ticked `METHOD /path` box on the Keys page's association form. An
 `endpoint` key with no binding authorises nothing at all. An
 endpoint key reaches published endpoints and the status and cursor of executions it started,
 and nothing else: not `/mcp`, and no other `/api/v1` route.
+
+**On a development deployment, one opt-in can cover a namespace's writes.** So that each new
+`POST`/`PUT`/`DELETE` route you publish does not need its own grant, a workspace admin may mark the
+application key's GET binding at a namespace node once — a one-time REST call the ADMIN makes, never
+you (there is no tool and no Keys-page box for it):
+
+```
+POST /api/v1/endpoints/bindings  {"api_key_id": "dpk_...", "path_prefix": "/finance/v1", "allow": true}
+```
+
+The key may then call every live mutation route beneath that node, including routes published
+later. Two switches must both be on: the deployment's authoring capability (a receiver refuses the
+opt-in with `409 endpoint.authoring_disabled` and never honours a stored one) and the operator's
+mutation switch (else a fresh call is `503 endpoint.mutations_disabled`). The opt-in follows the GET
+rule: it decides only where its node is the NEAREST node carrying any GET binding — a deeper ordinary
+binding (another key's, or the same key's) shadows it, and a sibling such as `/finance/v1-beta` is
+outside it. `"allow": false` or unbinding the node withdraws it on the next call, retries and polls
+included. Promotion never carries it: on a receiver the application's key needs exact grants, so
+say which routes a person must grant there.
 
 `endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface — each takes the
 route's `method` where it matters (absent means `GET`). Deleting an

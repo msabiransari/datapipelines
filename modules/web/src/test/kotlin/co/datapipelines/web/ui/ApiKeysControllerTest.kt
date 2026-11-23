@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.ManagedEndpointKeys
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
@@ -16,6 +17,7 @@ import co.datapipelines.auth.KeyKindNotMintableException
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -238,7 +240,14 @@ class ApiKeysAdminControllerTest {
         ApiKeysAdminController(
             apiKeyService,
             apiKeyRepository,
-            EndpointKeyService(apiKeyService, bindingRepository, auditSink, publishedEndpoints),
+            EndpointKeyService(
+                apiKeyService,
+                bindingRepository,
+                auditSink,
+                publishedEndpoints,
+                AuthoringGuard(true),
+                ManagedEndpointKeys.NONE,
+            ),
             publishing,
             ApiKeyRows(bindingRepository, dashboardBindingRepository),
             bindingRepository,

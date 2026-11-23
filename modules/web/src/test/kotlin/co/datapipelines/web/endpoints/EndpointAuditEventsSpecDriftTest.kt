@@ -33,6 +33,7 @@ class EndpointAuditEventsSpecDriftTest {
                 // The binding writer's kinds are private to it (bindings are outside #786); spelled as written there.
                 "endpoint.key_bound",
                 "endpoint.key_unbound",
+                "endpoint.key_namespace_writes",
                 EndpointPublishService.AUDIT_DRAFT_SAVED,
                 EndpointPublishService.AUDIT_UNPUBLISHED,
                 EndpointReleaseParticipant.AUDIT_RELEASED,
