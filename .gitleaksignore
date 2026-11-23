@@ -5,3 +5,7 @@
 # 2026-11-06 #389: fabricated parser-demonstration password; never used to authenticate.
 # Exact introduction only; other values, lines and commits remain scanned.
 daedc74826edd84e33862fca03c53acdcaddeee0:tests/integration-tests/src/test/kotlin/co/datapipelines/integration/MembershipBoundKeysE2eTest.kt:generic-api-key:147
+
+# 2026-11-23 #1039: synthetic Idempotency-Key canary for a redaction regression test.
+# Exact historical introduction fingerprint.
+c39d7b7a2629d5603d621613b7d2392901be7e01:tests/integration-tests/src/test/kotlin/co/datapipelines/integration/PublishedMutationServeIntegrationTest.kt:generic-api-key:1295
