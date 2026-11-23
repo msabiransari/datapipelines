@@ -145,10 +145,51 @@ class DemoApiKeyE2eTest {
         response.body().asString().contains("rate_limit.exceeded") shouldBe true
     }
 
+    @Test
+    @Order(4)
+    fun `the managed demo key is never allowed namespace writes - a same-named key elsewhere is an ordinary key (#1111)`() {
+        val managedId = KEY_ONE.substringBefore('.')
+        val refused =
+            given()
+                .port(port)
+                .asSession(workspaceAdminSession())
+                .contentType(ContentType.JSON)
+                .body("""{"api_key_id": "$managedId", "path_prefix": "$DEMO_PATH", "allow": true}""")
+                .`when`()
+                .post("/api/v1/endpoints/bindings")
+                .then()
+                .statusCode(403)
+                .extract()
+                .jsonPath()
+        refused.getString("error.code") shouldBe "endpoint.key_kind_refused"
+        refused.getString("error.details.reason") shouldBe "managed_key"
+        markedRows(managedId) shouldBe 0L
+
+        // The same NAME in another workspace grants and refuses nothing by its name: an ordinary key, elevated at its root.
+        val sameName = mintSameNamedKeyElsewhere()
+        given()
+            .port(port)
+            .asSession(otherWorkspaceAdminSession())
+            .contentType(ContentType.JSON)
+            .body("""{"api_key_id": "$sameName", "path_prefix": "/", "allow": true}""")
+            .`when`()
+            .post("/api/v1/endpoints/bindings")
+            .then()
+            .statusCode(201)
+            .body("data.allow", equalTo(true))
+            .body("data.bound", equalTo(true))
+        markedRows(sameName) shouldBe 1L
+
+        // The later boots count `demo-public-key` rows by name across workspaces; leave none of this fixture behind.
+        connection().use { c ->
+            c.createStatement().use { s -> s.execute("DELETE FROM api_keys WHERE id = '$sameName'") }
+        }
+    }
+
     // ------------------------------------------------------------------ boot 2: idempotence
 
     @Test
-    @Order(4)
+    @Order(5)
     fun `a second boot changes nothing, and the non-demo row proves the binding refusal is real`() {
         val before = seededCounts()
 
@@ -159,6 +200,8 @@ class DemoApiKeyE2eTest {
         boot(key = KEY_ONE)
 
         seededCounts() shouldBe before
+        // #1111 — the reconciling boot never turns the marker on for the managed key.
+        markedRows(KEY_ONE.substringBefore('.')) shouldBe 0L
         given()
             .port(port)
             .header(API_KEY_HEADER, KEY_ONE)
@@ -171,7 +214,7 @@ class DemoApiKeyE2eTest {
     // ------------------------------------------------------------------ boot 3: rotation
 
     @Test
-    @Order(5)
+    @Order(6)
     fun `a changed key setting rotates - the old key is refused, the new one serves`() {
         boot(key = KEY_TWO)
 
@@ -203,7 +246,7 @@ class DemoApiKeyE2eTest {
     // ------------------------------------------------------------------ boot 4: a manifest drops a released API (#889)
 
     @Test
-    @Order(6)
+    @Order(7)
     fun `a manifest that drops a released demo API retires it through the version verbs - the row stays, nothing serves`(
         output: CapturedOutput,
     ) {
@@ -230,7 +273,7 @@ class DemoApiKeyE2eTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     fun `the next boot leaves an already-retired API alone - no ERROR line and no write`(output: CapturedOutput) {
         val before = versionRows(SECOND_PATH) to entityUpdatedAt(SECOND_PATH)
 
@@ -247,7 +290,7 @@ class DemoApiKeyE2eTest {
     // ------------------------------------------------------------------ boot 6: the kill switch
 
     @Test
-    @Order(8)
+    @Order(9)
     fun `a blank key setting is the kill switch - the public API is retracted`(output: CapturedOutput) {
         boot(key = "")
 
@@ -285,7 +328,7 @@ class DemoApiKeyE2eTest {
     }
 
     @Test
-    @Order(9)
+    @Order(10)
     fun `the guarded deletion still refuses the retired API for a workspace admin - the seeder bypassed nothing`() {
         given()
             .port(port)
@@ -303,7 +346,7 @@ class DemoApiKeyE2eTest {
     // ------------------------------------------------------------------ boot 7: the key set again
 
     @Test
-    @Order(10)
+    @Order(11)
     fun `a key set again revives both retired APIs through a new released version`() {
         boot(key = KEY_FOUR)
 
@@ -405,6 +448,51 @@ class DemoApiKeyE2eTest {
         return E2eSession.jwt(jwtSecret, WS_ADMIN_USER, WS_ADMIN_EMAIL, workspace = "demo")
     }
 
+    /** #1111 — the key's GET binding rows carrying the namespace-writes opt-in. */
+    private fun markedRows(keyId: String): Long =
+        scalar("SELECT COUNT(*) FROM endpoint_key_bindings WHERE api_key_id = '$keyId' AND allow_namespace_writes")
+
+    /**
+     * #1111 — a person who administers a workspace of this suite's own (not `demo`), seeded once by SQL with its own user,
+     * so no cached membership of the demo admin decides which workspace is active.
+     */
+    private fun otherWorkspaceAdminSession(): String {
+        connection().use { c ->
+            c.createStatement().use { s ->
+                s.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
+                        " VALUES ('$OTHER_ADMIN_USER', '$OTHER_ADMIN_EMAIL', 'Demo API E2E other admin', 'test'," +
+                        " 'demo-api-e2e-other-admin', TRUE, FALSE) ON CONFLICT (id) DO NOTHING",
+                )
+                s.execute(
+                    "INSERT INTO workspaces (id, name, display_name, created_by)" +
+                        " VALUES ('$OTHER_WORKSPACE_ID', '$OTHER_WORKSPACE', 'Demo API E2E other', '$OTHER_ADMIN_USER')" +
+                        " ON CONFLICT (id) DO NOTHING",
+                )
+                s.execute(
+                    "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                        " VALUES ('$OTHER_WORKSPACE_ID', '$OTHER_ADMIN_USER', 'workspace_admin') ON CONFLICT DO NOTHING",
+                )
+            }
+        }
+        return E2eSession.jwt(jwtSecret, OTHER_ADMIN_USER, OTHER_ADMIN_EMAIL, workspace = OTHER_WORKSPACE)
+    }
+
+    /** #1111 — an endpoint key of the managed NAME, minted in another workspace over the real issuance route; its id. */
+    private fun mintSameNamedKeyElsewhere(): String {
+        val minted =
+            given()
+                .port(port)
+                .asSession(otherWorkspaceAdminSession())
+                .contentType(ContentType.JSON)
+                .body("""{"name": "demo-public-key", "kind": "endpoint", "bindings": []}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .thenReturn()
+        withClue(minted.asString()) { minted.statusCode() shouldBe 201 }
+        return minted.jsonPath().getString("data.id")
+    }
+
     /** An `endpoint` key the seeder does not manage, bound to both demo paths, minted over the real REST issuance route. */
     private fun mintIndependentKey(): String =
         given()
@@ -494,6 +582,10 @@ class DemoApiKeyE2eTest {
         private const val ADMIN_EMAIL = "demo-api-e2e-admin@example.com"
         private const val WS_ADMIN_EMAIL = "demo-api-e2e-ws-admin@example.com"
         private const val WS_ADMIN_USER = "de000000-0000-0000-0000-0000000088a9"
+        private const val OTHER_ADMIN_EMAIL = "demo-api-e2e-other-admin@example.com"
+        private const val OTHER_ADMIN_USER = "de000000-0000-0000-0000-000000001111"
+        private const val OTHER_WORKSPACE = "demo-e2e-1111"
+        private const val OTHER_WORKSPACE_ID = "de000000-0000-0000-0000-00000000aaaa"
 
         /** The catalogued codes the real responses carry (pipeline-contract §13), as literals — this suite is black-box. */
         private const val PIPELINE_NOT_RELEASED = "endpoint.pipeline_not_released"
