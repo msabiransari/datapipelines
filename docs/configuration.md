@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.108 (operator reference; source-traced configuration authority)
+**Status:** v1.109 (operator reference; source-traced configuration authority)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-11-22
+**Last updated:** 2026-11-23
 
 ---
 
@@ -1528,6 +1528,7 @@ The Helm input reference already lives in the commented `deploy/helm/datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-23 | v1.109 | 1111 (#1111, authoring namespace key) | **§3.19 / §3.22:** authoring capability also gates stored namespace-writes opt-ins on every fresh call, retry and poll; disabling authoring suspends them, re-enabling it restores retained grants, and downgrade or unbind retires them permanently. The existing mutation switch continues to gate fresh admission. No new configuration key. |
 | 2026-11-22 | v1.108 | 1043 (#1043) | **§3.22** gains `datapipelines.endpoints.capture-window-seconds` (default `900`) and `datapipelines.endpoints.capture-detail-retention-hours` (default `24`): how long an administrator's runtime capture window admits, and how long captured detail lives from admission; an example and the operator steps. **§7** their startup rule (positive integer, representable deadline, judged on the raw text). **§8** their source binding. Status line corrected from the stale v1.104. |
 | 2026-11-21 | v1.107 | 1039 (#1039) | **§2 `datapipelines.jwt.secret`:** also derives the replay digest key (rotation turns in-window retries into new requests). **§3.22:** `mutations-enabled` now withholds only FRESH published mutations — replay of an admitted request and its polling stay available; new `datapipelines.endpoints.mutation-start-window-seconds` (default `60`), the start-claim takeover window of a durable mutation reservation. **§8** its source binding. |
 | 2026-11-21 | v1.106 | 1038 r2 (#1038) | **§3.22:** `body-max-bytes` and `body-max-depth` also bound an authored body fixture (template test case, release/test run, `templates/evaluate`, `templates_evaluate`). |

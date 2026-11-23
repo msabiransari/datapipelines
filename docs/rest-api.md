@@ -3,7 +3,7 @@
 **Status:** v2.136 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24, 2026-09-26 (v2.36, v2.37), 2026-11-11 (v2.112, v2.116), 2026-11-12 (v2.120) and 2026-11-15 (v2.122, v2.123) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-11-22
+**Last updated:** 2026-11-23
 
 ---
 
