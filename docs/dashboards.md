@@ -1000,7 +1000,9 @@ renderer shows the resolved value" for this case only).
     mark's card opens as on hover. Right past a series' last mark reaches the legend entries (Enter or Space switches
     the focused one), then the texts the engine cut short (each opens its whole-text card). Escape clears the ring
     and the card; leaving the chart clears both. After a redraw the ring stays on the same mark, entry or text when
-    it is still drawn.
+    it is still drawn. On a scatter each point is a row of its own, in the data's order (#1062): Up and Down walk the
+    points (two at one place are each reached), Left, Home and End stay on the point, and Right goes on as past a
+    series' last mark.
   - **Motion.** The dimming fades over `--chart-ease`; under `prefers-reduced-motion` it does not fade.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
