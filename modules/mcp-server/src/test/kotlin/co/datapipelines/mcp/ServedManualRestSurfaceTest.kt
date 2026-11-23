@@ -146,6 +146,12 @@ class ServedManualRestSurfaceTest {
                     "the APPLICATION's call with its own endpoint key, labelled as such in the sentence above it — never the agent's",
                 ),
                 Allowed(
+                    "endpoints",
+                    "POST /api/v1/endpoints/bindings  {\"api_key_id\": \"dpk_...\", \"path_prefix\": \"/finance/v1\", \"allow\": true}",
+                    "#1111: the workspace ADMIN's one-time namespace opt-in, labelled as theirs in the sentence above it — no MCP " +
+                        "tool writes it by design, so the agent can only say what to ask for",
+                ),
+                Allowed(
                     "core-error-codes",
                     "## Auth api_key",
                     "the generated error-code catalogue's group heading — the name of the auth.api_key family, not a recipe",
