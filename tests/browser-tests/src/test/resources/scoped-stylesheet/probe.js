@@ -140,6 +140,9 @@ window.__dp1065 = (function () {
       return window.__dp1065FirstFills || [];
     },
     boot: async function (args) {
+      // Compare the stylesheets with their declared fonts available for the first chart measurement.
+      // With font-display: optional, cold visits can otherwise measure the same labels in different faces.
+      await Promise.all(Array.from(document.fonts, function (face) { return face.load(); }));
       var script = await addScript(args.script);
       if (script.indexOf("ok ") !== 0) return script;
       var DP = window.DatapipelinesDashboard;
