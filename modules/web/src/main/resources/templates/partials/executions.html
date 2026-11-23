@@ -15,11 +15,12 @@
           <th class="num">Duration</th>
           <th class="num">Rows</th>
           <th>Via</th>
+          <th>Caller</th>
         </tr>
       </thead>
       <tbody>
         <tr th:if="${#lists.isEmpty(executions)}" class="dt-state-row">
-          <td colspan="7" class="dt-state-cell">
+          <td colspan="8" class="dt-state-cell">
             <div class="dt-state">
               <b>No executions found</b>
               <span th:if="${offset == 0}">Run a pipeline to see results here.</span>
@@ -64,12 +65,14 @@
             <span class="app-chip" th:attr="data-status=${r.status.name()}"
                   th:classappend="${r.status.name() == 'SUCCESS'} ? 'app-chip-ok' : (${r.status.name() == 'FAILED'} ? 'app-chip-bad' : (${r.status.name() == 'RUNNING'} ? 'app-chip-run' : 'app-chip-warn'))"><i class="ds-status"></i><span th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(r.status.name()),'_',' '))}">Success</span></span>
           </td>
-          <td th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm')}">date</td>
+          <td th:attr="data-sort-value=${r.startedAt}"
+              th:text="${#temporals.format(r.startedAt, 'yyyy-MM-dd HH:mm', 'UTC')}">date</td>
           <td class="num" th:text="${r.durationMs != null} ? ${r.durationMs + ' ms'} : '—'">dur</td>
           <td class="num" th:text="${r.resultRowCount != null} ? ${r.resultRowCount} : '—'">rows</td>
           <!-- 079 §E: `triggered_via` rides on every ExecutionRecord already (SELECT_COLUMNS
                carries it) and was rendered only on the detail screen. -->
           <td class="u-muted" th:text="${r.triggeredVia.name()}">MCP</td>
+          <td th:text="${callers?.get(r.executedBy) ?: '—'}">caller</td>
         </tr>
       </tbody>
     </table>
@@ -82,6 +85,7 @@
         <button class="ds-button ds-button-secondary"
                 hx-get="/partials/executions"
                 hx-include="#execution-filters"
+                hx-sync="#execution-filters:replace"
                 th:attr="hx-vals=|{&quot;offset&quot;: ${offset - pageSize}}|"
                 hx-target="#execution-table"
                 hx-swap="innerHTML">Previous</button>
@@ -93,6 +97,7 @@
         <button class="ds-button ds-button-secondary"
                 hx-get="/partials/executions"
                 hx-include="#execution-filters"
+                hx-sync="#execution-filters:replace"
                 th:attr="hx-vals=|{&quot;offset&quot;: ${nextOffset}}|"
                 hx-target="#execution-table"
                 hx-swap="innerHTML">Next</button>

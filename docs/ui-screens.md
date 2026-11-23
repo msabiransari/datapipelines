@@ -1660,7 +1660,7 @@ plants markup in each pane). Release and Purge draft are the §4.3d dialogs, unc
 | JS | None |
 | htmx | Yes — filters (pipeline, status, date range), pagination (`hx-get="/partials/executions"` into `#execution-table`, `innerHTML`, with `hx-include="#execution-filters"` re-sending the filter form by id; the pager offsets are server-rendered into `hx-vals` via `th:attr` literal substitution) |
 
-Content: table of executions (pipeline **display name** — machine path on hover, T114 —, version **with a `DRAFT` label when that version was a draft when it ran** (versioning §8's derivation, `data-draft-run` for a test to read), status badge, triggered_by, triggered_via badge, started_at, duration). The label matters more since D55: a v1 run is routinely a draft run, so the number alone would not say whether a result came from reviewed content. The execution detail screen carries the same badge beside its `v1`. Clickable → execution detail. This screen deliberately keeps its own `#execution-table` / `innerHTML` / `hx-include="#execution-filters"` contract rather than adopting the §5 outerHTML one — it satisfies every §5.1 guarantee (stable target, controls outside the fragment, spinner, toasts), and the pager's `hx-vals` offsets are server-rendered via `th:attr="hx-vals=|{...}|"` (a plain-attribute `[[...]]` inlining reaches the browser unprocessed — Thymeleaf processes inlining in text nodes, not attribute values).
+Content: table of executions (pipeline **display name** — machine path on hover, T114 —, version **with a `DRAFT` label when that version was a draft when it ran** (versioning §8's derivation, `data-draft-run` for a test to read), status badge, started time, duration, result row count, trigger and caller). Caller uses the stored identity's display name, with an API key label for key identities and a short ID fallback for missing identities (#1113). The label matters more since D55: a v1 run is routinely a draft run, so the number alone would not say whether a result came from reviewed content. The execution detail screen carries the same badge beside its `v1`. Clickable → execution detail. The screen uses `#execution-table` / `innerHTML` / `hx-include="#execution-filters"` with pager offsets rendered via `th:attr="hx-vals=|{...}|"`. Date filters and the Started column use UTC. **On or after** includes the selected day and **Before** excludes it. Changing a filter returns to the first page, and pagination retains the filters (#1115).
 
 ### 4.9 Execution Detail
 
@@ -2098,17 +2098,17 @@ Two cards.
 1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
    for pipeline names and one for released versions (never a query per row, the rule
    `PipelineNames` was written for). Columns: path, pipeline, timeout, **API keys**.
-   - The method is always **GET**: `PublishedEndpointController` refuses everything else with
-     `Allow: GET`, so it is a fact about the surface rather than a column that could vary.
+   - The path cell shows the route's HTTP method. GET, POST, PUT and DELETE routes at the
+     same path have separate rows.
    - The version shown is the **released** one, not `pipelines.current_version`. An endpoint
      pins a PIPELINE and serves its latest release, so a draft number would describe something
      no call will ever run. A pipeline with no release renders "no released version" — an
      endpoint can outlive the release it was published against, and that is worth seeing.
-   - **API keys** names the keys associated at the EXACT node (179: names, not a count —
-     "which keys" is the operator's question). It is deliberately not the EFFECTIVE
-     authorization, which walks ancestors and takes the nearest node carrying any binding
-     (`EndpointAuthorizer`); and no associations does not mean nobody can call it — a `user`
-     key pinned to this workspace with `execute` still may. The **Manage** link (admins only)
+   - **API keys** shows the nearest binding on the concrete paths a GET route matches.
+     Inherited bindings show their source path. Bindings that apply to specific path parameter
+     values show those values and their source, with the closest match taking precedence.
+     A broader binding can apply to the remaining values (#1114). For a mutation the column
+     lists grants for its exact route entity and method. The **Manage** link (admins only)
      leads to the association editor on `/api-keys`.
    - **There is no "calls in the last 24 h" column, and the mock has one.** Nothing in this
      system records endpoint serves: no counter column on `published_endpoints`, no Micrometer

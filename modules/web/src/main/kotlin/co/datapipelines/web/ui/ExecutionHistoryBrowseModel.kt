@@ -10,6 +10,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
+import java.time.temporal.ChronoUnit
+import java.util.UUID
 
 /**
  * The execution-history screen's model, in one place for the page controller and the partial
@@ -34,6 +36,7 @@ class ExecutionHistoryBrowseModel(
      * field. Since D55 a v1 run is routinely a draft run, so the column has to say which.
      */
     private val pipelines: PipelineRepository,
+    private val actorNames: ActorNames,
 ) {
     /**
      * Fills [model] with one page of the history [principal] may see, and returns the fragment
@@ -48,7 +51,7 @@ class ExecutionHistoryBrowseModel(
     fun fillList(
         model: Model,
         principal: AuthenticatedPrincipal,
-        pipelineId: java.util.UUID?,
+        pipelineId: UUID?,
         status: String?,
         startedAfter: String?,
         startedBefore: String?,
@@ -58,14 +61,16 @@ class ExecutionHistoryBrowseModel(
         val isAdmin = principal.holds(Permission.EXECUTION_READ_ALL)
         val wanted = status?.let { runCatching { ExecutionStatus.valueOf(it.trim().uppercase()) }.getOrNull() }
         val page = maxOf(0, offset)
+        val after = instantOf(startedAfter, before = false)
+        val before = instantOf(startedBefore, before = true)
         val raw =
             if (isAdmin) {
                 executions.findAll(
                     workspaceId,
                     pipelineId,
                     wanted,
-                    instantOf(startedAfter, endOfDay = false),
-                    instantOf(startedBefore, endOfDay = true),
+                    after,
+                    before,
                     limit = PAGE_SIZE + 1,
                     offset = page,
                 )
@@ -79,8 +84,8 @@ class ExecutionHistoryBrowseModel(
                     principal.userId,
                     pipelineId,
                     wanted,
-                    instantOf(startedAfter, endOfDay = false),
-                    instantOf(startedBefore, endOfDay = true),
+                    after,
+                    before,
                     limit = PAGE_SIZE + 1,
                     offset = page,
                 )
@@ -98,6 +103,9 @@ class ExecutionHistoryBrowseModel(
             },
         )
         model.addAttribute("pipelineNames", pipelineNames.lookup(workspaceId, items.map { it.pipelineId }))
+        val actorIds = items.map { it.executedBy }.toSet()
+        val names = actorNames.lookup(actorIds)
+        model.addAttribute("callers", actorIds.associateWith { names[it] ?: ActorNames.fallback(it) })
         model.addAttribute("offset", page)
         model.addAttribute("pageSize", PAGE_SIZE)
         model.addAttribute("hasMore", hasMore)
@@ -106,21 +114,20 @@ class ExecutionHistoryBrowseModel(
     }
 
     /**
-     * The filter bar's `<input type="date">` posts `2026-09-09`, which `Instant.parse` rejects
-     * — every date filter on this screen used to be a `DateTimeParseException` and a 500 page.
-     * A bare date is read in UTC, and a `before` date is INCLUSIVE of the day the operator
-     * picked (they chose a day, not a midnight), so the two pickers select a closed range.
-     * A full ISO instant still parses; anything else filters nothing, like an unknown status.
+     * The date inputs use UTC, like the Started column. A Before date excludes that whole day.
+     * The repository uses an inclusive upper bound and PostgreSQL stores timestamps at
+     * microsecond precision, so use the last representable instant before the date starts.
+     * Full ISO instants keep their inclusive behavior.
      */
     private fun instantOf(
         raw: String?,
-        endOfDay: Boolean,
+        before: Boolean,
     ): Instant? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return runCatching { Instant.parse(value) }.getOrNull()
             ?: runCatching {
-                val date = LocalDate.parse(value)
-                (if (endOfDay) date.plusDays(1) else date).atStartOfDay(ZoneOffset.UTC).toInstant()
+                val midnight = LocalDate.parse(value).atStartOfDay(ZoneOffset.UTC).toInstant()
+                if (before) midnight.minus(1, ChronoUnit.MICROS) else midnight
             }.getOrElse { if (it is DateTimeParseException) null else throw it }
     }
 

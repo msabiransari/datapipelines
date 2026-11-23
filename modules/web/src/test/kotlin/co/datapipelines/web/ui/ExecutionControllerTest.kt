@@ -59,7 +59,8 @@ class ExecutionControllerTest {
     private val cancellation = mockk<ExecutionCancellationService>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
 
-    private val browse = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines)
+    private val actorNames = mockk<ActorNames>().also { every { it.lookup(any()) } returns emptyMap() }
+    private val browse = ExecutionHistoryBrowseModel(executions, pipelineNames, pipelines, actorNames)
     private val pageController = ExecutionHistoryController(pipelines, browse)
     private val partialController = ExecutionHistoryPartialController(browse)
     private val detailController =
