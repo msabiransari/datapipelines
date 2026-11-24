@@ -14,11 +14,20 @@
 # Never unlink a slot or lock file: replacing a locked inode would let a second
 # wrapper acquire a different lock.
 
-# Default floor: 1.5 x one pregate's memory, rounded up to the GB (#485 section A,
-# run 20261009T134317Z-b3fef5b0-1423801). Peak RSS of the daemons it started: Gradle
-# 1.08 GB + Kotlin 3.65 GB, plus the one test fork at its 1 GB heap cap = 5.73 GB;
-# x 1.5 = 8.6 GB -> 9 GB. (Box-wide MemAvailable drift swamped a before-minus-min read.)
-VERIFICATION_MEM_FLOOR_DEFAULT_MB=9216
+# Default floor: estimate from recorded JVM peaks, rounded up to the GB (1 GB =
+# 1024 MB), #1095. Peak resident memory: Gradle daemon 2047888 kB -> 2000 MB
+# (lane 1058, 2026-11-22); Kotlin daemon 3.65 GB -> 3738 MB (full compile, run
+# 20261009T134317Z-b3fef5b0-1423801); test JVM 4575140 kB -> 4468 MB at -Xmx2g
+# (lane 1058, 2026-11-22, web suite). Sum 10206 MB -> 10240 MB (10 GB).
+# No 1.5 x margin: follows the gate floor's rule (owner 2026-11-13,
+# gate-stages.sh); applying that margin would round up to 15 GB.
+# Not measured: all three JVMs in one cold run, the integration task with its
+# own 6g heap, or guard-stage containers; these terms do not bound total RSS.
+# Changing the pregate's -Pdp.test.heap means measuring the test JVM again and
+# updating its term; the self-test ties the measured heap to the pregate's heap.
+VERIFICATION_PREGATE_TEST_HEAP=2g
+VERIFICATION_PREGATE_PEAK_MB=(2000 3738 4468)
+VERIFICATION_MEM_FLOOR_DEFAULT_MB=$(( (VERIFICATION_PREGATE_PEAK_MB[0] + VERIFICATION_PREGATE_PEAK_MB[1] + VERIFICATION_PREGATE_PEAK_MB[2] + 1023) / 1024 * 1024 ))
 VERIFICATION_SLOTS=(0 1)
 
 # Prints the floor in MB; garbage falls back to the default with a stderr line.

@@ -323,6 +323,21 @@ garbage="$(DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB=12x verification::_mem_floor_
 [ "$garbage" = "$VERIFICATION_MEM_FLOOR_DEFAULT_MB" ] && grep -q "'12x' is not an integer" "$T/garbage" || fail 'garbage floor'
 [ "$(DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB= verification::_mem_floor_mb 2>&1)" = "$VERIFICATION_MEM_FLOOR_DEFAULT_MB" ] || fail 'empty floor'
 ok 'cases 9-10: the floor refuses gate and pregate before any record; 0 admits; garbage reads the default'
+# #1095: keep the recorded resident-memory estimate tied to the actual test heap.
+[ "$(grep -c '^[[:space:]]*PG_COMMON=(' "$ROOT/scripts/pregate-plan-lib.sh")" -eq 1 ] || fail 'floor: expected exactly one PG_COMMON=( line (#1095)'
+pregate_heap="$(sed -n '/^[[:space:]]*PG_COMMON=(/s/.* -Pdp.test.heap=\([^ )]*\).*/\1/p' "$ROOT/scripts/pregate-plan-lib.sh")"
+[ "$pregate_heap" = "$VERIFICATION_PREGATE_TEST_HEAP" ] || fail "floor: measured test heap $VERIFICATION_PREGATE_TEST_HEAP differs from pregate heap $pregate_heap; measure the test JVM again (#1095)"
+[ "${#VERIFICATION_PREGATE_PEAK_MB[@]}" -eq 3 ] || fail 'floor: expected three recorded JVM peaks (#1095)'
+peak_sum=0
+for peak in "${VERIFICATION_PREGATE_PEAK_MB[@]}"; do
+  [[ "$peak" =~ ^[0-9]+$ ]] && [ "$((10#$peak))" -gt 0 ] || fail "floor: peak must be a positive integer: $peak (#1095)"
+  peak_sum=$((peak_sum + 10#$peak))
+done
+[ "$((VERIFICATION_MEM_FLOOR_DEFAULT_MB % 1024))" -eq 0 ] &&
+  [ "$VERIFICATION_MEM_FLOOR_DEFAULT_MB" -ge "$peak_sum" ] &&
+  [ "$((VERIFICATION_MEM_FLOOR_DEFAULT_MB - peak_sum))" -lt 1024 ] || fail "floor: default $VERIFICATION_MEM_FLOOR_DEFAULT_MB MB is not sum $peak_sum MB rounded up to the GB (#1095)"
+[ "$(grep -c "default ${VERIFICATION_MEM_FLOOR_DEFAULT_MB} MB" "$ROOT/DEVELOPMENT.md")" -eq 1 ] || fail "floor: DEVELOPMENT.md must state default $VERIFICATION_MEM_FLOOR_DEFAULT_MB MB exactly once (#1095)"
+ok "the floor is the estimate from the recorded JVM peaks at the pregate's test heap, and DEVELOPMENT.md states it (#1095)"
 echo '  resource safety self-test: PASS'
 
 # #479: the production wrappers, planner and evidence reducer, with no real tools.
