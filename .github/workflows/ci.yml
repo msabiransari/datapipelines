@@ -207,6 +207,17 @@ jobs:
       # override path. At the repo defaults (workers 6, forked test JVMs, 3+4 GB daemons)
       # this runner is oversubscribed and load-sensitive UI assertions lose their race
       # (2026-09-13: an entrance animation measured 116.7 ms against its 120 ms floor).
+      # Ceilings here: Gradle daemon 2g heap + 512m metaspace, Kotlin daemon 2g,
+      # ordinary test JVM 1g, two workers (so two test JVMs can run at once).
+      # :modules:web:test reads only command-line -Pdp.test.heap, not this file's
+      # dp.test.heap; it runs at its own 1536m (modules/web/build.gradle.kts).
+      # About 1.0 GiB was live after a full collection (lane 1058, 2026-11-22).
+      # Worst case: both daemons + web JVM + one ordinary test JVM =
+      # 2 + 0.5 + 2 + 1.5 + 1 = 7 GB, the runner's entire memory above.
+      # These ceilings do not prove a fit: resident memory exceeds heap (lane
+      # 1058 measured 3.40 GiB at a 1g heap on the reference machine).
+      # Evidence is this workflow's own green run; report Java heap space or a
+      # killed runner in #1096.
       - name: size Gradle for the runner
         run: |
           mkdir -p ~/.gradle
