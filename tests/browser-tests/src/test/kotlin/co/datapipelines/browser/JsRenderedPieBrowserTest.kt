@@ -55,6 +55,15 @@ class JsRenderedPieBrowserTest {
                     page.evaluate(CARD_JS) shouldBe listOf("Payments by method", name, value)
                 }
             }
+            page.keyboard().press("End")
+            page.keyboard().press("ArrowRight")
+            page.evaluate(CARD_JS) shouldBe emptyList<String>()
+            page.evaluate(
+                "() => [...document.querySelectorAll('g.dp-legend.dp-active')].map(e => e.getAttribute('data-legend'))",
+            ) shouldBe listOf("string:S4")
+            // Space switches the selected entry, proving the keyboard target's identity as well as its highlight.
+            page.keyboard().press("Space")
+            page.evaluate("() => window.ChartPie.asked()") shouldBe listOf("string:S4")
             page.keyboard().press("Escape")
             page.evaluate(CARD_JS) shouldBe emptyList<String>()
             opened.errors.shouldBeEmpty()

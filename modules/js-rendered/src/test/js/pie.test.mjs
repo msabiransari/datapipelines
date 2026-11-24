@@ -115,6 +115,7 @@ test('pie lookup radii, card, square legend, keys and hidden reproportioning', (
     const right = I.keyTarget(lm, target, 'ArrowRight').target;
     assert.equal(right.kind, i === 3 ? 'entry' : 'mark');
     if (i < 3) assert.equal(right.datum, 'string:S' + (i + 2));
+    else assert.equal(right.id, 'string:S4');
   }
   assert.equal(r.index.marks[0].card.rows[0].value, '50 kg (50%)');
   assert.ok(r.primitives.some(p => p.k === 'rect' && p.role === 'legend'));
