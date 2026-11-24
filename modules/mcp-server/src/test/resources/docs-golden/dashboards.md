@@ -66,7 +66,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area` or `scatter` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter` or `pie` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -192,15 +192,26 @@ fourth its colour (`color` as a shade, as the bar's), or `color` can split the p
   per group) or pick another type. A row with a null `x`, `y` or size is not drawn.
 - `mark_count` counts the rows drawn.
 
+**Pie?** Parts of a whole, at most eight slices; default `inner: 0.6` is a ring, `inner: 0` a disc.
+With many parts prefer a bar. The smallest parts fold into Other, last. Negative aggregates refuse the chart.
+Labels stay inside slices where they fit; switching a slice off re-proportions the rest. Options: dashboards §2.1.2.
+
+```json
+"config": {"mark": {"type": "pie"}, "encoding": {
+  "theta": {"field": "amount", "type": "quantitative", "aggregate": "sum"},
+  "color": {"field": "channel", "type": "nominal", "sort": null}
+}}
+```
+
 **On every type, except where an item names its types:**
 - **`fields` instead of `color`** (bar, line and area only; a scatter's `y` takes one `field` and no `aggregate`):
   `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a tooltip detail.
-- **`encoding.tooltip`:** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
-- **`scale`:** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
+  scatter's `y`, a pie's `theta`, a tooltip detail.
+- **`encoding.tooltip` (not on a pie):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
+- **`scale` (not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
   `zero`; a value at or below zero is then not drawn.
 

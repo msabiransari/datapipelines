@@ -1,0 +1,54 @@
+{
+  "source": [
+    "Design record \u00a74.5 pie; approved brief #1068 D14"
+  ],
+  "note": "no rows: the no-data state",
+  "document": {
+    "display_name": "empty",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "pie"
+      },
+      "encoding": {
+        "theta": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [],
+    "v": []
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

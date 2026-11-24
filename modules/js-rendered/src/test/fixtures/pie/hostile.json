@@ -1,0 +1,70 @@
+{
+  "source": [
+    "Design record \u00a74.5 pie; approved brief #1068 D14"
+  ],
+  "note": "markup in a name, a title and a subtitle",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "pie"
+      },
+      "encoding": {
+        "theta": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      },
+      "title": {
+        "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going",
+        "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "onload=alert(1)",
+      "\" onmouseover=\"x"
+    ],
+    "v": [
+      3,
+      5,
+      2,
+      4,
+      1
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

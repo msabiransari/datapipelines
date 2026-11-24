@@ -1,0 +1,80 @@
+{
+  "source": [
+    "Design record \u00a74.5 pie; approved brief #1068 D14"
+  ],
+  "note": "twelve slices folded to eight with Other",
+  "document": {
+    "display_name": "folded",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "pie"
+      },
+      "encoding": {
+        "theta": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9",
+      "S10",
+      "S11",
+      "S12"
+    ],
+    "v": [
+      40,
+      30,
+      20,
+      15,
+      12,
+      10,
+      8,
+      6,
+      5,
+      4,
+      3,
+      2
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}
