@@ -40,7 +40,15 @@ begin() { # begin <case> <title>
   FX="$T/case$1"; BASE="$FX/tmp"; CO="$FX/checkout"
   mkdir -p "$BASE" "$CO" "$FX/outside"
 }
+explain_case() {
+  local record
+  for record in "$FX"/doubt.* "$FX/own-refs"; do
+    [ -f "$record" ] || continue
+    while IFS= read -r line; do printf '  explain case %s: %s\n' "$CASE" "$line" >&2; done < "$record"
+  done
+}
 finish() {
+  [ "$FAILS" -eq "$CASE_FAILS" ] || explain_case
   stop_holders
   if [ "$FAILS" -eq "$CASE_FAILS" ]; then echo "  ok   case $CASE: $TITLE"; fi
 }
@@ -77,12 +85,26 @@ own_process() { # own_process <pid>
 leave_out_foreign_doubt() {
   eval "$(declare -f th::_proc_refs | sed '1s/th::_proc_refs/th::_proc_refs_read/')"
   th::_proc_refs() {
-    local rc=0; th::_proc_refs_read "$1" || rc=$?
-    if [ "${TH_P_DOUBT:-0}" -gt 0 ] && ! own_process "$1"; then
+    local rc=0 own=0 pid parent= key value
+    th::_proc_refs_read "$1" || rc=$?
+    # Same holder-or-child rule as own_process; builtin reads avoid a fork for every scanned pid.
+    if [ -r "/proc/$1/status" ]; then
+      while read -r key value; do
+        if [ "$key" = PPid: ]; then parent="$value"; break; fi
+      done < "/proc/$1/status" 2>/dev/null
+    fi
+    for pid in "${CASE_HOLDERS[@]}"; do
+      if [ "$1" = "$pid" ] || [ "$parent" = "$pid" ]; then own=1; break; fi
+    done
+    if [ "$own" -eq 1 ]; then
+      printf 'case %s pass %s: own %s %s rc=%s refs=%s doubt=%s\n' \
+        "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" "$rc" "${#TH_P_REFS[@]}" "${TH_P_DOUBT:-0}" >> "$FX/own-refs"
+    fi
+    if [ "${TH_P_DOUBT:-0}" -gt 0 ] && [ "$own" -eq 0 ]; then
       printf 'case %s pass %s: %s %s\n' "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" >> "$T/foreign-doubt"
       TH_P_REFS=(); TH_P_DOUBT=0
     fi
-    if [ "${TH_P_FUSE:-0}" -gt 0 ] && ! own_process "$1"; then
+    if [ "${TH_P_FUSE:-0}" -gt 0 ] && [ "$own" -eq 0 ]; then
       printf 'case %s pass %s: %s %s\n' "$CASE" "$PASSN" "$1" "$TH_PROC_NAME" >> "$T/foreign-fuse"
       TH_P_FUSE=0
     fi
@@ -97,6 +119,7 @@ pass() {
   OUT="$FX/out.$PASSN"; ERR="$FX/err.$PASSN"; LIST="$FX/list.$PASSN"
   (
     export TMPDIR="${PASS_TMPDIR:-$BASE}"
+    export TH_DOUBT_LOG="$FX/doubt.$PASSN"
     # shellcheck source=lib/temp-hygiene.sh
     source "$LIB"
     leave_out_foreign_doubt
@@ -459,6 +482,46 @@ printf 'SCAN_EXIT_OFFLINE=200\nscan_tools_classify_network() { echo offline; }\n
 for stub in gradlew scripts/pregate.sh scripts/vuln-scan.sh scripts/docs-audit.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$GF/$stub"; chmod +x "$GF/$stub"
 done
+# Only the copied helpers see this input seam: enumerate this test and its descendants,
+# including holders and both real wrappers, instead of unrelated host processes. Their
+# references, mount tables and uncertain judgments still go through the real helper.
+for co in "$PF" "$GF"; do
+  mv "$co/scripts/lib/temp-hygiene-helper.py" "$co/scripts/lib/temp-hygiene-helper-real.py"
+  printf '%s\n' "$BASHPID" > "$co/scripts/lib/fixture-pid"
+  cat > "$co/scripts/lib/temp-hygiene-helper.py" <<'PY'
+import os
+from pathlib import Path
+import runpy
+
+fixture_pid = (Path(__file__).parent / "fixture-pid").read_text().strip()
+real_listdir = os.listdir
+
+
+def fixture_process(pid: str) -> bool:
+    seen: set[str] = set()
+    while pid.isdigit() and pid != "0" and pid not in seen:
+        if pid == fixture_pid:
+            return True
+        seen.add(pid)
+        try:
+            status = Path("/proc", pid, "status").read_text()
+        except FileNotFoundError:
+            return False  # A process that exited holds nothing.
+        pid = next((line.split()[1] for line in status.splitlines() if line.startswith("PPid:")), "0")
+    return False
+
+
+def fixture_listdir(path: str) -> list[str]:
+    entries = real_listdir(path)
+    if path == "/proc":
+        return [entry for entry in entries if not entry.isdigit() or fixture_process(entry)]
+    return entries
+
+
+os.listdir = fixture_listdir
+runpy.run_path(str(Path(__file__).with_name("temp-hygiene-helper-real.py")), run_name="__main__")
+PY
+done
 wrapper() { # wrapper <checkout> <script> [args]: the copied wrapper, its own lock cache, this case's temp base
   local co="$1"; shift
   PASSN=$((PASSN + 1)); OUT="$FX/out.$PASSN"
@@ -704,18 +767,21 @@ held_whole "$root/live"
 exists "$root/live-unused/closed-file" 'the unused sibling: doubt keeps every candidate'
 expect processes-in-doubt 1; expect root-removed 0
 grep -q "1 live process(es) have a reference that could not be resolved for certain.*first five: $HOLDER python3" "$ERR" || fail "no doubt stderr line naming the holder: $(cat "$ERR")"
+grep -q 'origin=chain why=errno-EACCES' "$FX/doubt.$PASSN" || fail 'no errno-EACCES line for chain'
 stop_holders; chmod 700 "$FX/outside/locked"
 # (b) A link loop: more links than the kernel follows in one lookup.
 ln -s loop "$FX/outside/loop"
-hold_arg "$FX/outside/loop/nested"
+hold_arg "--token=DPK-MARKER-1098:$FX/outside/loop/nested"
 pass c37b real real
 exists "$root/live/closed-file" 'the entry under a looping reference'
 exists "$root/live-unused/closed-file" 'the unused sibling under a looping reference'
 expect processes-in-doubt 1
+grep -q 'origin=lookup why=too-many-links' "$FX/doubt.$PASSN" || fail 'no too-many-links line for lookup'
+if grep -q 'DPK-MARKER-1098' "$FX/doubt.$PASSN"; then fail 'argument marker leaked into doubt log'; fi
 stop_holders
 # (c) A listed name that a fresh read still lists but cannot be opened: vanished while read.
 mkdir -p "$FX/outside/churn/kept"
-HELPER="$HELPER" C="$root/live" D="$FX/outside/churn" python3 -I -B -c '
+TH_DOUBT_LOG="$FX/doubt.listed" HELPER="$HELPER" C="$root/live" D="$FX/outside/churn" python3 -I -B -c '
 import importlib.util, os, sys, time
 spec = importlib.util.spec_from_file_location("helper", os.environ["HELPER"])
 helper = importlib.util.module_from_spec(spec); spec.loader.exec_module(helper)
@@ -731,6 +797,190 @@ nothing = resolver.walk(start, os.environ["D"] + "/gone/x", 1, False)
 ok = doubted == resolver.everything and resolver.doubts == 0 and not nothing and resolver.everything
 print("vanished: doubt=%s nothing=%s" % (doubted == resolver.everything, not nothing))
 sys.exit(0 if ok else 1)' > "$FX/vanished.out" 2>&1 || fail "the vanished-while-read rule: $(cat "$FX/vanished.out")"
+grep -q 'origin=lookup why=listed-not-openable' "$FX/doubt.listed" || fail 'no listed-not-openable line for lookup'
+# (d-h) Origins, the sink boundary, and cause events versus affected references. No extra sweep.
+HELPER="$HELPER" FX="$FX" C="$root/live" python3 -I -B - <<'PY' > "$FX/diagnostic-checks.out" 2>&1 || fail "doubt diagnostic checks: $(cat "$FX/diagnostic-checks.out")"
+import ast
+import errno
+import importlib.util
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+spec = importlib.util.spec_from_file_location("helper", os.environ["HELPER"])
+helper = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(helper)
+fx = Path(os.environ["FX"])
+candidate = os.environ["C"]
+
+def check(ok, row):
+    if not ok:
+        raise AssertionError(row)
+
+def contents(path):
+    return path.read_text() if path.exists() else ""
+
+def log_at(name):
+    os.environ["TH_DOUBT_LOG"] = str(fx / ("doubt." + name))
+    helper._log = helper.DoubtLog()
+    return Path(os.environ["TH_DOUBT_LOG"])
+
+# Every raised and returned origin requires a token, including conditional errno expressions.
+def token_calls(tree):
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and
+             ((isinstance(n.func, ast.Name) and n.func.id == "Doubt") or
+              (isinstance(n.func, ast.Attribute) and n.func.attr == "doubt"))]
+    check(len(calls) >= 18, "token-call floor: fewer than 18 calls")
+    for call in calls:
+        minimum = 1 if isinstance(call.func, ast.Name) else 2
+        check(len(call.args) >= minimum, "token-less call at line %s" % call.lineno)
+
+token_calls(ast.parse(Path(os.environ["HELPER"]).read_text()))
+
+class NoTable(helper.Resolver):
+    def find_mount(self, mount_id, fresh=False):
+        return None
+
+log = log_at("no-table")
+r = NoTable(helper.candidate_map([os.path.dirname(candidate)]), time.time() + 60)
+fd = os.open(candidate, helper.PATH_DIR)
+try:
+    check(r.kept_by(fd) == r.everything and r.doubts == 1, "no-table returned doubt")
+finally:
+    os.close(fd)
+check("origin=above_root why=no-table-line" in contents(log), "no no-table-line line")
+
+# Both non-call origins: linked versus unlinked files, and an unknown candidate path.
+log = log_at("direct")
+r = helper.Resolver.__new__(helper.Resolver)
+r.doubts = 0
+r.superblock = lambda fd: (False, None, False)
+r.scope = lambda dev: frozenset([candidate])
+file = fx / "direct-file"
+file.write_text("fixture")
+fd = os.open(file, os.O_RDONLY)
+try:
+    check(r.kept_by_file(fd, -1) == {candidate} and r.doubts == 1, "linked file judgment")
+    os.unlink(file)
+    check(not r.kept_by_file(fd, -1) and r.doubts == 1, "unlinked file control")
+finally:
+    os.close(fd)
+check("origin=kept_by_file why=not-own-data" in contents(log), "no direct file-data line")
+r.fs_paths = {}
+check(r.containing(frozenset([candidate]), "/", True) == (frozenset([candidate]), True), "unknown candidate judgment")
+check("origin=containing why=candidate-path-unknown" in contents(log), "no containing-path line")
+
+# Two sites with the same errno stay separate, repeated fresh events keep one detail line.
+log = log_at("counts")
+for site in ("site-one", "site-two"):
+    try:
+        raise helper.Doubt("errno-EACCES", origin="chain", site=site)
+    except helper.Doubt:
+        pass
+helper._log.total(2)
+text = contents(log)
+check("site-one/errno-EACCES=1" in text and "site-two/errno-EACCES=1" in text, "distinct errno sites")
+helper._log.event("chain", "errno-EACCES", "site-one")
+helper._log.total(3)
+text = contents(log)
+check(text.count("site=site-one") == 1 and "site-one/errno-EACCES=2" in text, "repeated fresh event")
+
+# Real chain caching: one new mount-root cause, then nine reused judgments.
+log = log_at("cache")
+r = NoTable(helper.candidate_map([os.path.dirname(candidate)]), time.time() + 60)
+fd = os.open(candidate, helper.PATH_DIR)
+try:
+    for _ in range(10):
+        check(r.kept_by(fd) == r.everything, "cached kept set")
+finally:
+    os.close(fd)
+helper._log.total(r.doubts)
+text = contents(log)
+check(r.doubts == 10 and "affected-references=10" in text and
+      "above-root-table/no-table-line=1" in text.split(), "cache hits are not cause events")
+
+# Two independent causes combined into the single reference counted by kept_by_file.
+log = log_at("combined")
+r = helper.Resolver.__new__(helper.Resolver)
+r.doubts = 0
+r.scope = lambda dev: frozenset([candidate])
+r.judge_directory = lambda fd: r.doubt(None, "parent", origin="chain", site="combined-parent")
+r.superblock = lambda fd: (False, None, False)
+file.write_text("fixture")
+fd = os.open(file, os.O_RDONLY)
+try:
+    check(r.kept_by_file(fd, 0) == {candidate} and r.doubts == 1, "combined kept and affected")
+finally:
+    os.close(fd)
+helper._log.total(r.doubts)
+text = contents(log)
+check("affected-references=1" in text and "combined-parent/parent=1" in text and
+      "file-data/not-own-data=1" in text, "combined causes")
+
+# Each sink runs in a fresh interpreter, under a deadline, with the same deterministic resolution.
+program = r"""
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("helper", os.environ["HELPER"])
+h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+mode = sys.argv[1]
+before = len(os.listdir("/proc/self/fd"))
+if mode == "unset":
+    def no_open(*args, **kwargs):
+        raise AssertionError("disabled diagnostic opened a file")
+    h.os.open = no_open
+if mode == "fstat-error":
+    def fstat_error(*args):
+        raise OSError(5, "injected fstat failure")
+    h.os.fstat = fstat_error
+if mode in ("write-error", "special"):
+    def write_spy(*args):
+        if mode == "special":
+            raise AssertionError("special file written")
+        raise OSError(5, "injected write failure")
+    h.os.write = write_spy
+r = h.Resolver.__new__(h.Resolver)
+r.doubts = 0
+r.scope = lambda dev: frozenset(["candidate"])
+kept = r.counted(r.doubt(None, "no-table-line", origin="above_root", site="sink-test"))
+h._log.total(r.doubts)
+if mode in ("unset", "symlink", "fifo", "missing", "fstat-error", "special"):
+    assert len(os.listdir("/proc/self/fd")) == before, "rejected sink leaked a descriptor"
+print(sorted(kept), r.doubts)
+"""
+sentinel = fx / "sentinel"
+sentinel.write_text("unchanged")
+link = fx / "sink-link"
+link.symlink_to(sentinel)
+fifo = fx / "sink-fifo"
+os.mkfifo(fifo)
+regular = fx / "sink-regular"
+paths = {"unset": None, "symlink": link, "fifo": fifo, "missing": fx / "missing" / "log",
+         "write-error": fx / "sink-write-error", "fstat-error": fx / "sink-fstat-error",
+         "special": Path("/dev/null"), "regular": regular}
+results = {}
+for mode, path in paths.items():
+    env = dict(os.environ)
+    env.pop("TH_DOUBT_LOG", None)
+    if path is not None:
+        env["TH_DOUBT_LOG"] = str(path)
+    try:
+        result = subprocess.run([sys.executable, "-I", "-B", "-c", program, mode], env=env,
+                                capture_output=True, timeout=2)
+    except subprocess.TimeoutExpired:
+        raise AssertionError("sink %s exceeded two-second deadline" % mode)
+    check(result.returncode == 0, "sink %s exit: %r" % (mode, result.stderr))
+    results[mode] = (result.returncode, result.stdout, result.stderr)
+    check(results[mode] == results["unset"], "sink %s changed resolver stdout/kept/count/exit" % mode)
+check(sentinel.read_text() == "unchanged", "symlink sentinel changed")
+check(not (fx / "missing").exists(), "missing parent created")
+check("no-table-line" in regular.read_text() and regular.stat().st_mode & 0o777 == 0o600,
+      "regular-file sink success and mode")
+check(not (fx / "sink-unset").exists(), "unset sink created a file")
+print("diagnostic checks: origins, token floor, direct judgments, sinks, event counts passed")
+PY
+
 finish
 
 begin 38 'a name that only starts with dots is not "..": the path may end at the entry before it'

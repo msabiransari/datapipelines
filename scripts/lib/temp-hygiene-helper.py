@@ -81,8 +81,64 @@ class Nothing(Exception):
     """The kernel's answer: the path names nothing (no such entry, not a directory, a name too long, a dead process)."""
 
 
+class DoubtLog:
+    """Best-effort, opt-in cause events; never arguments, environment values or exception text."""
+
+    def __init__(self) -> None:
+        self.path = os.environ.get("TH_DOUBT_LOG", "")
+        self.fd: Optional[int] = None
+        self.opened = False
+        self.pid = "-"
+        self.events: dict[tuple[str, str], int] = {}
+
+    def write(self, line: str) -> None:
+        if not self.path:
+            return
+        try:
+            if not self.opened:
+                self.opened = True
+                fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW |
+                             os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+                try:
+                    if stat.S_ISREG(os.fstat(fd).st_mode):
+                        self.fd = fd
+                finally:
+                    if self.fd is None:
+                        os.close(fd)
+            if self.fd is not None:
+                os.write(self.fd, (line + "\n").encode("utf-8", "backslashreplace"))
+        except OSError:
+            pass  # A failed diagnostic must never change a resolution or its output.
+
+    def event(self, origin: str, why: str, site: str, **detail: object) -> None:
+        if not self.path:
+            return
+        key = (site, why)
+        self.events[key] = self.events.get(key, 0) + 1
+        if self.events[key] == 1:
+            fields = " ".join("%s=%s" % (key, ascii(value)) for key, value in sorted(detail.items()))
+            self.write("doubt pid=%s origin=%s why=%s site=%s%s" %
+                       (self.pid, origin, why, site, " " + fields if fields else ""))
+
+    def total(self, affected: int) -> None:
+        fields = " ".join("%s/%s=%s" % (site, why, count)
+                          for (site, why), count in sorted(self.events.items()))
+        self.write("doubt-total affected-references=%s%s" % (affected, " " + fields if fields else ""))
+
+
+_log = DoubtLog()
+
+
+def errno_token(code: Optional[int]) -> str:
+    return "errno-" + errno.errorcode.get(code, "UNKNOWN")
+
+
 class Doubt(Exception):
     """A reference that cannot be resolved for certain: it keeps every candidate (D2, doubt keeps)."""
+
+    def __init__(self, why: str, *, origin: str, site: str, **detail: object) -> None:
+        super().__init__(why)
+        _log.event(origin, why, site, **detail)
 
 
 NOTHING_ERRNOS = frozenset((errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG, errno.ESRCH))
@@ -93,7 +149,8 @@ def kernel(call: "Callable[..., T]", *arguments: object, **options: object) -> "
     try:
         return call(*arguments, **options)
     except OSError as error:
-        raise (Nothing() if error.errno in NOTHING_ERRNOS else Doubt()) from error
+        raise (Nothing() if error.errno in NOTHING_ERRNOS else
+               Doubt(errno_token(error.errno), origin="kernel", site="kernel-call", call=call.__name__)) from error
 
 
 def under(path: bytes, base: bytes) -> bool:
@@ -221,20 +278,22 @@ class Statx:
     def magic(self, fd: int) -> int:
         """statfs(2) f_type of a descriptor's filesystem (the first field, a C long)."""
         if self.fstatfs is None or self.fstatfs(fd, self.buffer) != 0:
-            raise Doubt()
+            raise Doubt(errno_token(ctypes.get_errno()) if self.fstatfs else "statfs-unavailable",
+                        origin="magic", site="statfs-call", call="fstatfs")
         return ctypes.c_long.from_buffer(self.buffer).value & 0xFFFFFFFF
 
     def mount(self, fd: int) -> tuple[int, bool]:
         if self.call is None:
-            raise Doubt()
+            raise Doubt("statx-unavailable", origin="mount", site="statx-unavailable")
         if self.call(fd, b"", AT_EMPTY_PATH, STATX_MNT_ID, self.buffer) != 0:
             code = ctypes.get_errno()
-            raise Nothing() if code in NOTHING_ERRNOS else Doubt()
+            raise (Nothing() if code in NOTHING_ERRNOS else
+                   Doubt(errno_token(code), origin="mount", site="statx-call", call="statx"))
         mask, attributes = struct.unpack_from("=I4xQ", self.buffer, 0)
         (supported,) = struct.unpack_from("=Q", self.buffer, 56)
         (mount_id,) = struct.unpack_from("=Q", self.buffer, 144)
         if not mask & STATX_MNT_ID or not supported & STATX_ATTR_MOUNT_ROOT:
-            raise Doubt()  # an old kernel: neither the mount nor its root can be named
+            raise Doubt("statx-unsupported", origin="mount", site="statx-mask")  # an old kernel: neither the mount nor its root can be named
         return mount_id, bool(attributes & STATX_ATTR_MOUNT_ROOT)
 
 
@@ -429,9 +488,12 @@ class Resolver:
             self.doubts += 1
         return judged[0]
 
-    def doubt(self, dev: Optional[str]) -> tuple[frozenset[str], bool]:
+    def doubt(self, dev: Optional[str], why: str, *, origin: str, site: str,
+              **detail: object) -> tuple[frozenset[str], bool]:
         """DOUBT (D4): keep what the object could be in. A doubt that can keep nothing is not counted."""
         kept = self.scope(dev)
+        if kept:
+            _log.event(origin, why, site, **detail)
         return kept, bool(kept)
 
     def kept_by(self, fd: int, parent: int = -1) -> frozenset[str]:
@@ -446,7 +508,8 @@ class Resolver:
     def judge_directory(self, fd: int, parent: int = -1) -> tuple[frozenset[str], bool]:
         own_data, _, fuse = self.superblock(fd)
         if not own_data:
-            return self.doubt(None)  # its data may live in a directory of another filesystem
+            # Its data may live in a directory of another filesystem.
+            return self.doubt(None, "not-own-data", origin="judge_directory", site="directory-data")
         if fuse:
             self.fuse += 1  # D8: judged in its own tree, counted
         return self.chain(fd, parent)
@@ -476,24 +539,27 @@ class Resolver:
                 extra, extra_doubt = self.above_root(current, mount_id) if is_root else (frozenset(), False)
                 walked.append((key, identity, extra, extra_doubt))
                 if len(walked) > 4096:
-                    raise Doubt()
+                    raise Doubt("chain-too-long", origin="chain", site="chain-length")
                 try:
                     up = os.open("..", PATH_DIR, dir_fd=current)
                 except PermissionError as error:
                     if len(walked) == 1 and parent >= 0:
                         current = parent
                         continue
-                    raise Doubt() from error
+                    raise Doubt(errno_token(error.errno), origin="chain", site="chain-parent-permission",
+                                call="open-parent") from error
                 except OSError as error:
                     if error.errno in NOTHING_ERRNOS:
                         break  # removed from the tree (rmdir'd, a dead process's /proc entry): below nothing
-                    raise Doubt() from error
+                    raise Doubt(errno_token(error.errno), origin="chain", site="chain-parent-other",
+                                call="open-parent") from error
                 opened.append(up)
                 up_mount = self.mount_of(up)
                 if self.ident(up) == identity and up_mount == mount_id:
                     break  # the top of the mount tree (or the sweeper's own root): nothing above
                 if up_mount != mount_id and not is_root:
-                    hidden, hidden_doubt = self.doubt(self.superblock(current)[1])
+                    hidden, hidden_doubt = self.doubt(self.superblock(current)[1], "hidden-parent",
+                                                      origin="chain", site="chain-hidden")
                     key_, identity_, extra_, doubt_ = walked[-1]
                     walked[-1] = (key_, identity_, extra_ | hidden, doubt_ or hidden_doubt)
                 current = up
@@ -523,7 +589,8 @@ class Resolver:
             return frozenset(), False  # no candidate is on this filesystem
         mount = self.find_mount(mount_id, fresh=True)
         if mount is None or mount.dev != dev or not mount.root.startswith("/") or "//deleted" in mount.root:
-            return self.doubt(dev)
+            why = "no-table-line" if mount is None else "table-dev-differs" if mount.dev != dev else "root-not-a-path"
+            return self.doubt(dev, why, origin="above_root", site="above-root-table", mount_id=mount_id, filesystem_dev=dev)
         return self.containing(scope, mount.root, True)
 
     def containing(self, scope: frozenset[str], path: str, itself: bool) -> tuple[frozenset[str], bool]:
@@ -537,6 +604,8 @@ class Resolver:
                 unknown = True
             elif strictly_above(inside, path) or (itself and inside == path):
                 found.add(candidate)
+        if unknown:
+            _log.event("containing", "candidate-path-unknown", "containing-path")
         return frozenset(found), unknown
 
     def kept_by_file(self, fd: int, parent: int) -> frozenset[str]:
@@ -556,6 +625,7 @@ class Resolver:
             return self.counted((found, doubted))  # no name: in no directory (memfd, an unlinked file)
         own_data, dev, fuse = self.superblock(fd)
         if not own_data:
+            _log.event("kept_by_file", "not-own-data", "file-data")
             return self.counted((found | self.scope(None), True))
         if fuse:
             self.fuse += 1  # D8: judged in its own tree, counted
@@ -567,7 +637,7 @@ class Resolver:
         else:
             proved = parent >= 0 and self.mount_of(parent) == mount_id
         if not proved or st.st_nlink > 1:
-            more, more_doubt = self.doubt(dev)
+            more, more_doubt = self.doubt(dev, "parent-unproved-or-linked", origin="kept_by_file", site="file-parent")
             found, doubted = found | more, doubted or more_doubt
         return self.counted((found, doubted))
 
@@ -579,7 +649,8 @@ class Resolver:
             return frozenset(), False
         mount = self.find_mount(mount_id, fresh=True)
         if mount is None or mount.dev != dev or not mount.root.startswith("/") or "//deleted" in mount.root:
-            return self.doubt(dev)
+            why = "no-table-line" if mount is None else "table-dev-differs" if mount.dev != dev else "root-not-a-path"
+            return self.doubt(dev, why, origin="file_root", site="file-root-table", mount_id=mount_id, filesystem_dev=dev)
         return self.containing(scope, mount.root, False)
 
     def lookup(self, at: int, name: str) -> tuple[int, int]:
@@ -600,7 +671,7 @@ class Resolver:
             try:
                 fd = kernel(os.open, name, PATH_ANY | os.O_NOFOLLOW, dir_fd=at)
             except Nothing as error:
-                raise Doubt() from error
+                raise Doubt("listed-not-openable", origin="lookup", site="lookup-listed") from error
         try:
             st = kernel(os.fstat, fd)
             if not stat.S_ISLNK(st.st_mode):
@@ -611,13 +682,13 @@ class Resolver:
                 os.close(fd)
         self.hops += 1
         if self.hops > MAX_HOPS:
-            raise Doubt()
+            raise Doubt("too-many-links", origin="lookup", site="lookup-hops")
         if st.st_dev in self.proc_devs:
             return self.magic(at, name)
         try:
             target = kernel(os.readlink, name, dir_fd=at)
         except Nothing as error:
-            raise Doubt() from error  # it was a link a moment ago
+            raise Doubt("link-vanished", origin="lookup", site="lookup-readlink") from error  # it was a link a moment ago
         return self.exact(self.root if target.startswith("/") else at, target)
 
     def magic(self, at: int, name: str) -> tuple[int, int]:
@@ -812,7 +883,8 @@ class Resolver:
         except OSError:
             self.root = os.dup(self.own_root)  # its root cannot be opened: resolved as if it were ours
             # A process whose cwd is readable but whose root is not: its absolute paths are not proved.
-            root_doubt = self.counted(self.doubt(None)) if cwd >= 0 else frozenset()
+            root_doubt = (self.counted(self.doubt(None, "root-unopenable", origin="process", site="process-root"))
+                          if cwd >= 0 else frozenset())
         try:
             self.root_id = self.ident(self.root)
             kept = root_doubt | (self.guarded(lambda: self.kept_by(cwd)) if cwd >= 0 else frozenset())
@@ -852,7 +924,7 @@ class Resolver:
             text = kernel(os.readlink, link)
             if not text.startswith("/"):
                 return frozenset()  # a socket, pipe or anonymous inode: in no directory
-            raise Doubt() from error  # a path the kernel would not let us open: not proved
+            raise Doubt(errno_token(error.errno), origin="handle", site="handle-open", call="open") from error  # a path the kernel would not let us open: not proved
         try:
             if stat.S_ISDIR(kernel(os.fstat, fd).st_mode):
                 return self.kept_by(fd)
@@ -914,6 +986,7 @@ def scan_process(pid: str, base: bytes, resolver: Resolver) -> tuple[int, bytes,
     except OSError:
         arguments = []
     resolver.pid, before = pid, resolver.doubts
+    _log.pid = resolver.pid
     for kept in sorted(resolver.process(proc, arguments)):
         refs.append((b"k", os.fsencode(kept)))
     if resolver.candidates and resolver.doubts > before:
@@ -926,9 +999,14 @@ def scan_process(pid: str, base: bytes, resolver: Resolver) -> tuple[int, bytes,
 
 
 def scan(arguments: argparse.Namespace) -> int:
+    global _log
+    _log = DoubtLog()  # Fresh event counts and a fresh lazy sink for each scan.
     base = os.fsencode(arguments.base)
     out = sys.stdout.buffer
     resolver = Resolver(candidate_map(arguments.candidates_in or []), arguments.deadline)
+    _log.write("scan-start own-table-lines=%s candidates=%s unscoped=%s paths-unknown=%s" %
+               (len(resolver.own_mounts), len(resolver.everything), len(resolver.unscoped),
+                len(resolver.everything - resolver.fs_paths.keys())))
     pids = sorted((entry for entry in os.listdir("/proc") if entry.isdigit()), key=int)
     try:
         for pid in pids:
@@ -939,6 +1017,10 @@ def scan(arguments: argparse.Namespace) -> int:
                 emit(out, b"R", kind, value)
     except Budget:
         emit(out, b"#budget")
+    finally:
+        _log.total(resolver.doubts)
+        if _log.fd is not None:
+            os.close(_log.fd)
     out.flush()
     return 0
 

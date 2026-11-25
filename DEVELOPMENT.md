@@ -1587,6 +1587,7 @@ the gate's "pregate self-test" stage. It covers cases 1–47 of #983 on fixture 
 prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
 existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
 captured names a base outside its fixtures.
+`TH_DOUBT_LOG=<file>` records why a reference was uncertain; the self-test prints that record when a case is red.
 
 ---
 
