@@ -15,7 +15,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
 // ---------------------------------------------------------------- A14 and LA5: the look table
 
 /** LA5: every non-token value of the contract's §3.8 that bar and the shared layout use, by field (closed list). */
-const LA5 = ["cellGapMaxShare", "heatmapLabelsDefault", "pieInnerDefault", "pieLabelsDefault", "holeTotalMin", "sliceLabelPad", "holeUnitGap", "pieLabelRadius", "pieOtherText", "pieMoveAllowance", "gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stackShare", "radiusMaxShare", "roundOuterOnly", "legendKeyBar", "labelsDefault", "stackTotalFormat",
+const LA5 = ["boxShare", "boxMaxWidth", "boxCapShare", "boxMinLines", "boxOutsideLess", "boxOutsideOpacity", "boxOutsideRing", "boxOutliersDefault", "cellGapMaxShare", "heatmapLabelsDefault", "pieInnerDefault", "pieLabelsDefault", "holeTotalMin", "sliceLabelPad", "holeUnitGap", "pieLabelRadius", "pieOtherText", "pieMoveAllowance", "gridValue", "gridCategory", "frame", "zeroLine", "barShare", "stackShare", "radiusMaxShare", "roundOuterOnly", "legendKeyBar", "labelsDefault", "stackTotalFormat",
   "levelFull", "levelCompact", "levelMinimal", "tickSpacing", "tickSpacingCompact", "rotateAngle", "rotateHiddenShare", "labelMinEm", "rotateMaxEm", "bandLabelMaxEm", "legendSideMaxEm",
   "textAscent", "textDescent", "edge", "lineHeight", "titleGap", "tickGap", "labelGap", "cornerClear", "axisTitleGap", "legendKey", "legendKeyGap", "legendEntryGap", "legendGap", "valueLabelGap",
   "emptyText", "morePrefix",
@@ -46,7 +46,7 @@ test("LA5: the look table is closed and holds exactly the fixed values bar, the 
 });
 
 /** Another value of a field: its other form for a word, the other truth value, a number moved by a quarter. */
-const OTHER = { heatmapLabelsDefault: "values", pieLabelsDefault: "none", pieOtherText: "Rest", legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
+const OTHER = { boxOutliersDefault: "none", heatmapLabelsDefault: "values", pieLabelsDefault: "none", pieOtherText: "Rest", legendSideMaxEm: 2, legendKeyBar: "line", labelsDefault: "none", stackTotalFormat: "integer", emptyText: "Nothing to show", morePrefix: "and ", rotateAngle: 60,
   curveDefault: "step", pointsDefault: "markers", lineLabelsDefault: "last", lastLabelFormat: "integer", legendKeyLine: "square", legendKeyArea: "line",
   // A quarter down, not up: no fixture has five series, so 5 shows nothing; at 3 the four-line fixture loses its names on the lines.
   directMax: 3,

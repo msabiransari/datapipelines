@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.68 (living document — updated as enums evolve)
+**Status:** v1.70 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1424,6 +1424,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `scatter` | One point per row over two continuous axes, no aggregation; with `size` it is the bubble chart (#1062); channels `x` (a position: a number or time axis), `y` (a position narrowed to a number axis, linear or log), `color` (series or shade), `size` (diameters from `range`, the area following the value), `tooltip` (up to six details) |
 | `pie` | Parts of a whole, a ring by default (`inner` 0 draws a disc); channels `theta` (one value) and `color` (series); at most eight slices, smallest parts folded into Other, negative parts refused (#1068) |
 | `heatmap` | One shaded cell per pair of category bands; channels `x`, `y` (bands) and required `color` (shade); missing cells are empty, labels optional, at most 1,000 cells (#1070) |
+| `box` | One distribution per optional category band `x`; quantitative position `y`, no aggregation; median, interpolated quartiles, whiskers at the last values inside 1.5 × IQR and optional outside points; at most 50 boxes (#1072) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
 
@@ -1433,6 +1434,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-25 | v1.70 | 1072 (#1072) | Add box: median, quartiles and whiskers per category. |
 | 2026-11-24 | v1.69 | 1070 (#1070) | Add heatmap: two category axes and a sequential or diverging shade per cell. |
 | 2026-11-24 | v1.68 | 1068 (#1068) | Add the pie family: parts of a whole, one value split by series, a ring or disc, at most eight slices. |
 | 2026-11-23 | v1.67 | 1111 (#1111, authoring namespace key) | **§15:** `endpoint.key_namespace_writes` audits the requested and resulting state of an explicit namespace-writes change. |

@@ -140,7 +140,7 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap")) {
+                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box")) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +232,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                (counts["$theme/box"] ?: 0) shouldBeGreaterThanOrEqual MIN_BOX_TILES
+                (counts["$theme/boxPoints"] ?: 0) shouldBeGreaterThanOrEqual MIN_BOX_POINTS
                 counts.getValue("$theme/heatmap") shouldBeGreaterThanOrEqual MIN_HEATMAP_TILES
                 counts.getValue("$theme/cells") shouldBeGreaterThanOrEqual MIN_CELLS
                 counts.getValue("$theme/pie") shouldBeGreaterThanOrEqual MIN_PIE_TILES
@@ -532,6 +534,8 @@ class LookReferencePageBrowserTest {
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
+        private const val MIN_BOX_TILES = 10
+        private const val MIN_BOX_POINTS = 14
 
         /** Brief 1070: nine heatmap tiles, 145 cells across the seven rendered tiles. */
         private const val MIN_HEATMAP_TILES = 8
@@ -717,7 +721,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -786,10 +790,12 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        // Box outside points use their own at-rest radius, ring and opacity (brief 1072 D17).
+        const isBox = s.wire === "box";
         const heatmap = s.wire === "heatmap";
         const pie = s.wire === "pie";
         const sizeEnc = scatter ? s.document.config.encoding.size || null : null;
-        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []);
+        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []).concat(isBox ? [R.tables.look("boxOutsideRing") * t.n("--chart-gap")] : []);
         const radius = t.n("--chart-bar-radius");
         const has = (list, v) => list.some((x) => Math.abs(x - v) < 1e-6);
         svg.querySelectorAll("*").forEach((el) => {
@@ -809,9 +815,9 @@ private object LookReferenceChecks {
               case "font-weight": ok = has(weights, Number(v)); break;
               case "font-family": ok = v.replace(/["']/g, "").split(",")[0].trim() === t.font; break;
               case "stroke-width": ok = has(widths, Number(v)); break;
-              case "opacity": ok = has([t.n("--chart-dim")], Number(v)); break;
+              case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
               case "stop-opacity": ok = has([t.n("--chart-area-top"), t.n("--chart-area-bottom")], Number(v)); break;
-              case "r": ok = has([t.n("--chart-point")], Number(v)) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
+              case "r": ok = has([t.n("--chart-point")], Number(v)) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
               case "rx":
               case "ry": {
                 // Heatmap corners use the cell token, capped by half either side.
@@ -855,10 +861,11 @@ private object LookReferenceChecks {
         const marks = of("mark").filter((p) => p.k !== "group");
         const legend = of("legend").filter((p) => p.k !== "group");
         const labels = of("guide", "text");
-        const dots = scatter ? [] : of("mark", "circle");
-        const points = scatter ? of("mark", "circle") : [];
+        const dots = scatter || isBox ? [] : of("mark", "circle");
+        const points = scatter || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
         counts.points += points.length;
+        if (isBox) counts.boxPoints += points.length;
         const slices = pie ? (s.index.marks || []).filter((entry) => entry.shape.kind === "sector") : [];
         const cells = heatmap ? marks.filter((p) => p.k === "rect") : [];
         counts.cells += cells.length;
@@ -912,7 +919,7 @@ private object LookReferenceChecks {
         if (e.dots !== undefined && dots.length !== e.dots) bad(dots.length + " end dots, the expect says " + e.dots);
         // --- scatter: one point per row drawn (brief 1062 D3), each inside the plot (D5, #1066's pad)
         if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
-        if (scatter && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
+        if ((scatter || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
         if (heatmap) {
           if (e.cells !== cells.length) bad(cells.length + " cells, the expect says " + e.cells);
           if (s.summary.marks !== cells.length) bad("heatmap count differs from summary.marks");
@@ -922,6 +929,11 @@ private object LookReferenceChecks {
         }
         points.forEach((p) => {
           if (p.cx - p.r < plot.x - TOL || p.cx + p.r > plot.x + plot.w + TOL || p.cy - p.r < plot.y - TOL || p.cy + p.r > plot.y + plot.h + TOL) bad("the point " + p.series + "/" + p.datum + " crosses the plot's edge");
+        });
+        // Box points remain within their box column; the plot check above remains shared and unchanged.
+        if (isBox) points.forEach((p) => {
+          const entry = s.index.marks.find((m) => String(m.datum) === String(p.datum).split("/")[0]);
+          if (!entry || p.cx - p.r < entry.shape.x - TOL || p.cx + p.r > entry.shape.x + entry.shape.w + TOL) bad("box outside point crosses its column");
         });
         dots.forEach((d) => {
           const line = marks.find((p) => p.k === "path" && p.series === d.series && p.stroke && p.fill === null);

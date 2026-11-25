@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie` or `heatmap` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap` or `box` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -217,16 +217,27 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
 }}
 ```
 
+**Box?** Use `box` for a number's spread in each category; use a bar for a total or one number per category.
+The median, interpolated quartiles and whiskers are fixed; `outliers` is `points` (default) or `none`.
+At most 50 boxes, 200 outside points per box and 1,000 drawn overall; the card counts every outside point.
+No legend or authored tooltip. A box's value axis includes zero only with `zero: true`. Options: dashboards §2.1.2.
+```json
+"config": {"mark": {"type": "box"}, "encoding": {
+  "x": {"field": "region", "type": "nominal", "sort": null},
+  "y": {"field": "amount", "type": "quantitative"}
+}}
+```
+
 **On every type, except where an item names its types:**
-- **`fields` instead of `color`** (bar, line and area only; a scatter's `y` takes one `field` and no `aggregate`):
+- **`fields` instead of `color`** (bar, line and area only; a scatter's and a box's `y` take one `field` and no `aggregate`):
   `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a pie's `theta`, a tooltip detail.
-- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
+  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail.
+- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's or a box's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
 - **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
-  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each

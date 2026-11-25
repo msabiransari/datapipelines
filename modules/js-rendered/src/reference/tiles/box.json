@@ -1,0 +1,1711 @@
+[
+ {
+  "id": "plain",
+  "title": "three boxes, outside points on two",
+  "document": {
+   "display_name": "plain",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East"
+   ],
+   "v": [
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    52,
+    54,
+    56,
+    58,
+    60,
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    52,
+    54,
+    56,
+    120,
+    35,
+    38,
+    41,
+    44,
+    47,
+    50,
+    53,
+    56,
+    59,
+    62,
+    65,
+    35,
+    38,
+    41,
+    44,
+    47,
+    50,
+    53,
+    56,
+    59,
+    30,
+    32,
+    34,
+    36,
+    38,
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    30,
+    32,
+    34,
+    36,
+    38,
+    40,
+    42,
+    44,
+    46,
+    -30
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 2
+  }
+ },
+ {
+  "id": "both-sides",
+  "title": "points beyond both whiskers",
+  "document": {
+   "display_name": "both-sides",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A"
+   ],
+   "v": [
+    100,
+    102,
+    104,
+    106,
+    108,
+    110,
+    112,
+    114,
+    116,
+    118,
+    120,
+    100,
+    102,
+    104,
+    106,
+    108,
+    110,
+    112,
+    114,
+    116,
+    118,
+    120,
+    100,
+    102,
+    104,
+    106,
+    108,
+    110,
+    112,
+    114,
+    10,
+    20,
+    400,
+    450
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 4
+  }
+ },
+ {
+  "id": "no-outliers",
+  "title": "outliers none: the points are not drawn, the axis fits the whiskers, the card still counts them",
+  "document": {
+   "display_name": "no-outliers",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box",
+     "outliers": "none"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East",
+    "East"
+   ],
+   "v": [
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    52,
+    54,
+    56,
+    58,
+    60,
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    52,
+    54,
+    56,
+    120,
+    35,
+    38,
+    41,
+    44,
+    47,
+    50,
+    53,
+    56,
+    59,
+    62,
+    65,
+    35,
+    38,
+    41,
+    44,
+    47,
+    50,
+    53,
+    56,
+    59,
+    30,
+    32,
+    34,
+    36,
+    38,
+    40,
+    42,
+    44,
+    46,
+    48,
+    50,
+    30,
+    32,
+    34,
+    36,
+    38,
+    40,
+    42,
+    44,
+    46,
+    -30
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 0
+  }
+ },
+ {
+  "id": "flat-iqr",
+  "title": "Q1 = Q3: the box has no height and takes the floor; points still beyond",
+  "document": {
+   "display_name": "flat-iqr",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B"
+   ],
+   "v": [
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    9,
+    1,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 2
+  }
+ },
+ {
+  "id": "log",
+  "title": "a log value axis, positive values",
+  "document": {
+   "display_name": "log",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "scale": {
+       "type": "log"
+      }
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B",
+    "B"
+   ],
+   "v": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    8,
+    400,
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 1
+  }
+ },
+ {
+  "id": "title-unit",
+  "title": "a title, a subtitle, a unit and a format",
+  "document": {
+   "display_name": "title-unit",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null,
+      "title": "Region"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "unit": "ms",
+      "title": "Response",
+      "format": "integer"
+     }
+    },
+    "title": {
+     "text": "Response time",
+     "subtitle": "per region"
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "North",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South",
+    "South"
+   ],
+   "v": [
+    100,
+    105,
+    110,
+    115,
+    120,
+    125,
+    130,
+    135,
+    140,
+    145,
+    150,
+    100,
+    105,
+    110,
+    115,
+    240,
+    90,
+    94,
+    98,
+    102,
+    106,
+    110,
+    114,
+    118,
+    122,
+    126,
+    130,
+    90,
+    94,
+    98,
+    102
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 1
+  }
+ },
+ {
+  "id": "empty",
+  "title": "no rows: the no-data state",
+  "document": {
+   "display_name": "empty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [],
+   "v": []
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "expect": {
+   "state": "no-data",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 0
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "markup in names, the title and the subtitle",
+  "document": {
+   "display_name": "hostile",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    },
+    "title": {
+     "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title",
+     "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "<script>alert(1)</script>",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "onload=alert(1)",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x",
+    "\" onmouseover=\"x"
+   ],
+   "v": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    60,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 1
+  }
+ },
+ {
+  "id": "refused",
+  "title": "fifty-one boxes: refused, chart.too_many_marks",
+  "document": {
+   "display_name": "boxes-51",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "c00",
+    "c00",
+    "c00",
+    "c00",
+    "c00",
+    "c01",
+    "c01",
+    "c01",
+    "c01",
+    "c01",
+    "c02",
+    "c02",
+    "c02",
+    "c02",
+    "c02",
+    "c03",
+    "c03",
+    "c03",
+    "c03",
+    "c03",
+    "c04",
+    "c04",
+    "c04",
+    "c04",
+    "c04",
+    "c05",
+    "c05",
+    "c05",
+    "c05",
+    "c05",
+    "c06",
+    "c06",
+    "c06",
+    "c06",
+    "c06",
+    "c07",
+    "c07",
+    "c07",
+    "c07",
+    "c07",
+    "c08",
+    "c08",
+    "c08",
+    "c08",
+    "c08",
+    "c09",
+    "c09",
+    "c09",
+    "c09",
+    "c09",
+    "c10",
+    "c10",
+    "c10",
+    "c10",
+    "c10",
+    "c11",
+    "c11",
+    "c11",
+    "c11",
+    "c11",
+    "c12",
+    "c12",
+    "c12",
+    "c12",
+    "c12",
+    "c13",
+    "c13",
+    "c13",
+    "c13",
+    "c13",
+    "c14",
+    "c14",
+    "c14",
+    "c14",
+    "c14",
+    "c15",
+    "c15",
+    "c15",
+    "c15",
+    "c15",
+    "c16",
+    "c16",
+    "c16",
+    "c16",
+    "c16",
+    "c17",
+    "c17",
+    "c17",
+    "c17",
+    "c17",
+    "c18",
+    "c18",
+    "c18",
+    "c18",
+    "c18",
+    "c19",
+    "c19",
+    "c19",
+    "c19",
+    "c19",
+    "c20",
+    "c20",
+    "c20",
+    "c20",
+    "c20",
+    "c21",
+    "c21",
+    "c21",
+    "c21",
+    "c21",
+    "c22",
+    "c22",
+    "c22",
+    "c22",
+    "c22",
+    "c23",
+    "c23",
+    "c23",
+    "c23",
+    "c23",
+    "c24",
+    "c24",
+    "c24",
+    "c24",
+    "c24",
+    "c25",
+    "c25",
+    "c25",
+    "c25",
+    "c25",
+    "c26",
+    "c26",
+    "c26",
+    "c26",
+    "c26",
+    "c27",
+    "c27",
+    "c27",
+    "c27",
+    "c27",
+    "c28",
+    "c28",
+    "c28",
+    "c28",
+    "c28",
+    "c29",
+    "c29",
+    "c29",
+    "c29",
+    "c29",
+    "c30",
+    "c30",
+    "c30",
+    "c30",
+    "c30",
+    "c31",
+    "c31",
+    "c31",
+    "c31",
+    "c31",
+    "c32",
+    "c32",
+    "c32",
+    "c32",
+    "c32",
+    "c33",
+    "c33",
+    "c33",
+    "c33",
+    "c33",
+    "c34",
+    "c34",
+    "c34",
+    "c34",
+    "c34",
+    "c35",
+    "c35",
+    "c35",
+    "c35",
+    "c35",
+    "c36",
+    "c36",
+    "c36",
+    "c36",
+    "c36",
+    "c37",
+    "c37",
+    "c37",
+    "c37",
+    "c37",
+    "c38",
+    "c38",
+    "c38",
+    "c38",
+    "c38",
+    "c39",
+    "c39",
+    "c39",
+    "c39",
+    "c39",
+    "c40",
+    "c40",
+    "c40",
+    "c40",
+    "c40",
+    "c41",
+    "c41",
+    "c41",
+    "c41",
+    "c41",
+    "c42",
+    "c42",
+    "c42",
+    "c42",
+    "c42",
+    "c43",
+    "c43",
+    "c43",
+    "c43",
+    "c43",
+    "c44",
+    "c44",
+    "c44",
+    "c44",
+    "c44",
+    "c45",
+    "c45",
+    "c45",
+    "c45",
+    "c45",
+    "c46",
+    "c46",
+    "c46",
+    "c46",
+    "c46",
+    "c47",
+    "c47",
+    "c47",
+    "c47",
+    "c47",
+    "c48",
+    "c48",
+    "c48",
+    "c48",
+    "c48",
+    "c49",
+    "c49",
+    "c49",
+    "c49",
+    "c49",
+    "c50",
+    "c50",
+    "c50"
+   ],
+   "v": [
+    10,
+    20,
+    25,
+    30,
+    40,
+    11,
+    20,
+    25,
+    30,
+    41,
+    12,
+    20,
+    25,
+    30,
+    42,
+    13,
+    20,
+    25,
+    30,
+    43,
+    14,
+    20,
+    25,
+    30,
+    44,
+    15,
+    20,
+    25,
+    30,
+    45,
+    16,
+    20,
+    25,
+    30,
+    46,
+    17,
+    20,
+    25,
+    30,
+    40,
+    18,
+    20,
+    25,
+    30,
+    41,
+    19,
+    20,
+    25,
+    30,
+    42,
+    20,
+    20,
+    25,
+    30,
+    43,
+    21,
+    20,
+    25,
+    30,
+    44,
+    22,
+    20,
+    25,
+    30,
+    45,
+    23,
+    20,
+    25,
+    30,
+    46,
+    24,
+    20,
+    25,
+    30,
+    40,
+    25,
+    20,
+    25,
+    30,
+    41,
+    26,
+    20,
+    25,
+    30,
+    42,
+    27,
+    20,
+    25,
+    30,
+    43,
+    28,
+    20,
+    25,
+    30,
+    44,
+    29,
+    20,
+    25,
+    30,
+    45,
+    30,
+    20,
+    25,
+    30,
+    46,
+    31,
+    20,
+    25,
+    30,
+    40,
+    32,
+    20,
+    25,
+    30,
+    41,
+    33,
+    20,
+    25,
+    30,
+    42,
+    34,
+    20,
+    25,
+    30,
+    43,
+    35,
+    20,
+    25,
+    30,
+    44,
+    36,
+    20,
+    25,
+    30,
+    45,
+    37,
+    20,
+    25,
+    30,
+    46,
+    38,
+    20,
+    25,
+    30,
+    40,
+    39,
+    20,
+    25,
+    30,
+    41,
+    40,
+    20,
+    25,
+    30,
+    42,
+    41,
+    20,
+    25,
+    30,
+    43,
+    42,
+    20,
+    25,
+    30,
+    44,
+    43,
+    20,
+    25,
+    30,
+    45,
+    44,
+    20,
+    25,
+    30,
+    46,
+    45,
+    20,
+    25,
+    30,
+    40,
+    46,
+    20,
+    25,
+    30,
+    41,
+    47,
+    20,
+    25,
+    30,
+    42,
+    48,
+    20,
+    25,
+    30,
+    43,
+    49,
+    20,
+    25,
+    30,
+    44,
+    50,
+    20,
+    25,
+    30,
+    45,
+    51,
+    20,
+    25,
+    30,
+    46,
+    52,
+    20,
+    25,
+    30,
+    40,
+    53,
+    20,
+    25,
+    30,
+    41,
+    54,
+    20,
+    25,
+    30,
+    42,
+    55,
+    20,
+    25,
+    30,
+    43,
+    56,
+    20,
+    25,
+    30,
+    44,
+    57,
+    20,
+    25,
+    30,
+    45,
+    58,
+    20,
+    25,
+    30,
+    46,
+    59,
+    20,
+    25,
+    30,
+    40,
+    1,
+    2,
+    3
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "refused",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 0,
+   "code": "chart.too_many_marks"
+  }
+ },
+ {
+  "id": "points-at-ends",
+  "title": "Both outside points fit inside the value axis ends",
+  "document": {
+   "display_name": "flat-iqr",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "c",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "box"
+    },
+    "encoding": {
+     "x": {
+      "field": "c",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative"
+     }
+    }
+   }
+  },
+  "columns": {
+   "c": [
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A",
+    "A"
+   ],
+   "v": [
+    -10,
+    1,
+    1,
+    1,
+    1,
+    1,
+    10
+   ]
+  },
+  "types": {
+   "c": "STRING",
+   "v": "DECIMAL"
+  },
+  "frame": {
+   "w": 480,
+   "h": 320
+  },
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "points": 2
+  }
+ }
+]

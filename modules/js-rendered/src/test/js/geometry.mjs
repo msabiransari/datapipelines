@@ -242,3 +242,39 @@ export function expectedHeatmapMarks(fx) {
   }
   return count;
 }
+
+/** Box I3, from rows alone: exact decimal fences, finite-value filtering, and both drawn-mark caps (#1072 D18). */
+export function expectedBoxMarks(fx) {
+  const {x, y} = fx.document.config.encoding;
+  const Y = fx.columns[y.field], X = x ? fx.columns[x.field] : null;
+  const groups = new Map();
+  for (let i = 0; i < Y.length; i++) {
+    if (Y[i] == null || (X && X[i] == null) || !Number.isFinite(Number(Y[i]))) continue;
+    if (y.scale?.type === "log" && Number(Y[i]) <= 0) continue;
+    const key = X ? JSON.stringify([typeof X[i], String(X[i])]) : "one";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(Y[i]);
+  }
+  if (groups.size > 50) return 0;
+  if (fx.document.config.mark.outliers === "none") return groups.size;
+  let drawn = 0;
+  for (const values of groups.values()) {
+    let outside;
+    if (values.every(v => typeof v === "string")) {
+      const parts = values.map(v => /^(-?)(\d+)(?:\.(\d+))?$/.exec(v));
+      const scale = Math.max(...parts.map(p => (p[3] || "").length));
+      const s = parts.map(p => BigInt(p[1] + p[2] + (p[3] || "").padEnd(scale, "0"))).sort((a,b) => a < b ? -1 : a > b ? 1 : 0);
+      const q = k => { const h = (s.length - 1) * k, i = Math.floor(h / 4), f = BigInt(h % 4); return s[i] * (4n - f) + s[Math.min(i+1,s.length-1)] * f; };
+      const a = q(1), b = q(3), low = 2n * a - 3n * (b-a), high = 2n * b + 3n * (b-a);
+      outside = s.filter(v => 8n*v < low || 8n*v > high).length;
+    } else {
+      const s = values.map(Number).sort((a,b) => a-b);
+      const q = p => { const h=(s.length-1)*p, i=Math.floor(h), f=h-i; return f ? s[i]*(1-f)+s[i+1]*f : s[i]; };
+      const a=q(0.25), b=q(0.75), low=a-1.5*(b-a), high=b+1.5*(b-a);
+      const span=b/1024-a/1024;
+      outside = s.filter(v => (Number.isFinite(low) ? v<low : v/1024 < a/1024-1.5*span) || (Number.isFinite(high) ? v>high : v/1024 > b/1024+1.5*span)).length;
+    }
+    drawn += Math.min(200, outside);
+  }
+  return drawn > 1000 ? 0 : groups.size;
+}
