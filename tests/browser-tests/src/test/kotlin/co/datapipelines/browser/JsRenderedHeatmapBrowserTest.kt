@@ -76,6 +76,58 @@ class JsRenderedHeatmapBrowserTest {
     }
 
     @Test
+    fun `fitted labels and cells fade together for pointer and keyboard selection in both themes`() {
+        withPage { opened ->
+            val page = opened.page
+            for (theme in listOf("light", "dark")) {
+                for (fixture in listOf("labels-values", "missing-cells")) {
+                    page.evaluate(DRAW_LABELS, listOf(fixture, theme)) shouldBe "rendered"
+                    page.waitForFunction(PAIR_OPACITY, -1)
+                    for (datum in listOf(0, 1, -2, 0, -1)) {
+                        @Suppress("UNCHECKED_CAST")
+                        val pos = page.evaluate(HOVER_PLACE, datum) as List<Number>
+                        page.mouse().move(pos[0].toDouble(), pos[1].toDouble())
+                        checkPairs(page, theme, fixture, "pointer", datum)
+                    }
+                    page.locator("#chart").focus()
+                    for ((key, datum) in listOf("ArrowRight" to 0, "ArrowRight" to 1, "ArrowDown" to -3, "Escape" to -1)) {
+                        page.keyboard().press(key)
+                        // Down follows the actual grid; it has a different column count in each fixture.
+                        val selected = if (datum == -3) (if (fixture == "labels-values") 8 else 5) else datum
+                        checkPairs(page, theme, fixture, key, selected)
+                    }
+                    page.keyboard().press("ArrowRight")
+                    checkPairs(page, theme, fixture, "key before blur", 0)
+                    page.locator("#chart").evaluate("e => e.blur()")
+                    checkPairs(page, theme, fixture, "blur", -1)
+                }
+            }
+            clean(opened)
+        }
+    }
+
+    private fun checkPairs(
+        page: Page,
+        theme: String,
+        fixture: String,
+        action: String,
+        datum: Int,
+    ) {
+        withClue("$theme $fixture $action datum=$datum: ${page.evaluate(PAIR_READ)}") {
+            page.waitForFunction(PAIR_OPACITY, datum)
+            if (datum >= 0) {
+                @Suppress("UNCHECKED_CAST")
+                val expected = page.evaluate(EXPECTED_CARD, datum) as List<String>
+                checkCard(page, datum, expected)
+            } else {
+                page.locator("text.dp-tooltip").count() shouldBe 0
+                page.locator("#chart.dp-dimmed, #chart .dp-active, #chart .dp-inactive").count() shouldBe 0
+            }
+        }
+        println("pairs $theme $fixture $action datum=$datum: ${page.evaluate(PAIR_READ)}")
+    }
+
+    @Test
     fun `A7 keys walk rows and columns without wrapping and card and ring follow`() {
         withPage { opened ->
             val page = opened.page
@@ -201,6 +253,14 @@ class JsRenderedHeatmapBrowserTest {
               return out.state;
             }
             """.trimIndent()
+        private val DRAW_LABELS =
+            """
+            async ([fixture,theme]) => {
+              const out=await window.ChartHeatmap.draw(fixture+'/960x540.input.json',{w:960,h:540},{theme,labels:'values'});
+              window.__heatmapWritten=new Set(document.querySelectorAll('#chart *'));
+              return out.state;
+            }
+            """.trimIndent()
         private val DOM =
             """
             () => {
@@ -258,10 +318,10 @@ class JsRenderedHeatmapBrowserTest {
               if (datum === -1) return [r.right+5,r.bottom+5];
               let b;
               if (datum === -2) {
-                // First row's fourth slot is empty in missing-cells (five columns).
-                if (out.index.marks.some(m=>m.datum===3)) throw new Error('expected an empty slot');
+                // A real empty slot in missing-cells; empty space above the plot for the full labels grid.
                 const first=out.index.marks[0].shape;
-                b={x:first.x+3*first.w,y:first.y,w:first.w,h:first.h};
+                if (out.index.marks.some(m=>m.datum===3)) b={x:out.index.plot.x,y:0,w:1,h:1};
+                else b={x:first.x+3*first.w,y:first.y,w:first.w,h:first.h};
               } else b=out.index.marks.find(m=>m.datum===datum).shape;
               return [r.left+(b.x+b.w/2)*r.width/out.frame.w,r.top+(b.y+b.h/2)*r.height/out.frame.h];
             }
@@ -289,6 +349,37 @@ class JsRenderedHeatmapBrowserTest {
               if (cells.length!==marks.length || !cells.every((e,i)=>Math.abs(Number(getComputedStyle(e).opacity)-
                 (datum<0 || marks[i].datum===datum ? 1 : dim))<0.001)) return false;
               return [...svg.querySelectorAll('.dp-guide,.dp-tooltip')].every(e=>Number(getComputedStyle(e).opacity)===1);
+            }
+            """.trimIndent()
+
+        // Derive label ownership independently from containment, then read the effective opacity through all ancestors.
+        // This also detects double dimming of a group and its child, or a label left outside its cell's group.
+        private val PAIR_READ =
+            """
+            () => {
+              const svg=document.getElementById('chart'), out=window.ChartHeatmap.last();
+              const opacity=e=>{let v=1; for(;e;e=e.parentElement) v*=Number(getComputedStyle(e).opacity); return v;};
+              const cells=[...svg.querySelectorAll('rect.dp-mark')], labels=[...svg.querySelectorAll('text.dp-guide')];
+              const pairs=cells.map((e,i)=>{
+                const p=out.primitives.filter(p=>p.k==='rect' && p.role==='mark')[i];
+                const label=labels.find(t=>{const x=Number(t.getAttribute('x')),y=Number(t.getAttribute('y'));
+                  return x>=p.x && x<=p.x+p.w && y>=p.y && y<=p.y+p.h;});
+                return {datum:p.datum,cell:opacity(e),label:label?opacity(label):null};
+              });
+              const other=[...svg.querySelectorAll('.dp-axis,.dp-grid,.dp-tick,.dp-title,.dp-legend,.dp-guide,.dp-tooltip,.dp-focus')]
+                .filter(e=>!labels.includes(e)).map(opacity);
+              return {pairs,labels:labels.length,other,dim:Number(getComputedStyle(svg).getPropertyValue('--chart-dim')),
+                emptySeries:out.index.series.length===0 && out.summary.series.length===0 && out.index.marks.every(m=>m.series===null)};
+            }
+            """.trimIndent()
+        private val PAIR_OPACITY =
+            """
+            datum => {
+              const read=($PAIR_READ)();
+              return read.emptySeries && read.pairs.length>=13 && read.labels===read.pairs.length && read.dim>0 && read.dim<1 &&
+                read.pairs.every(p=>{const want=datum<0 || p.datum===datum?1:read.dim;
+                  return p.label!==null && Math.abs(p.cell-want)<0.001 && Math.abs(p.label-want)<0.001;}) &&
+                read.other.every(v=>Math.abs(v-1)<0.001);
             }
             """.trimIndent()
     }

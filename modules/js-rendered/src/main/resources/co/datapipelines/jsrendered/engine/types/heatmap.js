@@ -101,7 +101,7 @@
   function marks(m, hand, h) {
     var theme = h.theme, gap = theme.n("--chart-gap"), share = look("cellGapMaxShare");
     var radius = theme.n("--chart-cell-radius"), small = h.small, pad = look("valueLabelGap") * small;
-    var prims = [], labels = [], lookup = [], right = hand.plot.x + hand.plot.w, bottom = hand.plot.y + hand.plot.h;
+    var prims = [], lookup = [], right = hand.plot.x + hand.plot.w, bottom = hand.plot.y + hand.plot.h;
     var gx = Math.min(gap, hand.band.step * share) / 2, gy = Math.min(gap, hand.rows.step * share) / 2;
     for (var i = 0; i < m.cells.length; i++) {
       var c = m.cells[i], sx = hand.band.start + c.c * hand.band.step, sy = hand.rows.start + c.r * hand.rows.step;
@@ -109,8 +109,8 @@
       var bx = side(sx, hand.band.step, right), by = side(sy, hand.rows.step, bottom);
       var fill = R.colour.token(m.shade.scale, c.agg.num), css = theme.css(fill);
       var text = T.value(c.agg.exact !== null ? c.agg.exact : c.agg.num);
-      prims.push(P.rect({ role: "mark", x: dx.at, y: dy.at, w: dx.size, h: dy.size,
-        rx: r2(Math.min(radius, dx.size / 2, dy.size / 2)), fill: fill, color: css, series: null, datum: c.datum }));
+      var cell = P.rect({ role: "mark", x: dx.at, y: dy.at, w: dx.size, h: dy.size,
+        rx: r2(Math.min(radius, dx.size / 2, dy.size / 2)), fill: fill, color: css, series: null, datum: c.datum });
       lookup.push({ series: null, datum: c.datum, row: c.r, key: true, emphasis: "ring",
         shape: { kind: "box", x: bx.at, y: by.at, w: bx.size, h: by.size },
         card: { heading: m.rows[c.r].full + ", " + m.cols[c.c].full,
@@ -118,11 +118,13 @@
       });
       if (m.labelsOn && hand.level !== "minimal" && h.width(text, small) <= dx.size - 2 * pad + 1e-9 && h.boxH(small) <= dy.size + 1e-9) {
         var ink = R.theme.onFill(theme.colour(fill), theme.colour("--chart-on-fill-light"), theme.colour("--chart-on-fill-dark"));
-        labels.push(h.label({ role: "guide", x: r2(dx.at + dx.size / 2), y: h.middle(dy.at + dy.size / 2, small),
-          text: text, anchor: "middle", size: small, ink: ink }));
-      }
+        var label = h.label({ role: "guide", x: r2(dx.at + dx.size / 2), y: h.middle(dy.at + dy.size / 2, small),
+          text: text, anchor: "middle", size: small, ink: ink });
+        // One semantic mark: shared interaction fades the cell and its fitted value together (#1139).
+        P.group(prims, { role: "mark" }, [cell, label]);
+      } else prims.push(cell);
     }
-    return { primitives: prims.concat(labels), lookup: lookup, count: lookup.length };
+    return { primitives: prims, lookup: lookup, count: lookup.length };
   }
 
   R.type("heatmap", { channels: CHANNELS, model: model, marks: marks, axes: "cartesian" });

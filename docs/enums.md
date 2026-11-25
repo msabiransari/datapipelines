@@ -1423,7 +1423,6 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `area` | As `line`, each series filled down to zero, or stacked on the series below it (zero or normalized), with a fade from the line down (#989); the value axis always holds zero and has no log scale; channels as `line` |
 | `scatter` | One point per row over two continuous axes, no aggregation; with `size` it is the bubble chart (#1062); channels `x` (a position: a number or time axis), `y` (a position narrowed to a number axis, linear or log), `color` (series or shade), `size` (diameters from `range`, the area following the value), `tooltip` (up to six details) |
 | `pie` | Parts of a whole, a ring by default (`inner` 0 draws a disc); channels `theta` (one value) and `color` (series); at most eight slices, smallest parts folded into Other, negative parts refused (#1068) |
-
 | `heatmap` | One shaded cell per pair of category bands; channels `x`, `y` (bands) and required `color` (shade); missing cells are empty, labels optional, at most 1,000 cells (#1070) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.

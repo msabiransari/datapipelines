@@ -1234,8 +1234,12 @@
             marked.push(els[i]);
           } else if (sc.activeMark !== null && p.series === null && p.role === "mark" && p.k !== "group" && p.k !== "text") {
             var selected = sc.activeMark.indexOf(i) >= 0;
-            setClass(els[i], selected ? "dp-active" : "dp-inactive", true);
-            marked.push(els[i]);
+            // A mark group owns its value label too (issue 1139). Fade once at that group, retaining the leaf's
+            // datum for lookup/ring geometry; unrelated guides outside it keep their normal opacity.
+            var owner = els[i];
+            while (owner.parentNode !== svg && classes(owner.parentNode).indexOf("dp-mark") >= 0) owner = owner.parentNode;
+            setClass(owner, selected ? "dp-active" : "dp-inactive", true);
+            marked.push(owner);
           }
         }
         setClass(svg, "dp-dimmed", true);

@@ -612,6 +612,50 @@ function cellHighlightCheck(L) {
   }
 }
 
+function labelledCellHighlightCheck(L) {
+  const fx = JSON.parse(readFileSync(path.join(ENGINE_TESTS, "fixtures/heatmap/labels-values.json"), "utf8"));
+  const out = R.render({ type: "heatmap", document: fx.document, columns: fx.columns, types: fx.types,
+    frame: W960, theme: "light", hidden: [], measure: null });
+  const env = mounted(L, out, W960);
+  const cells = descendants(env.svg).filter(e => e.tagName === "rect" && cls(e) === "dp-mark");
+  assert.equal(cells.length, 35);
+  assert.equal(out.index.series.length, 0);
+  assert.equal(out.summary.series.length, 0);
+  const owners = cells.map(e => e.parentNode);
+  assert.equal(new Set(owners).size, cells.length, "one semantic group per cell");
+  for (const n of [0, 1]) {
+    const b = out.index.marks[n].shape;
+    pointAt(env, b.x + b.w / 2, b.y + b.h / 2);
+    cells.forEach((e, i) => {
+      const owner = owners[i], kids = descendants(owner);
+      assert.equal(owner.tagName, "g");
+      assert.equal(kids.length, 2, "cell and fitted value");
+      assert.equal(kids[1].tagName, "text");
+      assert.equal(kids[1].textContent, out.index.marks[i].card.rows[0].value);
+      assert.equal(/\bdp-active\b/.test(cls(owner)), i === n, "active cell-label group " + i);
+      assert.equal(/\bdp-inactive\b/.test(cls(owner)), i !== n, "inactive cell-label group " + i);
+      assert.ok(kids.every(k => !/\bdp-(active|inactive)\b/.test(cls(k))), "no second fade on a child");
+    });
+    ringAround(env, out, n);
+    assert.ok(cardTexts(env.svg).length > 0);
+    assert.ok(guides(env).every(e => !/\bdp-(active|inactive)\b/.test(cls(e))), "unrelated guides stay opaque");
+  }
+  for (const how of EXITS) {
+    key(env, "ArrowRight");
+    assert.equal(active(env.svg).length, 1);
+    if (how === "leave") { const b=out.index.marks[0].shape; pointAt(env,b.x+b.w/2,b.y+b.h/2); leave(env); }
+    else if (how === "Escape") key(env, "Escape");
+    else if (how === "blur") env.svg.dispatch("blur", {});
+    else env.handle.detach();
+    assert.ok(descendants(env.svg).every(e => !/\bdp-(active|inactive|dimmed)\b/.test(cls(e))), how + ": all pairs restored");
+  }
+}
+
+test("#1139: a cell and its fitted value share one fade; the leaf-only layer goes red", () => {
+  const loop = '            while (owner.parentNode !== svg && classes(owner.parentNode).indexOf("dp-mark") >= 0) owner = owner.parentNode;';
+  redThenGreen("cell-label ownership", labelledCellHighlightCheck, layerWith([[loop, ""]]));
+});
+
 test("A.6: ring on a point and on a box; move on a sector, on exactly the mark's elements", () => {
   const pts = draw(fixture("points"), 960, 540), pe = mounted(layer, pts, W960), n = at(pts, "tie-a");
   pointAt(pe, pts.index.marks[n].shape.x, pts.index.marks[n].shape.y);

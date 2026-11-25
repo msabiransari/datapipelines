@@ -125,7 +125,8 @@
 /* #990 — the chart interaction layer (datapipelines-chart-interactions.js; look contract §3.4–§3.7, §4.4, L7; brief 990
    D2, D3, D4, D8). The layer writes classes only: `dp-tooltip` on its card's group, `dp-dimmed` on the picture while a
    series or individual mark is active and `dp-active` on its group/entry or own primitives. For a mark without a
-   series, `dp-inactive` identifies the other marks' primitives without fading their guides or cards. Every value is a chart token.
+   series, `dp-inactive` identifies the other marks or their groups (including fitted value labels); unrelated guides
+   and cards keep their normal opacity. Every value is a chart token.
    - The card's shadow is this stylesheet's alone (owner ruling L7): ONE `filter` on the card's group (`g`: the
      writer gives the card's surface and texts the same class, and a filter on them would stack shadows), never
      box-shadow (it draws nothing on a shape inside the picture) and never an attribute. Its fallback is the contract's

@@ -37,7 +37,7 @@
   }
 
   /** draw(file, frame): the emitted input emitted/heatmap/<file>, drawn at `frame` ({w, h}) with an empty hidden list. */
-  function draw(file, frame) {
+  function draw(file, frame, options) {
     return fetch("emitted/heatmap/" + file)
       .then(function (response) {
         if (!response.ok) throw new Error("chart-heatmap: emitted/heatmap/" + file + " answered " + response.status);
@@ -45,6 +45,11 @@
       })
       .then(function (input) {
         input.frame = { w: frame.w, h: frame.h };
+        if (options && options.theme) {
+          input.theme = options.theme;
+          document.documentElement.setAttribute("data-theme", options.theme);
+        }
+        if (options && options.labels) input.document.config.mark.labels = options.labels;
         kept = input;
         hidden = [];
         asked = [];

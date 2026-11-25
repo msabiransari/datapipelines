@@ -14,7 +14,7 @@ const I = createRequire(import.meta.url)(join(MODULE, "../web/src/main/resources
 const FX = Object.fromEntries(chartFixtures().filter((f) => f.wire === "heatmap").map((f) => [f.name, f.fixture]));
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const same = (a,b) => assert.deepEqual(plain(a),plain(b));
-const rects = (r) => r.primitives.filter((p) => p.role === "mark");
+const rects = (r) => r.primitives.filter((p) => p.role === "mark" && p.k === "rect");
 const variant = (name, edit) => { const f = structuredClone(FX[name]); edit(f, f.document.config.encoding); return f; };
 function draw(f, w=960, h=540, extra={}) { E.seen=null; const r=E.render(inputOf(f,w,h,extra)); return {r,...E.seen}; }
 const model = (r) => I.modelOf(E,r,E.measure.measurer(null).fn);
