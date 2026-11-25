@@ -11,6 +11,8 @@ import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
+import java.sql.PreparedStatement
+import java.sql.ResultSet
 import java.time.Duration
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
@@ -24,7 +26,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
     private val application: String,
     private val threadId: Long,
     context: ApplicationContext? = null,
-    private val ticks: () -> Int,
+    private val ticks: (() -> Int)? = null,
 ) : AutoCloseable {
     private val retained = ArrayDeque<String>()
     private val pauses = ConcurrentLinkedQueue<String>()
@@ -44,7 +46,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
             }
         }
     private var window = clock()
-    private var baseline = ticks()
+    private var baseline = ticks?.invoke()
     private var pressure = psi()
     private var gcBaseline = gcTotals()
     private var activitySize = "unknown"
@@ -67,7 +69,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
                 }
             },
         )
-        retain("before_locks ${clock()} ticks=${ticks()} thread_id=$threadId")
+        retain("before_locks ${clock()} ticks=${ticks?.invoke() ?: "not_applicable"} thread_id=$threadId")
         println(
             "HELD_LOCK_DIAG_BEGIN app=$application pid=${ProcessHandle.current().pid()} " +
                 "worker=${System.getProperty("org.gradle.test.worker")} ${clock()}",
@@ -76,7 +78,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
 
     fun beginWindow(connection: Connection) {
         window = clock()
-        baseline = ticks()
+        baseline = ticks?.invoke()
         pressure = psi()
         gcBaseline = gcTotals()
         activitySize =
@@ -92,7 +94,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
         retain("lock_window_start $window ticks=$baseline psi=$pressure gc=$gcBaseline")
     }
 
-    fun beforeLocks() = retain("before_locks ${clock()} ticks=${ticks()} thread_id=$threadId")
+    fun beforeLocks() = retain("before_locks ${clock()} ticks=${ticks?.invoke() ?: "not_applicable"} thread_id=$threadId")
 
     fun await(
         connection: Connection,
@@ -119,64 +121,61 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
         val now = clock()
         var observed = false
         val activity =
-            safe {
-                connection.prepareStatement(ACTIVITY).use { statement ->
-                    statement.queryTimeout = QUERY_SECONDS
-                    statement.setString(1, observerText)
-                    statement.setString(2, application)
-                    statement.executeQuery().use { rows ->
-                        buildList {
-                            while (rows.next()) {
-                                val query = rows.getString("query").orEmpty()
-                                val kind =
-                                    when {
-                                        "FROM lake_tables t" in query && "t.namespace" in query -> "catalog_read"
-                                        "INSERT INTO datasource_workspaces" in query && "FROM workspaces w" in query -> "repair_insert"
-                                        "SELECT id FROM lake_tables_managed" in query -> "settlement_page"
-                                        "pg_advisory" in query -> "advisory"
-                                        else -> "other_or_truncated"
-                                    }
-                                val matched = rows.getBoolean("observed")
-                                observed = observed || matched
-                                add(
-                                    "pid=${rows.getInt("pid")} app=$application kind=$kind " +
-                                        "state=${rows.getString(
-                                            "state",
-                                        )} wait=${rows.getString("wait_event_type")}/${rows.getString("wait_event")} " +
-                                        "observed=$matched query_chars=${query.length}",
-                                )
-                            }
-                        }.joinToString("; ")
-                    }
-                }
+            query(connection, ACTIVITY, bind = {
+                it.setString(1, observerText)
+                it.setString(2, application)
+            }) { rows ->
+                val query = rows.getString("query").orEmpty()
+                val kind = classify(query)
+                val matched = rows.getBoolean("observed")
+                val state = rows.getString("state")
+                val wait = "${rows.getString("wait_event_type")}/${rows.getString("wait_event")}"
+                observed = observed || matched
+                "pid=${rows.getInt("pid")} app=$application kind=$kind state=$state wait=$wait " +
+                    "observed=$matched query_chars=${query.length}"
             }
         val locks =
-            safe {
-                connection.prepareStatement(LOCKS).use { statement ->
-                    statement.queryTimeout = QUERY_SECONDS
-                    statement.setString(1, application)
-                    statement.executeQuery().use { rows ->
-                        buildList {
-                            while (rows.next()) {
-                                add(
-                                    "pid=${rows.getInt(1)} type=${rows.getString(2)} " +
-                                        "relation=${rows.getString(3)} mode=${rows.getString(4)} granted=${rows.getBoolean(5)}",
-                                )
-                            }
-                        }.joinToString("; ")
-                    }
-                }
+            query(connection, LOCKS, bind = { it.setString(1, application) }) { rows ->
+                "pid=${rows.getInt(1)} type=${rows.getString(2)} " +
+                    "relation=${rows.getString(3)} mode=${rows.getString(4)} granted=${rows.getBoolean(5)}"
             }
         val stack = threads.getThreadInfo(threadId, Int.MAX_VALUE)
+        val invocation = running.get()?.let { System.identityHashCode(it).toString() } ?: "unknown"
         retain(
-            "sample $now ticks=${ticks()} ticks_started_since_locks=${ticks() - baseline} " +
-                "thread_id=$threadId thread_state=${stack?.threadState} invocation=${running.get()?.let { System.identityHashCode(it) }} " +
+            "sample $now ticks=${ticks?.invoke() ?: "not_applicable"} ticks_started_since_locks=${startsSinceBaseline()} " +
+                "observer_configured=${observerText != null} " +
+                "thread_id=$threadId thread_state=${stack?.threadState} invocation=$invocation " +
                 "invocation_start_nano=${startedAt.get()}\n" +
                 "activity=$activity\nlocks=$locks\nstack=${stack?.stackTrace?.joinToString("\n") ?: "unknown"}",
         )
         if (observed) println("HELD_LOCK_OBSERVED app=$application $now activity=$activity locks=$locks")
-        return observed
+        return observed && !activity.startsWith("unknown(")
     }
+
+    private fun classify(query: String): String =
+        when {
+            "FROM lake_tables t" in query && "t.namespace" in query -> "catalog_read"
+            "INSERT INTO datasource_workspaces" in query && "FROM workspaces w" in query -> "repair_insert"
+            "SELECT id FROM lake_tables_managed" in query -> "settlement_page"
+            "pg_advisory" in query -> "advisory"
+            else -> "other_or_truncated"
+        }
+
+    private fun query(
+        connection: Connection,
+        sql: String,
+        bind: (PreparedStatement) -> Unit,
+        row: (ResultSet) -> String,
+    ): String =
+        safe {
+            connection.prepareStatement(sql).use { statement ->
+                statement.queryTimeout = QUERY_SECONDS
+                bind(statement)
+                statement.executeQuery().use { rows ->
+                    generateSequence { if (rows.next()) row(rows) else null }.joinToString("; ")
+                }
+            }
+        }
 
     fun dump(): String {
         val end = clock()
@@ -219,7 +218,12 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
 
     private fun clock() = Clock(System.nanoTime(), System.currentTimeMillis(), runtime.uptime)
 
-    private fun gcTotals() = collectors.map { "count=${it.collectionCount},time_ms=${it.collectionTime}" }
+    private fun startsSinceBaseline(): String = baseline?.let { start -> ticks?.invoke()?.minus(start)?.toString() } ?: "not_applicable"
+
+    private fun gcTotals(): List<String> {
+        fun known(value: Long) = value.takeIf { it >= 0 }?.toString() ?: "unknown"
+        return collectors.map { "count=${known(it.collectionCount)},time_ms=${known(it.collectionTime)}" }
+    }
 
     private fun psi(): Map<String, Long?> =
         buildMap {
