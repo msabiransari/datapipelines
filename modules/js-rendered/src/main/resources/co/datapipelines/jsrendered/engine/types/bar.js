@@ -196,21 +196,46 @@
     // 100 % and carries no label.
     var option = doc.config.mark.labels === undefined ? look("labelsDefault") : doc.config.mark.labels;
     var labelsOn = option === "values" && !normalize;
+    // A stack's total label text: the exact decimal sum of the visible cells when every one carries exact text, else the
+    // float sum (owner 2026-11-24, #1118). The room reservation and the painted label share it, in the short form
+    // (stackTotalFormat), so a hidden series never leaves the two out of step.
+    var stackTotalText = function (visible, c) {
+      var texts = [], sum = 0, allExact = true, any = false;
+      for (var s = 0; s < series.length; s++) {
+        if (visible[series[s].id] !== true) continue;
+        var cv = cells[s][c];
+        if (cv.num === null) continue;
+        any = true;
+        texts.push(cv.exact);
+        if (cv.exact === null) allExact = false;
+        sum += cv.num;
+      }
+      if (!any) return null;
+      if (allExact) return T.value(D.aggregate(texts, "sum", value.field).exact, look("stackTotalFormat"));
+      return T.value(sum, look("stackTotalFormat"));
+    };
+    // The texts the layout reserves room for: per visible category the stack total, or the visible grouped cells' texts.
+    // A function of `visible` (like extent and totals) so the reservation follows the same series the label paints.
     var endLabels = null;
     if (labelsOn) {
-      endLabels = [];
-      for (var c3 = 0; c3 < categories.length; c3++) {
-        var tot = 0, any = false;
-        for (var s4 = 0; s4 < series.length; s4++) {
-          var cv = cells[s4][c3];
-          if (cv.num === null) continue;
-          if (stacked) {
-            tot += cv.num;
-            any = true;
-          } else endLabels.push(cv.text);
+      endLabels = function (visible) {
+        var out = [];
+        if (stacked) {
+          for (var c3 = 0; c3 < categories.length; c3++) {
+            var text = stackTotalText(visible, c3);
+            if (text !== null) out.push(text);
+          }
+        } else {
+          for (var c3 = 0; c3 < categories.length; c3++) {
+            for (var s4 = 0; s4 < series.length; s4++) {
+              var cv = cells[s4][c3];
+              if (cv.num === null) continue;
+              out.push(cv.text);
+            }
+          }
         }
-        if (stacked && any) endLabels.push(T.value(tot, look("stackTotalFormat")));
-      }
+        return out;
+      };
     }
     var a0 = value.aggregate.charAt(0).toUpperCase() + value.aggregate.slice(1);
     var vt = titleOf(value, value.field ? a0 + " of " + value.field : fields ? a0 : "Count");
@@ -268,6 +293,7 @@
       format: format,
       details: details,
       totals: totals,
+      stackTotalText: stackTotalText,
       layout: {
         vertical: vertical,
         log: log,
@@ -498,7 +524,9 @@
       var total = sums.get(c), en = ends.get(c), box = total >= 0 ? en.pos || en.neg : en.neg || en.pos;
       var outerBox = { x: box.x, y: box.y, w: box.w, end: box.end, up: total >= 0 ? true : false };
       if (total >= 0 && en.pos === null) outerBox.end = plot.value.scale(Math.max(plot.value.lo, Math.min(plot.value.hi, 0)));
-      var lb = labelAt(m, plot, hp, outerBox, T.value(total, look("stackTotalFormat")), groupW, groupW, placed);
+      // The text is the exact decimal sum of the visible cells when every one is exact (owner 2026-11-24, #1118); the
+      // float sum still decides the label's side and place (numeric accumulation for geometry).
+      var lb = labelAt(m, plot, hp, outerBox, m.stackTotalText(plot.visible, c), groupW, groupW, placed);
       if (lb !== null) out.push(lb);
     }
   }

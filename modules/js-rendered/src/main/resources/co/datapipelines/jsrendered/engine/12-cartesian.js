@@ -4,8 +4,8 @@
 // Horizontal: bands down y (the first category at the top, record §4.5), values along x.
 //
 // A model's layout part: {vertical, bands: [{text, under}], bandTitle, valueTitle, bandGrid, valueGrid, format,
-// domain, extent(visible) → [lo, hi], endLabels: null | [texts of the value labels]}; bandGrid/valueGrid are the
-// author's axis.grid (undefined = the look's default); endLabels makes the value axis keep a label's room at a data end.
+// domain, extent(visible) → [lo, hi], endLabels: null | (visible) → [texts of the value labels]}; bandGrid/valueGrid are
+// the author's axis.grid (undefined = the look's default); endLabels makes the value axis keep a label's room at a data end.
 // The line family adds (brief 989 D4, D5, D6; all optional, absent on bar but `log`): `log` (a log value axis: then
 // extent gives [smallest positive, largest] or [null, null]); `x` (a continuous x axis in place of the bands: {kind:
 // "time" | "linear" | "log", lo, hi (seconds for time; for log the smallest positive and the largest), gran (time),
@@ -198,6 +198,7 @@
     var reach = reachOf(L, h), right = Math.max(rightCol !== undefined ? rightCol : typeof L.right === "number" ? L.right : 0, reach);
     var n = L.bands.length, plotTop = b.top + Math.max(hh, reach), labels = L.x ? positionGuess(lvl, L) : bandLabels(L);
     var reserve = A.rowReserve(h, labels, false), extra = 0, rotate = L.x ? "never" : "allow", ext = L.extent(visible), xs = null;
+    var els = L.endLabels === null ? null : L.endLabels(visible);
     // The plot keeps the value axis's need (#985 R1): a rotated label is cut shorter, or the corner cuts the first
     // label, before the plot is made lower than two tick labels.
     var avail = b.bottom - bandTitleH - plotTop, need = valueNeed(h), cs = A.angle(), maxLen = null;
@@ -205,7 +206,7 @@
     for (var pass = 0; pass < 2; pass++) {
       var plotBottom = b.bottom - bandTitleH - reserve - extra;
       var plotH = Math.max(1, plotBottom - plotTop);
-      ax = valueAxisOf(lvl, L, ext, plotH, L.endLabels === null ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
+      ax = valueAxisOf(lvl, L, ext, plotH, els === null || els.length === 0 ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
       var plotX = b.left + titleCol + widestOf(h, ax.texts, s) + tg;
       plot = { x: r2(plotX), y: r2(plotTop), w: r2(Math.max(1, b.right - right - plotX)), h: r2(plotH) };
       kept = keptOf(L, h, plot);
@@ -295,6 +296,7 @@
     var n = L.bands.length, names = namesOf(L.bands);
     var nameW = nameWidth(h, names, b);
     var plotX = b.left + titleCol + nameW + tg, ext = L.extent(visible), extra = 0, rightPad = 0;
+    var els = L.endLabels === null ? null : L.endLabels(visible);
     var ax, plot, scale, row, step, drawn, nameTexts;
     for (var pass = 0; pass < 2; pass++) {
       var plotBottom = b.bottom - valueTitleH - (tg + h.boxH(s)) - extra;
@@ -303,7 +305,7 @@
       var plotH = Math.max(1, room - topPad);
       for (var it = 0; it < 3; it++) {
         var plotW0 = Math.max(1, b.right - rightPad - plotX);
-        ax = valueAxisOf(lvl, L, ext, plotW0, L.endLabels === null ? 0 : widestOf(h, L.endLabels, h.small) + look("valueLabelGap") * h.small);
+        ax = valueAxisOf(lvl, L, ext, plotW0, els === null || els.length === 0 ? 0 : widestOf(h, els, h.small) + look("valueLabelGap") * h.small);
         var pad = h.width(ax.texts[ax.texts.length - 1], s) / 2;
         if (pad <= rightPad) break;
         rightPad = pad;

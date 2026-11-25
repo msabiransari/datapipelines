@@ -6,8 +6,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
+import { plant } from "./forms.mjs";
 
-const R = engine();
+// A spy on the bar marks (the pattern of scatter.test.mjs) so the label tests read the model's endLabels(visible) — the
+// text the layout reserves room for — beside the painted guide labels. With no spy set the marks are the files' own.
+const BAR = "types/bar.js";
+const LABEL_SPY_FROM = 'R.type("bar", { channels: CHANNELS, model: model, marks: marks,';
+const LABEL_SPY_TO = 'R.type("bar", { channels: CHANNELS, model: model, marks: function (m, hand, h) { if (R.spyLabel) R.spyLabel(m, hand); return marks(m, hand, h); },';
+const R = engine((s) => plant(s, BAR, LABEL_SPY_FROM, LABEL_SPY_TO));
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const FRAME = [960, 540];
 
@@ -127,13 +133,20 @@ test("D1: one series hidden: the total follows the visible series only", () => {
   assert.notDeepEqual(out.index.totals, all.index.totals, "hiding a series changes the totals");
 });
 
+/** The render input of a stacked bar of rows [[x, series, value]]; opts = {format, unit, types, hidden, horizontal}. */
+function barInput(rows, opts = {}) {
+  const value = { field: "v", type: "quantitative", aggregate: "sum", stack: "zero", format: opts.format || "compact" };
+  if (opts.unit) value.unit = opts.unit;
+  const band = { field: "x", type: "nominal", sort: "ascending" };
+  const color = { field: "s", type: "nominal", sort: "ascending" };
+  const document = { display_name: "t", config: { mark: { type: "bar" }, encoding: opts.horizontal ? { x: value, y: band, color } : { x: band, y: value, color } } };
+  const columns = { x: rows.map((r) => r[0]), s: rows.map((r) => r[1]), v: rows.map((r) => r[2]) };
+  return { type: "bar", document, columns, types: opts.types || { x: "STRING", s: "STRING", v: "DECIMAL" }, frame: { w: FRAME[0], h: FRAME[1] }, theme: "light", measure: null, hidden: opts.hidden || [] };
+}
+
 /** A stacked bar of rows [[x, series, value]] at the default frame; opts = {format, unit, types, hidden}. */
 function hand(rows, opts = {}) {
-  const y = { field: "v", type: "quantitative", aggregate: "sum", stack: "zero", format: opts.format || "compact" };
-  if (opts.unit) y.unit = opts.unit;
-  const document = { display_name: "t", config: { mark: { type: "bar" }, encoding: { x: { field: "x", type: "nominal", sort: "ascending" }, y, color: { field: "s", type: "nominal", sort: "ascending" } } } };
-  const columns = { x: rows.map((r) => r[0]), s: rows.map((r) => r[1]), v: rows.map((r) => r[2]) };
-  return plain(R.render({ type: "bar", document, columns, types: opts.types || { x: "STRING", s: "STRING", v: "DECIMAL" }, frame: { w: FRAME[0], h: FRAME[1] }, theme: "light", measure: null, hidden: opts.hidden || [] }));
+  return plain(R.render(barInput(rows, opts)));
 }
 
 test("D1: the card's form, not the label's: the chart's format and unit, as a row's value carries them", () => {
@@ -164,4 +177,71 @@ test("D1.3: an unstacked bar, a normalized stack, a line, an area and a scatter 
   }
   const oneSeries = hand([["a", "P", "1"]]);
   assert.ok(Array.isArray(oneSeries.index.totals), "a stack of one series still carries its total");
+});
+
+// ---------------------------------------------------------------- #1118: the stack-total LABEL (owner 2026-11-24)
+
+/** A render with the bar model and the frame's hand: {r, m, hand} (m and hand are null when marks was not called). */
+function drawLabel(rows, opts = {}) {
+  let seen = null;
+  R.spyLabel = (m, hand) => {
+    seen = { m, hand };
+  };
+  try {
+    return { r: plain(R.render(barInput(rows, opts))), m: seen && seen.m, hand: seen && seen.hand };
+  } finally {
+    R.spyLabel = null;
+  }
+}
+
+/** The painted stack-total labels, in draw order. */
+const guides = (r) => r.primitives.filter((p) => p.k === "text" && p.role === "guide").map((p) => p.text);
+
+/** The stack-total label the test expects: the visible rows' exact sum (or the float sum), in the short form. */
+function expectedLabel(rows, visibleSeries) {
+  const vals = [];
+  let allExact = true;
+  for (const [, s, v] of rows) {
+    if (!visibleSeries.has(String(s)) || v === null) continue;
+    vals.push(v);
+    if (typeof v !== "string") allExact = false;
+  }
+  if (vals.length === 0) return null;
+  return R.text.value(allExact ? exactSum(vals) : vals.reduce((a, b) => a + b, 0), "compact");
+}
+
+test("#1118: a BIGINT stack total is its exact sum in the short form, reserved and painted", () => {
+  for (const [second, want] of [["2", "9,007.2T"], ["1000000000000001", "10,007.2T"]]) {
+    const d = drawLabel([["a", "P", "9007199254740993"], ["a", "Q", second]]);
+    assert.deepEqual(guides(d.r), [want], "painted label for +" + second);
+    assert.deepEqual(plain(d.m.layout.endLabels(d.hand.visible)), [want], "reserved text for +" + second);
+  }
+});
+
+test("#1118: hiding a series moves the reserved and the painted label to the same visible exact sum", () => {
+  const rows = [["a", "P", "9007199254740993"], ["a", "Q", "1000000000000001"]];
+  const all = drawLabel(rows, { horizontal: true });
+  assert.deepEqual(guides(all.r), ["10,007.2T"], "both visible");
+  assert.deepEqual(plain(all.m.layout.endLabels(all.hand.visible)), ["10,007.2T"], "both visible, reserved");
+  const q = all.r.summary.series.find((s) => s.title === "Q").id;
+  const hid = drawLabel(rows, { horizontal: true, hidden: [q] });
+  assert.equal(hid.r.summary.series.find((s) => s.title === "Q").hidden, true, "Q is hidden in this draw");
+  assert.deepEqual(guides(hid.r), ["9,007.2T"], "painted follows the visible series");
+  assert.deepEqual(plain(hid.m.layout.endLabels(hid.hand.visible)), ["9,007.2T"], "reserved follows the visible series");
+});
+
+test("#1118: DECIMAL fractions and mixed signs sum exactly", () => {
+  const frac = drawLabel([["a", "P", "1.5"], ["a", "Q", "2.25"]]);
+  assert.deepEqual(guides(frac.r), [R.text.value("3.75", "compact")], "fractional sum");
+  const neg = drawLabel([["a", "P", "-5"], ["a", "Q", "2"]]);
+  assert.deepEqual(guides(neg.r), ["−3"], "the sign is the engine's minus");
+  assert.deepEqual(plain(neg.m.layout.endLabels(neg.hand.visible)), ["−3"], "reserved carries the sign too");
+});
+
+test("#1118: an all-null category draws no label; a nonexact stack keeps the numeric formatter", () => {
+  const nulls = drawLabel([["a", "P", null], ["b", "P", "5"]]);
+  assert.deepEqual(guides(nulls.r), ["5"], "only the drawn category carries a label");
+  assert.deepEqual(plain(nulls.m.layout.endLabels(nulls.hand.visible)), ["5"], "the reservation skips the all-null category");
+  const float = drawLabel([["a", "P", 1e15], ["a", "Q", 2]], { types: { x: "STRING", s: "STRING", v: "DOUBLE" } });
+  assert.deepEqual(guides(float.r), [R.text.value(1e15 + 2, "compact")], "a nonexact stack keeps the numeric total format");
 });
