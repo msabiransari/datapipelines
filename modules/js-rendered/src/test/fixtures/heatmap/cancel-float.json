@@ -24,7 +24,7 @@
           },
           {
             "name": "v",
-            "type": "DOUBLE",
+            "type": "DECIMAL",
             "nullable": true
           }
         ]

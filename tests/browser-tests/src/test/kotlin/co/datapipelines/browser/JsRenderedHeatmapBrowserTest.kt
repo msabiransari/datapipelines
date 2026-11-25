@@ -82,6 +82,20 @@ class JsRenderedHeatmapBrowserTest {
         }
     }
 
+    @Test
+    fun `A7 minimal frame still steps cells and shows the kept value row`() {
+        withPage { opened ->
+            val page = opened.page
+            draw(page, "grid-4x3", MIN_W, MIN_H)
+            page.locator("#chart").focus()
+            for ((key, datum) in listOf("ArrowRight" to 0, "ArrowRight" to 1, "ArrowDown" to 5)) {
+                page.keyboard().press(key)
+                checkCard(page, datum, listOf("v", datum.toString()))
+            }
+            clean(opened)
+        }
+    }
+
     private fun withPage(block: (ChartTestPage.Opened) -> Unit) {
         val opened = PAGE.open(browser, VIEW_W, VIEW_H)
         try {
@@ -126,6 +140,8 @@ class JsRenderedHeatmapBrowserTest {
         private const val DRAW_W = 960
         private const val DRAW_H = 540
         private const val COLS = 4
+        private const val MIN_W = 80
+        private const val MIN_H = 24
         private val EMITTED = Regex("""heatmap/[a-z0-9-]+/\d+x\d+\.input\.json""")
         private val PAGE =
             ChartTestPage(
@@ -205,7 +221,7 @@ class JsRenderedHeatmapBrowserTest {
               const box=out.index.marks.find(m=>m.datum===datum).shape;
               const mark=out.primitives.find(p=>p.role==='mark' && p.datum===datum);
               const rings=[...svg.querySelectorAll('rect.dp-guide')].filter(e=>!window.__heatmapWritten.has(e));
-              const gap=3.25, ring=rings.find(e=>Math.abs(Number(e.getAttribute('x'))-(box.x-gap))<0.02 &&
+              const gap=0.25*window.JsRendered.theme.resolve(out.theme).n("--chart-text"), ring=rings.find(e=>Math.abs(Number(e.getAttribute('x'))-(box.x-gap))<0.02 &&
                 Math.abs(Number(e.getAttribute('y'))-(box.y-gap))<0.02 && Math.abs(Number(e.getAttribute('width'))-(box.w+2*gap))<0.02 &&
                 getComputedStyle(e).stroke === 'rgb('+window.JsRendered.theme.resolve(out.theme).colour(mark.fill).join(', ')+')');
               return {texts:[...svg.querySelectorAll('text.dp-tooltip')].map(e=>e.textContent),ring:!!ring};

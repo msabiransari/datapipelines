@@ -1,5 +1,6 @@
 // Heatmap's own checks (brief 1070 A.2–A.5). Expected geometry is derived from the handed slots, not the marks.
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { expectedHeatmapMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
 import { plant } from "./forms.mjs";
 const FILE = "types/heatmap.js";
 const REGISTER = 'R.type("heatmap", { channels: CHANNELS, model: model, marks: marks,';
-const E = engine((s) => plant(s, FILE, REGISTER, 'R.heatModel = model; R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m, hand, h) { R.seen = {m, hand, h}; return marks(m, hand, h); },'));
+const E = engine((s) => plant(s, FILE, REGISTER, 'R.heatModel = model; R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m, hand, h) { R.seen = {m, hand, h, marks}; return marks(m, hand, h); },'));
 const I = createRequire(import.meta.url)(join(MODULE, "../web/src/main/resources/static/js/datapipelines-chart-interactions.js"))._internal;
 const FX = Object.fromEntries(chartFixtures().filter((f) => f.wire === "heatmap").map((f) => [f.name, f.fixture]));
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -214,4 +215,39 @@ test("G2–G8 model geometry labels lookup and cap falsifications name the chang
   }
   const cap=engine(s=>{s['06-tables.js']=s['06-tables.js'].replace('"heatmap.marks":','"removed.marks":');});
   const capCheck=r=>assert.equal(full(r,fx('thousand-one')).summary.refusal?.code,'chart.too_many_marks');capCheck(E);assert.throws(()=>capCheck(cap));capCheck(E);console.log('G7 cap: GREEN / targeted RED / GREEN');
+});
+
+
+test("A.4 label fit accepts the exact width and height borders and drops labels just beyond each",()=>{
+  const f=variant('single',f=>f.document.config.mark.labels='values');
+  const d=draw(f), cell=rects(d.r)[0], width=d.h.width('7',d.h.small);
+  const saved=E.tables.LOOK.valueLabelGap.value, edge=(cell.w-width)/(2*d.h.small);
+  try {
+    for(const [gap,want] of [[edge,1],[edge+0.001,0],[edge-0.001,1]]) {
+      E.tables.LOOK.valueLabelGap.value=gap;
+      assert.equal(draw(f).r.primitives.filter(p=>p.k==='text'&&p.role==='guide').length,want);
+    }
+  } finally {E.tables.LOOK.valueLabelGap.value=saved;}
+  for(const [height,want] of [[15,1],[14.99,0],[15.01,1]]) {
+    const hand={...d.hand,band:{start:6,step:100,n:1},rows:{start:6,step:height+2,n:1},plot:{x:6,y:6,w:100,h:height+2}};
+    const out=d.marks(d.m,hand,{...d.h,boxH:()=>15});
+    assert.equal(out.primitives.filter(p=>p.k==='text'&&p.role==='guide').length,want);
+  }
+});
+
+
+test("G8 exact oracle keeps cancellation exact while a float-only oracle turns I3 red",()=>{
+  const code=readFileSync(new URL('./geometry.mjs',import.meta.url),'utf8').split('/** Exact-decimal arithmetic')[1];
+  const body='/** Exact-decimal arithmetic'+code;
+  const old='else if (values.some((v) => typeof v === "string")) value = heatmapExact(values, a);';
+  assert.equal(body.split(old).length,2);
+  const wrong=new Function(body.replace('export function expectedHeatmapMarks','function expectedHeatmapMarks').replace(old,'else if (values.some((v) => typeof v === "string")) value = values.map(Number).reduce((a,b)=>a+b,0);')+'; return expectedHeatmapMarks;')();
+  assert.equal(expectedHeatmapMarks(FX['cancel-exact']),2);assert.throws(()=>assert.equal(wrong(FX['cancel-exact']),2));
+  assert.equal(wrong(FX['cancel-float']),1);assert.equal(expectedHeatmapMarks(FX['cancel-exact']),2);
+});
+
+test("G9 unescaped writer text turns the hostile heatmap red in both output forms",()=>{
+  const bad=engine(s=>plant(s,'31-write-string.js','escape(k.text)','k.text'));
+  const check=(r,form)=>assert.equal((r.writeString(r.render(inputOf(FX.hostile,960,540)).primitives,form,'light').match(/<(script|img|b)\b/gi)||[]).length,0);
+  for(const form of ['page','standalone']) {check(E,form);assert.throws(()=>check(bad,form));check(E,form);}
 });

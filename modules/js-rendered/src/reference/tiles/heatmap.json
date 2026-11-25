@@ -1048,7 +1048,7 @@
      }
     },
     "title": {
-     "text": "<b>t</b> onload=alert(1)",
+     "text": "<b>bold?</b> & \"quoted\"",
      "subtitle": "<img src=x onerror=alert(1)>"
     }
    }
