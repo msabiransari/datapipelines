@@ -482,6 +482,46 @@ printf 'SCAN_EXIT_OFFLINE=200\nscan_tools_classify_network() { echo offline; }\n
 for stub in gradlew scripts/pregate.sh scripts/vuln-scan.sh scripts/docs-audit.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$GF/$stub"; chmod +x "$GF/$stub"
 done
+# Only the copied helpers see this input seam: enumerate this test and its descendants,
+# including holders and both real wrappers, instead of unrelated host processes. Their
+# references, mount tables and uncertain judgments still go through the real helper.
+for co in "$PF" "$GF"; do
+  mv "$co/scripts/lib/temp-hygiene-helper.py" "$co/scripts/lib/temp-hygiene-helper-real.py"
+  printf '%s\n' "$BASHPID" > "$co/scripts/lib/fixture-pid"
+  cat > "$co/scripts/lib/temp-hygiene-helper.py" <<'PY'
+import os
+from pathlib import Path
+import runpy
+
+fixture_pid = (Path(__file__).parent / "fixture-pid").read_text().strip()
+real_listdir = os.listdir
+
+
+def fixture_process(pid: str) -> bool:
+    seen: set[str] = set()
+    while pid.isdigit() and pid != "0" and pid not in seen:
+        if pid == fixture_pid:
+            return True
+        seen.add(pid)
+        try:
+            status = Path("/proc", pid, "status").read_text()
+        except FileNotFoundError:
+            return False  # A process that exited holds nothing.
+        pid = next((line.split()[1] for line in status.splitlines() if line.startswith("PPid:")), "0")
+    return False
+
+
+def fixture_listdir(path: str) -> list[str]:
+    entries = real_listdir(path)
+    if path == "/proc":
+        return [entry for entry in entries if not entry.isdigit() or fixture_process(entry)]
+    return entries
+
+
+os.listdir = fixture_listdir
+runpy.run_path(str(Path(__file__).with_name("temp-hygiene-helper-real.py")), run_name="__main__")
+PY
+done
 wrapper() { # wrapper <checkout> <script> [args]: the copied wrapper, its own lock cache, this case's temp base
   local co="$1"; shift
   PASSN=$((PASSN + 1)); OUT="$FX/out.$PASSN"
