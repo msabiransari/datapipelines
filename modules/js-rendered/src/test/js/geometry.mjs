@@ -189,3 +189,56 @@ export function expectedPieMarks(fixture, hiddenIds) {
   const total = shown.reduce((a, s) => a + s.n, 0);
   return shown.filter(s => s.n / total * 360 >= 0.02).length;
 }
+/** Exact-decimal arithmetic for heatmap I3: only the final aggregate crosses to float64. Independent of the engine. */
+function heatmapExact(values, aggregate) {
+  const parts = values.map((v) => {
+    const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(v));
+    if (!m) throw new Error("I3 exact decimal: " + v);
+    return { sign: m[1], whole: m[2], fraction: m[3] || "" };
+  });
+  const scale = Math.max(...parts.map((p) => p.fraction.length));
+  const integers = parts.map((p) => BigInt(p.sign + p.whole + p.fraction.padEnd(scale, "0")));
+  let result;
+  let places = scale;
+  if (aggregate === "min" || aggregate === "max") {
+    result = integers.reduce((a, b) => aggregate === "min" ? (a < b ? a : b) : (a > b ? a : b));
+  } else {
+    result = integers.reduce((a, b) => a + b, 0n);
+    if (aggregate === "mean") {
+      result = result * 10n ** 20n / BigInt(integers.length);
+      places += 20;
+    }
+  }
+  const sign = result < 0n ? "-" : "";
+  const digits = (result < 0n ? -result : result).toString().padStart(places + 1, "0");
+  const point = digits.length - places;
+  return Number(sign + digits.slice(0, point) + (places ? "." + digits.slice(point) : ""));
+}
+
+/** I3, from delivered rows: one finite non-null aggregate per typed pair, including count's non-null-only rule. */
+export function expectedHeatmapMarks(fx) {
+  const e = fx.document.config.encoding, X = fx.columns[e.x.field], Y = fx.columns[e.y.field], V = fx.columns[e.color.field];
+  const groups = new Map();
+  for (let i = 0; i < Math.max(X.length, Y.length); i++) {
+    if (X[i] == null || Y[i] == null) continue;
+    const key = JSON.stringify([typeof X[i], String(X[i]), typeof Y[i], String(Y[i])]);
+    if (!groups.has(key)) groups.set(key, []);
+    if (V[i] != null) groups.get(key).push(V[i]);
+  }
+  let count = 0;
+  for (const values of groups.values()) {
+    if (!values.length) continue;
+    const a = e.color.aggregate;
+    let value;
+    if (a === "count") value = values.length;
+    else if (values.some((v) => typeof v === "string")) value = heatmapExact(values, a);
+    else if (a === "min") value = Math.min(...values);
+    else if (a === "max") value = Math.max(...values);
+    else {
+      value = values.reduce((x, y) => x + y, 0);
+      if (a === "mean") value /= values.length;
+    }
+    if (Number.isFinite(value)) count++;
+  }
+  return count;
+}

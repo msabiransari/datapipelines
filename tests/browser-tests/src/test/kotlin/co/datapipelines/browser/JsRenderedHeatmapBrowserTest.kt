@@ -1,0 +1,215 @@
+package co.datapipelines.browser
+
+import com.microsoft.playwright.Browser
+import com.microsoft.playwright.BrowserType
+import com.microsoft.playwright.Page
+import com.microsoft.playwright.Playwright
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.shouldBe
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Test
+
+/** Heatmap's real Chromium checks: DOM/primitive parity, slot hover, fixed card, ring, grid keys and fitted labels. */
+class JsRenderedHeatmapBrowserTest {
+    @Test
+    fun `A7 cells labels and chrome in the DOM equal the engine primitives`() {
+        withPage { opened ->
+            for (fixture in listOf("grid-4x3", "missing-cells", "labels-values", "labels-diverging", "hostile")) {
+                for ((w, h) in listOf(960 to 540, 360 to 240, 80 to 24)) {
+                    draw(opened.page, fixture, w, h)
+                    withClue("$fixture at $w x $h") {
+                        @Suppress("UNCHECKED_CAST")
+                        val bad = opened.page.evaluate(DOM) as List<String>
+                        bad.shouldBeEmpty()
+                    }
+                }
+            }
+            clean(opened)
+        }
+    }
+
+    @Test
+    fun `A7 a slot including its gap opens the cell card and colour ring and outside the plot clears them`() {
+        withPage { opened ->
+            val page = opened.page
+            draw(page, "grid-4x3", DRAW_W, DRAW_H)
+            for (gap in listOf(false, true)) {
+                @Suppress("UNCHECKED_CAST")
+                val p = page.evaluate(PLACE, gap) as List<Number>
+                page.mouse().move(p[0].toDouble(), p[1].toDouble())
+                withClue("slot gap=$gap") { checkCard(page, 0, listOf("r01, c01", "v", "0")) }
+            }
+            page.mouse().move((VIEW_W - 2).toDouble(), (VIEW_H - 2).toDouble())
+            page.locator("text.dp-tooltip").count() shouldBe 0
+            page.evaluate(
+                "() => [...document.querySelectorAll('#chart .dp-guide')].filter(e => e.getAttribute('fill') === 'none').length",
+            ) shouldBe
+                0
+            clean(opened)
+        }
+    }
+
+    @Test
+    fun `A7 keys walk rows and columns without wrapping and card and ring follow`() {
+        withPage { opened ->
+            val page = opened.page
+            draw(page, "grid-4x3", DRAW_W, DRAW_H)
+            page.evaluate(
+                "() => window.ChartHeatmap.last().primitives.filter(p => p.k === 'text' && p.shown !== p.text && p.shown !== null).length",
+            ) shouldBe
+                0
+            page.locator("#chart").focus()
+            val plan =
+                listOf(
+                    "ArrowRight" to 0,
+                    "ArrowRight" to 1,
+                    "ArrowDown" to 5,
+                    "ArrowUp" to 1,
+                    "End" to 3,
+                    "ArrowRight" to 3,
+                    "Home" to 0,
+                    "ArrowLeft" to 0,
+                )
+            for ((key, datum) in plan) {
+                page.keyboard().press(key)
+                val row = datum / COLS + 1
+                val col = datum % COLS + 1
+                checkCard(page, datum, listOf("r0$row, c0$col", "v", datum.toString()))
+            }
+            clean(opened)
+        }
+    }
+
+    private fun withPage(block: (ChartTestPage.Opened) -> Unit) {
+        val opened = PAGE.open(browser, VIEW_W, VIEW_H)
+        try {
+            block(opened)
+        } finally {
+            opened.context.close()
+        }
+    }
+
+    private fun draw(
+        page: Page,
+        fixture: String,
+        w: Int,
+        h: Int,
+    ) {
+        page.evaluate(DRAW, listOf("$fixture/960x540.input.json", w, h)) shouldBe "rendered"
+    }
+
+    private fun checkCard(
+        page: Page,
+        datum: Int,
+        expected: List<String>,
+    ) {
+        @Suppress("UNCHECKED_CAST")
+        val read = page.evaluate(CARD, datum) as Map<String, Any?>
+        withClue("datum $datum: $read") {
+            read["texts"] shouldBe expected
+            read["ring"] shouldBe true
+        }
+    }
+
+    private fun clean(opened: ChartTestPage.Opened) {
+        opened.errors.toList().shouldBeEmpty()
+        opened.violations.toList().shouldBeEmpty()
+        opened.off.toList().shouldBeEmpty()
+        opened.page.locator("[style]").count() shouldBe 0
+    }
+
+    companion object {
+        private const val VIEW_W = 1280
+        private const val VIEW_H = 900
+        private const val DRAW_W = 960
+        private const val DRAW_H = 540
+        private const val COLS = 4
+        private val EMITTED = Regex("""heatmap/[a-z0-9-]+/\d+x\d+\.input\.json""")
+        private val PAGE =
+            ChartTestPage(
+                origin = "https://chart-heatmap.test",
+                resources = "chart-heatmap",
+                script = "chart-heatmap.js",
+                testTypes = emptyList(),
+                emitted = { r -> if (EMITTED.matches(r)) "co/datapipelines/jsrendered/emitted/$r" else null },
+            )
+        private var playwright: Playwright? = null
+        private lateinit var browser: Browser
+
+        @JvmStatic
+        @BeforeAll
+        fun launch() {
+            val pw = Playwright.create().also { playwright = it }
+            browser = pw.chromium().launch(BrowserType.LaunchOptions().setHeadless(true))
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun shut() {
+            if (::browser.isInitialized) browser.close()
+            playwright?.close()
+            playwright = null
+        }
+
+        private val DRAW =
+            """
+            async ([file,w,h]) => {
+              const out = await window.ChartHeatmap.draw(file,{w,h});
+              window.__heatmapWritten = new Set(document.querySelectorAll('#chart *'));
+              return out.state;
+            }
+            """.trimIndent()
+        private val DOM =
+            """
+            () => {
+              const out = window.ChartHeatmap.last(), svg = document.getElementById('chart'), bad = [];
+              const els = [...svg.querySelectorAll('*')].filter(e => !(e.tagName === 'linearGradient' || e.tagName === 'stop' ||
+                (e.parentNode === svg && (e.tagName === 'title' || e.tagName === 'desc'))));
+              const tags = {rect:'rect',line:'line',path:'path',circle:'circle',text:'text',group:'g'};
+              if (els.length !== out.primitives.length) bad.push('element count');
+              out.primitives.forEach((p,i) => {
+                const e = els[i];
+                if (!e || e.tagName !== tags[p.k] || !e.classList.contains('dp-'+p.role)) {bad.push('primitive '+i); return;}
+                if (p.k === 'text' && e.textContent !== (p.shown ?? p.text)) bad.push('text '+i);
+                if (p.k === 'rect') for (const [a,k] of [['x','x'],['y','y'],['width','w'],['height','h'],['rx','rx']]) {
+                  if (Math.abs(Number(e.getAttribute(a))-p[k]) > 0.011) bad.push(a+' '+i);
+                }
+              });
+              const values = out.primitives.filter(p => p.k === 'text' && p.role === 'guide');
+              if (out.level === 'minimal' && values.length) bad.push('minimal labels');
+              const t = window.JsRendered.theme.resolve(out.theme);
+              for (const p of values) {
+                const e = els[out.primitives.indexOf(p)];
+                if (!['--chart-on-fill-light','--chart-on-fill-dark'].includes(p.fill)) bad.push('on-fill token');
+                if (getComputedStyle(e).fill !== 'rgb('+t.colour(p.fill).join(', ')+')') bad.push('computed label ink');
+              }
+              if (out.level === 'full' && window.ChartHeatmap.input().document.config.mark.labels === 'values' && !values.length) bad.push('no fitted labels');
+              return bad;
+            }
+            """.trimIndent()
+        private val PLACE =
+            """
+            gap => {
+              const out=window.ChartHeatmap.last(), b=out.index.marks[0].shape;
+              const svg=document.getElementById('chart'), r=svg.getBoundingClientRect();
+              const x=gap ? b.x+b.w-0.25 : b.x+b.w/2, y=b.y+b.h/2;
+              return [r.left+x*r.width/out.frame.w,r.top+y*r.height/out.frame.h];
+            }
+            """.trimIndent()
+        private val CARD =
+            """
+            datum => {
+              const out=window.ChartHeatmap.last(), svg=document.getElementById('chart');
+              const box=out.index.marks.find(m=>m.datum===datum).shape;
+              const mark=out.primitives.find(p=>p.role==='mark' && p.datum===datum);
+              const rings=[...svg.querySelectorAll('rect.dp-guide')].filter(e=>!window.__heatmapWritten.has(e));
+              const gap=3.25, ring=rings.find(e=>Math.abs(Number(e.getAttribute('x'))-(box.x-gap))<0.02 &&
+                Math.abs(Number(e.getAttribute('y'))-(box.y-gap))<0.02 && Math.abs(Number(e.getAttribute('width'))-(box.w+2*gap))<0.02 &&
+                getComputedStyle(e).stroke === 'rgb('+window.JsRendered.theme.resolve(out.theme).colour(mark.fill).join(', ')+')');
+              return {texts:[...svg.querySelectorAll('text.dp-tooltip')].map(e=>e.textContent),ring:!!ring};
+            }
+            """.trimIndent()
+    }
+}

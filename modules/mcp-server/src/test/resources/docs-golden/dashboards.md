@@ -66,7 +66,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter` or `pie` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie` or `heatmap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -203,6 +203,15 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
 }}
 ```
 
+**Heatmap?** Use `heatmap` for a measure over two categories, such as weekday by hour: a few dozen to 1,000 cells. Aggregate in the query above 1,000; use a line for an ordered time series. Missing or all-null cells are empty, not zero. Labels default to none; choose `values` for a few cells.
+```json
+"config": {"mark": {"type": "heatmap", "labels": "values"}, "encoding": {
+  "x": {"field": "hour", "type": "nominal", "sort": "ascending"},
+  "y": {"field": "weekday", "type": "nominal", "sort": null},
+  "color": {"field": "orders", "type": "quantitative", "aggregate": "sum", "scale": "sequential"}
+}}
+```
+
 **On every type, except where an item names its types:**
 - **`fields` instead of `color`** (bar, line and area only; a scatter's `y` takes one `field` and no `aggregate`):
   `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
@@ -210,8 +219,8 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
   scatter's `y`, a pie's `theta`, a tooltip detail.
-- **`encoding.tooltip` (not on a pie):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
-- **`scale` (not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
+- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
+- **`scale` (on a value or a number axis):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
   `zero`; a value at or below zero is then not drawn.
 

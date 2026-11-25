@@ -53,6 +53,9 @@ enum class ChartType(
 
     /** Shares of a whole, drawn as a ring by default (§4.5; lane #1068). */
     PIE("pie", ChartChannelNodes.pie, ChartMarkPolicy.AREA),
+
+    /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
+    HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -161,6 +164,13 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val heatmap: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("color", required = true, node = ChannelNode.Shape("shade")),
+        )
+
     val bandOrValue: ChannelNode =
         ChannelNode.OneOf(
             listOf(

@@ -1,0 +1,93 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "markup in names, a title and the field",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "<img src=x onerror=alert(2)>",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null,
+          "title": "<img src=x onerror=alert(1)>"
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "<img src=x onerror=alert(2)>",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      },
+      "title": {
+        "text": "<b>t</b> onload=alert(1)",
+        "subtitle": "<img src=x onerror=alert(1)>"
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "<script>alert(1)</script>",
+      "onload=alert(1)",
+      "\" onmouseover=\"x"
+    ],
+    "y": [
+      "r1",
+      "r1",
+      "r1",
+      "r2",
+      "r2",
+      "r2"
+    ],
+    "<img src=x onerror=alert(2)>": [
+      1,
+      5,
+      2,
+      4,
+      3,
+      6
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "<img src=x onerror=alert(2)>": "INTEGER"
+  }
+}

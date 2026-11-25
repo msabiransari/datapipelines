@@ -1,0 +1,82 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "an aggregate beyond float64 is not drawn, one warning",
+  "document": {
+    "display_name": "non-finite",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "DOUBLE",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "a",
+      "a",
+      "b",
+      "c"
+    ],
+    "y": [
+      "r",
+      "r",
+      "r",
+      "r"
+    ],
+    "v": [
+      1e+308,
+      1e+308,
+      4,
+      5
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "DOUBLE"
+  }
+}

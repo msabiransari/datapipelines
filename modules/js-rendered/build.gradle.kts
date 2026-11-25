@@ -342,7 +342,7 @@ val jsRenderedReference =
             if (sinks.values.any { it != 0 }) throw GradleException("jsRenderedReference: reference.js names a markup or code sink: $sinks")
 
             // 5. The tiles: one file per type, every tile with its hand-written expect.
-            listOf("bar", "line", "area", "scatter", "pie").forEach { wire ->
+            listOf("bar", "line", "area", "scatter", "pie", "heatmap").forEach { wire ->
                 @Suppress("UNCHECKED_CAST")
                 val tiles = groovy.json.JsonSlurper().parse(File(source, "tiles/$wire.json")) as List<Map<String, Any?>>
                 val missing = tiles.filter { it["expect"] !is Map<*, *> || (it["expect"] as Map<*, *>).isEmpty() }.map { it["id"] }

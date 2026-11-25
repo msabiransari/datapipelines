@@ -1,0 +1,51 @@
+{
+  "display_name": "temporal-axes",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "x",
+          "type": "DATE",
+          "nullable": false
+        },
+        {
+          "name": "y",
+          "type": "DATE",
+          "nullable": false
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "heatmap"
+    },
+    "encoding": {
+      "x": {
+        "field": "x",
+        "type": "temporal",
+        "sort": null
+      },
+      "y": {
+        "field": "y",
+        "type": "temporal",
+        "sort": null
+      },
+      "color": {
+        "field": "v",
+        "aggregate": "sum",
+        "type": "quantitative",
+        "scale": "sequential"
+      }
+    }
+  }
+}

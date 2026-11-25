@@ -1,0 +1,82 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "the same as numbers: the sum passes float64 on the way and is not drawn (one cell, one warning)",
+  "document": {
+    "display_name": "cancel-float",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "DOUBLE",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "a",
+      "a",
+      "a",
+      "b"
+    ],
+    "y": [
+      "r",
+      "r",
+      "r",
+      "r"
+    ],
+    "v": [
+      1e+308,
+      1e+308,
+      -1e+308,
+      5
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "DOUBLE"
+  }
+}
