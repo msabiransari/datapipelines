@@ -348,7 +348,14 @@
     var k = Math.max(1, vis.length), stacked = m.stack === "zero" || m.stack === "normalize";
     var step = plot.band.step, groupW = step * look(stacked ? "stackShare" : "barShare");
     var gap = theme.n("--chart-gap"), radius = theme.n("--chart-bar-radius"), maxShare = look("radiusMaxShare");
-    var barW = stacked ? groupW : Math.max(0, (groupW - gap * (k - 1)) / k);
+    // Grouped bars keep the requested gap while it fits. An overfull group — a nondefault gap whose total separation
+    // reaches the group's width — compresses the separation so every bar keeps a positive width (brief 1130); a
+    // zero-width group takes zero separation. The default gap and every fitting group keep their geometry unchanged.
+    var sep = gap;
+    if (!stacked && k > 1 && gap !== 2 && gap * (k - 1) >= groupW) {
+      sep = groupW > 0 ? gap * groupW / (groupW + gap * (k - 1)) : 0;
+    }
+    var barW = stacked ? groupW : Math.max(0, (groupW - sep * (k - 1)) / k);
     var lo = plot.value.lo, hi = plot.value.hi, sc = plot.value.scale, base = sc(clampTo(0, lo, hi));
     var vertical = m.vertical, rects = [];
     var pos = [], neg = [];
@@ -387,7 +394,7 @@
           first = true;
         }
         var p0 = sc(clampTo(from, lo, hi)), p1 = sc(clampTo(to, lo, hi));
-        var off = plot.band.start + step * ci + (step - groupW) / 2 + (stacked ? 0 : j * (barW + gap));
+        var off = plot.band.start + step * ci + (step - groupW) / 2 + (stacked ? 0 : j * (barW + sep));
         var len = Math.abs(p1 - p0), shift = !first && len > 0 ? Math.min(gap, len) : 0;
         len -= shift;
         var isOuter = !stacked || look("roundOuterOnly") !== true || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);

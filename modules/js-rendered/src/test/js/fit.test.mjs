@@ -4,8 +4,8 @@
 // oracle of R2 reads the labels with THIS file's own decimal reader, never R.text (the formatter under test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { engine, chartFixtures, inputOf } from "./engine.mjs";
-import { violations } from "./geometry.mjs";
+import { engine, chartFixtures, inputOf, canonical } from "./engine.mjs";
+import { violations, markBox } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
@@ -233,4 +233,140 @@ test("R2: the small-value bar's value labels state the delivered values at the d
   const r = R.render(inputOf(fx("ticks-small-decimal"), 960, 540));
   const labels = r.primitives.filter((p) => p.k === "text" && p.role === "guide").map((p) => p.text);
   assert.deepEqual([...labels].sort(), ["0.000100", "0.000200"]);
+});
+
+// ---------------------------------------------------------------- #1130: the grouped-bar gap
+
+/** The mark primitives that paint a bar: a rect, or the rounded path (§2 "corners"), both role "mark". */
+function barMarks(r) {
+  return r.primitives.filter((p) => p.role === "mark" && (p.k === "rect" || p.k === "path"));
+}
+
+/** A bar's category-axis extent (its painted width) and its category-axis start, for either orientation. */
+const catExtent = (b, vertical) => (vertical ? b[2] - b[0] : b[3] - b[1]);
+const catStart = (b, vertical) => (vertical ? b[0] : b[1]);
+
+/** A horizontal grouped bar from a vertical eight-series fixture: the same data with x and y swapped (brief 1130 §A.1). */
+function horizontalOf(f) {
+  const d = JSON.parse(JSON.stringify(f.document));
+  const x = d.config.encoding.x, y = d.config.encoding.y;
+  d.config.encoding.x = y;
+  d.config.encoding.y = x;
+  return { document: d, columns: f.columns, types: f.types, hidden: f.hidden || [] };
+}
+
+/**
+ * The independent grouped-allocation oracle (brief 1130 §A.3): the widths and offsets recomputed from the rendered plot
+ * box and the documented rule (§2 "bars": a group fills 74% of its band), never from the engine's barW/off. A nondefault
+ * gap whose total separation G = (k−1)g reaches the group width W scales the separation to gW/(W+G); otherwise the
+ * requested gap stands. Width = max(0, (W−(k−1)e)/k); bar j of a group starts at the group start + j·(width+e).
+ */
+function groupedGeometry(f, r, gap) {
+  const vertical = f.document.config.encoding.y.type === "quantitative";
+  const band = vertical ? f.document.config.encoding.x : f.document.config.encoding.y;
+  const color = f.document.config.encoding.color;
+  const cats = new Set(f.columns[band.field].map((v) => typeof v + ":" + String(v)));
+  const sers = new Set(color ? f.columns[color.field].map((v) => typeof v + ":" + String(v)) : [""]);
+  const n = cats.size, k = Math.max(1, sers.size);
+  const length = vertical ? r.index.plot.w : r.index.plot.h;
+  const step = length / Math.max(1, n);
+  const W = step * 0.74;
+  const G = (k - 1) * gap;
+  const e = gap !== 2 && G >= W ? (W > 0 ? gap * W / (W + G) : 0) : gap;
+  const w = Math.max(0, (W - (k - 1) * e) / k);
+  return { vertical, n, k, W, e, w };
+}
+
+/** The engine with the grouped-gap compression removed: "requested-gap placement alone" (brief 1130 §Gates). It
+ * reproduces the base's overfull-group behaviour, so the fix must differ from it under an overfull group and equal it
+ * wherever the requested layout fits. */
+const requestedGapOnly = engine((srcs) => {
+  const anchor = "sep = groupW > 0 ? gap * groupW / (groupW + gap * (k - 1)) : 0;";
+  if (!srcs["types/bar.js"].includes(anchor)) throw new Error("grouped-gap compression anchor missing from bar.js");
+  srcs["types/bar.js"] = srcs["types/bar.js"].replace(anchor, "sep = gap;");
+});
+
+test("gap 8 at 80 x 24: 24 painted bars of the compressed width, zero frame violations; requested-gap placement alone overflows", () => {
+  for (const name of ["fit-crowded-eight-series", "look-eight-series"]) {
+    const f = fx(name), tokens = { "--chart-gap": 8 };
+    const r = R.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
+    const boxes = barMarks(r).map(markBox);
+    const g = groupedGeometry(f, r, 8);
+    assert.equal(boxes.length, 24, name + ": 24 painted bars");
+    assert.ok(g.w >= 0.48 && g.w <= 0.49, name + ": compressed width " + g.w + " is the measured 0.48–0.49");
+    for (const b of boxes) assert.ok(Math.abs(catExtent(b, g.vertical) - g.w) <= 0.011, name + ": each bar is the compressed width");
+    const xs = boxes.map((b) => catStart(b, g.vertical)).sort((a, b) => a - b);
+    for (let j = 1; j < 24; j++) if (j % 8) assert.ok(Math.abs(xs[j] - xs[j - 1] - (g.w + g.e)) <= 0.011, name + ": starts are spaced width+separation");
+    assert.deepEqual([...violations(r.primitives, 80, 24).violations].map((v) => v.inv + " " + v.what), []);
+    const r0 = requestedGapOnly.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
+    assert.ok(violations(r0.primitives, 80, 24).violations.length > 0, name + ": requested-gap placement alone violates I2");
+  }
+});
+
+test("the grouped-gap matrix: custom gaps paint positive bars inside the frame; the eight dense default rows keep base geometry", () => {
+  const frames = [[80, 24], [81, 25], [100, 31], [120, 40], [160, 24], [960, 540]];
+  const preserved = new Set(["80x24", "81x25", "100x31", "160x24"]);
+  for (const name of ["fit-crowded-eight-series", "look-eight-series"]) {
+    const f = fx(name);
+    for (const horiz of [false, true]) {
+      const src = horiz ? horizontalOf(f) : f;
+      const vertical = !horiz;
+      for (const [w, h] of frames) {
+        for (const gap of [0, 2, 4, 8]) {
+          const tokens = gap === 2 ? {} : { "--chart-gap": gap };
+          const r = R.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
+          const where = name + (horiz ? " horizontal" : " vertical") + " " + w + "x" + h + " gap " + gap;
+          if (horiz && gap === 2 && preserved.has(w + "x" + h)) {
+            // The eight dense default rows keep the base's overflow (a subpixel allocation #1117 later refuses):
+            // byte-identical to requested-gap placement, so this lane changed nothing about them.
+            const r0 = requestedGapOnly.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
+            assert.equal(canonical(r), canonical(r0), where + " is byte-equal to the base");
+          } else {
+            assert.deepEqual([...violations(r.primitives, w, h).violations].map((v) => v.inv + " " + v.what), [], where);
+          }
+          if (gap === 4 || gap === 8) for (const b of barMarks(r).map(markBox)) {
+            assert.ok(catExtent(b, vertical) > 0, where + ": positive painted width");
+          }
+        }
+      }
+    }
+  }
+});
+
+test("the grouped-gap compression is inert at the default gap: every bar picture is byte-identical to the base", () => {
+  let compared = 0;
+  for (const f of FIXTURES.filter((x) => x.wire === "bar")) {
+    for (const [w, h] of [[80, 24], [200, 140], [360, 240], [960, 540]]) {
+      const a = canonical(R.render(inputOf(f.fixture, w, h)));
+      const b = canonical(requestedGapOnly.render(inputOf(f.fixture, w, h)));
+      assert.equal(a, b, f.name + " at " + w + "x" + h);
+      compared++;
+    }
+  }
+  assert.ok(compared > 100, "default-gap pictures compared: " + compared);
+});
+
+test("a legend switch hides exactly the requested series at full level; the hidden list is ignored where no switch is drawn", () => {
+  const ids = ["Series 1", "Series 2", "Series 3", "Series 4", "Series 5", "Series 6", "Series 7", "Series 8"].map((s) => "string:" + s);
+  const visible = (r) => r.summary.series.filter((s) => !s.hidden).map((s) => s.id);
+  for (const [w, h] of [[360, 240], [960, 540]]) {
+    const rMid = R.render(inputOf(fx("look-eight-series"), w, h, { hidden: ["string:Series 4"] }));
+    assert.deepEqual([...visible(rMid)], ids.filter((id) => id !== "string:Series 4"), w + "x" + h + ": the middle series is hidden");
+    const rSeven = R.render(inputOf(fx("look-eight-series"), w, h, { hidden: ids.slice(0, 7) }));
+    assert.deepEqual([...visible(rSeven)], ["string:Series 8"], w + "x" + h + ": seven of eight hidden");
+  }
+  // At the minimal level no legend entry is drawn, so the hidden list hides nothing (the rule of §4.3).
+  const rMin = R.render(inputOf(fx("look-eight-series"), 80, 24, { hidden: ids.slice(0, 7) }));
+  assert.equal(visible(rMin).length, 8, "minimal: the hidden list is ignored");
+});
+
+test("a genuine single-series chart at the minimal level keeps its full group width and ignores the hidden list", () => {
+  const f = fx("look-one-series"), vertical = f.document.config.encoding.y.type === "quantitative";
+  const r = R.render(inputOf(f, 80, 24, { hidden: ["measure"] }));
+  const boxes = barMarks(r).map(markBox);
+  assert.equal(boxes.length, 4, "one bar per category");
+  const g = groupedGeometry(f, r, 2);
+  assert.equal(g.k, 1, "a single series");
+  for (const b of boxes) assert.ok(Math.abs(catExtent(b, vertical) - g.W) <= 0.011, "each bar takes the full group width");
+  assert.deepEqual([...violations(r.primitives, 80, 24).violations].map((v) => v.inv + " " + v.what), []);
 });
