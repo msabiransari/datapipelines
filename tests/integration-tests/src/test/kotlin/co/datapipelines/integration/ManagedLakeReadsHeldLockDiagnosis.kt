@@ -69,7 +69,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
                 }
             },
         )
-        retain("before_locks ${clock()} ticks=${ticks?.invoke() ?: "not_applicable"} thread_id=$threadId")
+        retain("diagnosis_begin ${clock()} ticks=${ticks?.invoke() ?: "not_applicable"} thread_id=$threadId")
         println(
             "HELD_LOCK_DIAG_BEGIN app=$application pid=${ProcessHandle.current().pid()} " +
                 "worker=${System.getProperty("org.gradle.test.worker")} ${clock()}",
@@ -146,7 +146,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
             "sample $now ticks=${ticks?.invoke() ?: "not_applicable"} ticks_started_since_locks=${startsSinceBaseline()} " +
                 "observer_configured=${observerText != null} " +
                 "thread_id=$threadId thread_state=${stack?.threadState} invocation=$invocation " +
-                "invocation_start_nano=${startedAt.get()}\n" +
+                "last_invocation_start_nano=${startedAt.get()}\n" +
                 "activity=$activity\nlocks=$locks\nstack=${stack?.stackTrace?.joinToString("\n") ?: "unknown"}",
         )
         val confirmed = observed && !activity.startsWith("unknown(")
