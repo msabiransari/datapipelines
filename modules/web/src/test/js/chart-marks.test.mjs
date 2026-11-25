@@ -572,7 +572,7 @@ test("A.5: in every fixture a walk over all rows visits each key target exactly 
 
 // ========================================================================================= A.6 the highlight
 
-test("A.6: a mark with a series dims the others and activates its group and entry; a cell without one dims nothing", () => {
+test("A.6: a series activates its group and entry; a cell without one activates only its own primitives", () => {
   const out = draw(fixture("slices"), 960, 540), env = mounted(layer, out, W960);
   const half = out.index.marks[at(out, "half")];
   pointAt(env, half.anchor.x, half.anchor.y);
@@ -580,13 +580,37 @@ test("A.6: a mark with a series dims the others and activates its group and entr
   const act = active(env.svg);
   assert.equal(act.length, 2, "its mark group and its entry");
   assert.ok(act.every((e) => e.getAttribute("data-series") === "string:Half" || e.getAttribute("data-legend") === "string:Half"));
-  const cells = draw(fixture("cells"), 960, 540), ce = mounted(layer, cells, W960);
-  const c = cells.index.marks[0];
-  pointAt(ce, c.anchor.x, c.anchor.y);
-  assert.ok(cardTexts(ce.svg).length > 0, "the cell's card");
-  assert.equal(dimmed(ce.svg), false);
-  assert.equal(active(ce.svg).length, 0);
+  cellHighlightCheck(layer);
 });
+
+function cellHighlightCheck(L) {
+  const cells = draw(fixture("cells"), 960, 540), ce = mounted(L, cells, W960);
+  const model = modelOf(L, cells);
+  const els = descendants(ce.svg).slice(0, cells.primitives.length);
+  for (const n of [0, 1]) {
+    const c = cells.index.marks[n];
+    pointAt(ce, c.anchor.x, c.anchor.y);
+    assert.ok(cardTexts(ce.svg).length > 0, "the cell's card");
+    assert.equal(dimmed(ce.svg), true, "a cell dims other marks");
+    assert.deepEqual(active(ce.svg), model.held[n].map(i => els[i]), "only the selected cell's primitives");
+    for (let i = 0; i < cells.primitives.length; i++) {
+      const p = cells.primitives[i];
+      const other = p.role === "mark" && p.k !== "group" && p.k !== "text" && !model.held[n].includes(i);
+      assert.equal(/\bdp-inactive\b/.test(cls(els[i])), other, "inactive primitive " + i);
+    }
+    ringAround(ce, cells, n);
+  }
+  for (const how of ["leave", "Escape", "blur", "detach"]) {
+    pointAt(ce, cells.index.marks[0].anchor.x, cells.index.marks[0].anchor.y);
+    if (how === "leave") leave(ce);
+    else if (how === "Escape") key(ce, "Escape");
+    else if (how === "blur") ce.svg.dispatch("blur", {});
+    else ce.handle.detach();
+    nothingLeft(ce, how);
+    assert.equal(active(ce.svg).length, 0);
+    assert.ok(descendants(ce.svg).every(e => !/\bdp-inactive\b/.test(cls(e))), how + ": no dim markers left");
+  }
+}
 
 test("A.6: ring on a point and on a box; move on a sector, on exactly the mark's elements", () => {
   const pts = draw(fixture("points"), 960, 540), pe = mounted(layer, pts, W960), n = at(pts, "tie-a");
@@ -738,12 +762,8 @@ test("G7: the highlight leaves and stays: plants in copies of the layer, each re
     const L = layerWith(pairs);
     for (const s of states) redThenGreen(`G7 ${name} → ${s.split(" ").slice(0, 1).concat(s.startsWith("(a)") ? [s.split(" ").pop()] : []).join(" ")}`, STATE[s], L);
   }
-  const dims = layerWith([["          active = mk.series;", '          active = mk.series === null ? "" : mk.series;']]);
-  redThenGreen("G7 dp-dimmed for a mark without a series", (L) => {
-    const cells = draw(fixture("cells"), 960, 540), ce = mounted(L, cells, W960);
-    pointAt(ce, cells.index.marks[0].anchor.x, cells.index.marks[0].anchor.y);
-    assert.equal(dimmed(ce.svg), false, "a cell dims nothing");
-  }, dims);
+  const dims = layerWith([["          if (mk.series === null) activeMark = model.held[n];", ""]]);
+  redThenGreen("G7 missing dimming for a mark without a series", cellHighlightCheck, dims);
 });
 
 test("G8: the keys: key false ignored; ArrowDown to the same position in the row; each red", () => {

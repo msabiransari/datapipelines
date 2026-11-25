@@ -52,6 +52,30 @@ class JsRenderedHeatmapBrowserTest {
     }
 
     @Test
+    fun `occupied cell hover dims only the other cells and clears on empty space and leave`() {
+        withPage { opened ->
+            val page = opened.page
+            draw(page, "missing-cells", DRAW_W, DRAW_H)
+            for (datum in listOf(0, 1, -2, 0, -1)) {
+                @Suppress("UNCHECKED_CAST")
+                val pos = page.evaluate(HOVER_PLACE, datum) as List<Number>
+                page.mouse().move(pos[0].toDouble(), pos[1].toDouble())
+                page.waitForFunction(OPACITY, datum)
+                if (datum >= 0) {
+                    @Suppress("UNCHECKED_CAST")
+                    val expected = page.evaluate(EXPECTED_CARD, datum) as List<String>
+                    checkCard(page, datum, expected)
+                } else {
+                    page.locator("text.dp-tooltip").count() shouldBe 0
+                    page.locator("#chart.dp-dimmed, #chart .dp-active").count() shouldBe 0
+                }
+                println("hover datum=$datum: ${page.evaluate(OPACITY_READ)}")
+            }
+            clean(opened)
+        }
+    }
+
+    @Test
     fun `A7 keys walk rows and columns without wrapping and card and ring follow`() {
         withPage { opened ->
             val page = opened.page
@@ -225,6 +249,46 @@ class JsRenderedHeatmapBrowserTest {
                 Math.abs(Number(e.getAttribute('y'))-(box.y-gap))<0.02 && Math.abs(Number(e.getAttribute('width'))-(box.w+2*gap))<0.02 &&
                 getComputedStyle(e).stroke === 'rgb('+window.JsRendered.theme.resolve(out.theme).colour(mark.fill).join(', ')+')');
               return {texts:[...svg.querySelectorAll('text.dp-tooltip')].map(e=>e.textContent),ring:!!ring};
+            }
+            """.trimIndent()
+        private val HOVER_PLACE =
+            """
+            datum => {
+              const out=window.ChartHeatmap.last(), svg=document.getElementById('chart'), r=svg.getBoundingClientRect();
+              if (datum === -1) return [r.right+5,r.bottom+5];
+              let b;
+              if (datum === -2) {
+                // First row's fourth slot is empty in missing-cells (five columns).
+                if (out.index.marks.some(m=>m.datum===3)) throw new Error('expected an empty slot');
+                const first=out.index.marks[0].shape;
+                b={x:first.x+3*first.w,y:first.y,w:first.w,h:first.h};
+              } else b=out.index.marks.find(m=>m.datum===datum).shape;
+              return [r.left+(b.x+b.w/2)*r.width/out.frame.w,r.top+(b.y+b.h/2)*r.height/out.frame.h];
+            }
+            """.trimIndent()
+        private val EXPECTED_CARD =
+            """
+            datum => {
+              const card=window.ChartHeatmap.last().index.marks.find(m=>m.datum===datum).card;
+              return [card.heading,card.rows[0].name,card.rows[0].value];
+            }
+            """.trimIndent()
+        private val OPACITY_READ =
+            """
+            () => [...document.querySelectorAll('#chart rect.dp-mark')].map(e=>getComputedStyle(e).opacity)
+            """.trimIndent()
+        private val OPACITY =
+            """
+            datum => {
+              const out=window.ChartHeatmap.last(), svg=document.getElementById('chart');
+              const cells=[...svg.querySelectorAll('rect.dp-mark')];
+              const marks=out.primitives.filter(p=>p.k==='rect' && p.role==='mark');
+              const dim=Number(getComputedStyle(svg).getPropertyValue('--chart-dim'));
+              if (!(dim>0 && dim<1) || cells.length<2 || out.index.series.length || out.summary.series.length) return false;
+              if (!out.index.marks.every(m=>m.series===null)) return false;
+              if (cells.length!==marks.length || !cells.every((e,i)=>Math.abs(Number(getComputedStyle(e).opacity)-
+                (datum<0 || marks[i].datum===datum ? 1 : dim))<0.001)) return false;
+              return [...svg.querySelectorAll('.dp-guide,.dp-tooltip')].every(e=>Number(getComputedStyle(e).opacity)===1);
             }
             """.trimIndent()
     }
