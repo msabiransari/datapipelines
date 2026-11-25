@@ -161,3 +161,31 @@ export function expectedScatterMarks(fx, hiddenIds) {
  */
 export const WIDTHS = Array.from({ length: (1600 - 240) / 40 + 1 }, (_, i) => 240 + 40 * i);
 export const HEIGHTS = [100, 140, 200, 240, 480];
+
+/** Pie I3, from the fixture rows: group, aggregate, fold smallest first, then hide and omit unrepresentable angles. */
+export function expectedPieMarks(fixture, hiddenIds) {
+  const {theta, color} = fixture.document.config.encoding;
+  const groups = new Map();
+  fixture.columns[color.field].forEach((name, i) => {
+    if (name == null) return;
+    const id = typeof name + ":" + name;
+    if (!groups.has(id)) groups.set(id, []);
+    if (theta.aggregate === "count") groups.get(id).push(1);
+    else if (fixture.columns[theta.field][i] != null) groups.get(id).push(Number(fixture.columns[theta.field][i]));
+  });
+  let slices = [...groups].filter(([, v]) => v.length).map(([id, v]) => ({id, n: theta.aggregate === "count" ? v.length : theta.aggregate === "min" ? Math.min(...v) : theta.aggregate === "max" ? Math.max(...v) : v.reduce((a, b) => a + b, 0) / (theta.aggregate === "mean" ? v.length : 1)}));
+  slices = slices.filter(s => Number.isFinite(s.n));
+  if (slices.some(s => s.n < 0)) return 0;
+  const limit = fixture.document.config.mark.max_slices ?? 8;
+  if (slices.length > limit) {
+    const ranked = slices.map((s, i) => ({...s, i})).sort((a, b) => b.n - a.n || a.i - b.i);
+    const keep = new Set(ranked.slice(0, limit - 1).map(s => s.i));
+    const other = slices.filter((s, i) => !keep.has(i)).reduce((a, s) => a + s.n, 0);
+    slices = slices.filter((s, i) => keep.has(i));
+    if (Number.isFinite(other)) slices.push({id: "other", n: other});
+  }
+  if (!Number.isFinite(slices.reduce((a, s) => a + s.n, 0))) return 0;
+  const shown = slices.filter(s => !hiddenIds.includes(s.id) && s.n > 0);
+  const total = shown.reduce((a, s) => a + s.n, 0);
+  return shown.filter(s => s.n / total * 360 >= 0.02).length;
+}

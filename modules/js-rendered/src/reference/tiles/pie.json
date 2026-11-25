@@ -1,0 +1,557 @@
+[
+ {
+  "id": "ring",
+  "title": "Eight parts, a ring",
+  "document": {
+   "display_name": "eight-slices",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8"
+   ],
+   "v": [
+    30,
+    20,
+    15,
+    10,
+    9,
+    8,
+    5,
+    3
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 8
+  }
+ },
+ {
+  "id": "disc",
+  "title": "The same whole, a disc",
+  "document": {
+   "display_name": "pie-inner-0",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie",
+     "inner": 0
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "S1",
+    "S2",
+    "S3",
+    "S4"
+   ],
+   "v": [
+    50,
+    30,
+    15,
+    5
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 4
+  }
+ },
+ {
+  "id": "folded",
+  "title": "Smallest parts in Other",
+  "document": {
+   "display_name": "folded",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12"
+   ],
+   "v": [
+    40,
+    30,
+    20,
+    15,
+    12,
+    10,
+    8,
+    6,
+    5,
+    4,
+    3,
+    2
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 8
+  }
+ },
+ {
+  "id": "unit",
+  "title": "Payments and their unit",
+  "document": {
+   "display_name": "four-unit",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "payments"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    },
+    "title": {
+     "text": "Payments by method"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "S1",
+    "S2",
+    "S3",
+    "S4"
+   ],
+   "v": [
+    50,
+    30,
+    15,
+    5
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 4
+  }
+ },
+ {
+  "id": "empty",
+  "title": "No data",
+  "document": {
+   "display_name": "empty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 0
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "Names are plain text",
+  "document": {
+   "display_name": "hostile",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    },
+    "title": {
+     "text": "<b>bold? <script>alert(1)</script> & \"quoted\"",
+     "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "\" onmouseover=\"x"
+   ],
+   "v": [
+    3,
+    5,
+    2,
+    4,
+    1
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "slices": 5
+  }
+ },
+ {
+  "id": "refused",
+  "title": "Negative parts refused",
+  "document": {
+   "display_name": "negative",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "pie"
+    },
+    "encoding": {
+     "theta": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "S1",
+    "S2",
+    "S3"
+   ],
+   "v": [
+    5,
+    -2,
+    3
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "code": "chart.rule.negative-part",
+   "dots": 0,
+   "slices": 0
+  }
+ }
+]

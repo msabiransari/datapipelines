@@ -41,7 +41,13 @@ class ChartSchemaValidatorTest {
     @Test
     fun `a family's refusal names its own schema's problems and never another family's registry branch`() {
         val unknownKey = setOf(ChartSchemaProblem("additionalProperties", "/config"), ChartSchemaProblem("oneOf", "/config"))
-        for (file in listOf("valid/bar-log.json", "valid/line-log.json", "valid/area-stacked.json", "valid/scatter-plain.json")) {
+        for (file in listOf(
+            "valid/bar-log.json",
+            "valid/line-log.json",
+            "valid/area-stacked.json",
+            "valid/scatter-plain.json",
+            "valid/pie-plain.json",
+        )) {
             val body = example(file)
             withClue("$file conforms") { ChartSchemaValidator().validate(body).shouldBeEmpty() }
             (body.path("config") as com.fasterxml.jackson.databind.node.ObjectNode).put("bogus_attr", 1)

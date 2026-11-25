@@ -62,6 +62,15 @@
     radialTickSpan: f(2, "render", "× the radius: the axis length the radial axis's tick rule is given (its scale is read across the whole circle)"),
     radialNameShare: f(0.25, "render", "the widest a radial axis's name may be, as a share of the plot's width"),
     radialRadiusFloor: f(0.5, "render", "a radial axis writes its names only while the radius left after their room is at least this share of the polar frame's"),
+    // Pie (brief 1068 D13): rendered defaults, label fit, hole and hover reserve.
+    pieInnerDefault: f(0.6, "render", "brief 1068 D13: pieInnerDefault"),
+    pieLabelsDefault: f("percent", "render", "brief 1068 D13: pieLabelsDefault"),
+    holeTotalMin: f(34, "render", "brief 1068 D13: holeTotalMin"),
+    sliceLabelPad: f(4, "render", "brief 1068 D13: sliceLabelPad"),
+    holeUnitGap: f(4, "render", "brief 1068 D13: holeUnitGap"),
+    pieLabelRadius: f(0.66, "render", "brief 1068 D13: pieLabelRadius"),
+    pieOtherText: f("Other", "render", "brief 1068 D13: pieOtherText"),
+    pieMoveAllowance: f(5, "render", "brief 1068 D13: pieMoveAllowance"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -106,6 +115,7 @@
     "area.points": { kind: "mark", limit: 1000, basis: "measured", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 989 D9 (b) by S-CAP (round 3), a stacked area of 2 series in full from line's cap down, two runs: 1,000 passes (longest drag frame 33.4 ms both runs); 2,000 fails one of its two runs (66.6 ms, over 3.5 × D = 58.45 ms; 50.1 ms in the other)" },
     "area.rows": { kind: "row", limit: 10000, basis: "inherited", unit: "rows", note: "record §4.9: the line family's row cap, inherited from line (lane 989 D9 (a), round 3)" },
     "scatter.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "rows drawn", note: "record §4.9 Draft 13 (the numbers that stand): scatter's 1,000 is lane 977's browser table, as bar's 1,000 is (lane 977 S-CAP: scatter 1,000 passed, 2,000 failed by one frame of 50.1 ms); one mark per row drawn, never thinned" },
+    "pie.marks": { kind: "semantic", limit: 8, basis: "fixed", unit: "slices", note: "Record §4.5 pie: eight slices, not measured (R19); marks are series, so the series cap refuses first." },
   };
 
   function look(name) {
