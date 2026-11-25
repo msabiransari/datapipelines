@@ -119,6 +119,9 @@
         },
         {
           "$ref": "heatmap.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "box.schema.json#/$defs/config"
         }
       ]
     },

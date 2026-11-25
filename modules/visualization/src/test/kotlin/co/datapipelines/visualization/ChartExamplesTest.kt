@@ -83,7 +83,7 @@ class ChartExamplesTest {
         private val ROOT: File by lazy {
             File(checkNotNull(ChartExamplesTest::class.java.getResource("/chart-examples/expectations.json")).toURI()).parentFile
         }
-        private const val EXAMPLE_COUNT = 130
+        private const val EXAMPLE_COUNT = 152
 
         private val EXPECTATIONS: Map<String, JsonNode> by lazy {
             ArtifactJson.mapper

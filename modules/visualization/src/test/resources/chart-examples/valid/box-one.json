@@ -1,0 +1,61 @@
+{
+ "display_name": "Box distribution",
+ "description": "Two measures per row, one series.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "day",
+     "type": "DATE"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "weight",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "margin",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING"
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "box"
+  },
+  "encoding": {
+   "y": {
+    "field": "amount",
+    "type": "quantitative"
+   }
+  }
+ }
+}
