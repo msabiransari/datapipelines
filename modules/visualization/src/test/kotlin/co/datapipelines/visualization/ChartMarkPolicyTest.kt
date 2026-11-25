@@ -42,6 +42,7 @@ class ChartMarkPolicyTest {
                 "line" to ChartMarkPolicy.LINE,
                 "area" to ChartMarkPolicy.AREA,
                 "scatter" to ChartMarkPolicy.POINT,
+                "pie" to ChartMarkPolicy.AREA,
             )
     }
 

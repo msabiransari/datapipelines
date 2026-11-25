@@ -30,7 +30,7 @@ class ChartTypeTest {
     fun `fromWire maps each wire value to its entry and refuses any other`() {
         ChartType.entries.forEach { ChartType.fromWire(it.wire) shouldBe it }
         ChartType.fromWire("Bar") shouldBe null
-        ChartType.fromWire("pie") shouldBe null
+        ChartType.fromWire("not_a_type") shouldBe null
     }
 
     @Test
@@ -87,7 +87,17 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie")
+    }
+
+    @Test
+    fun `pie has one value and one series under the area policy`() {
+        ChartType.PIE.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "theta", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")),
+                mapOf("key" to "color", "required" to true, "node" to mapOf("node" to "shape", "name" to "series")),
+            )
+        ChartType.PIE.policy shouldBe ChartMarkPolicy.AREA
     }
 
     @Test

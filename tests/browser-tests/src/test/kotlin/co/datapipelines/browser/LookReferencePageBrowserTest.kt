@@ -140,7 +140,7 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter")) {
+                for (wire in listOf("bar", "line", "area", "scatter", "pie")) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +232,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/pie") shouldBeGreaterThanOrEqual MIN_PIE_TILES
+                counts.getValue("$theme/slices") shouldBeGreaterThanOrEqual MIN_SLICES
                 (counts["$theme/points"] ?: 0) shouldBeGreaterThanOrEqual MIN_POINTS
                 (counts["$theme/texts"] ?: 0) shouldBeGreaterThanOrEqual MIN_TEXTS
                 (counts["$theme/values"] ?: 0) shouldBeGreaterThanOrEqual MIN_VALUES
@@ -521,6 +523,10 @@ class LookReferencePageBrowserTest {
         // 920/936, values 6058/6120, elements 2926/2946, dots 118, labels 164, bars 257, legends 158; 61 cards).
         private const val MIN_TILES = 23
 
+        /** Brief 1068: pie's seven tiles and the 29 sectors drawn across them. */
+        private const val MIN_PIE_TILES = 7
+        private const val MIN_SLICES = 29
+
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
@@ -705,7 +711,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -774,6 +780,7 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const pie = s.wire === "pie";
         const sizeEnc = scatter ? s.document.config.encoding.size || null : null;
         const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []);
         const radius = t.n("--chart-bar-radius");
@@ -808,7 +815,8 @@ private object LookReferenceChecks {
                   // §3.8: the data end's radius is --chart-bar-radius, never more than half the bar's width (its band side)
                   const r = Number(m[1]);
                   const half = Math.abs(2 * r - box.width) < 0.05 || Math.abs(2 * r - box.height) < 0.05;
-                  if (!(r <= radius + 1e-6 && (has([radius], r) || half))) ok = false;
+                  const sectorRadius = pie && (s.index.marks || []).some((entry) => entry.shape.kind === "sector" && Math.abs(entry.shape.r1 - r) < 0.05);
+                  if (!(sectorRadius || (r <= radius + 1e-6 && (has([radius], r) || half)))) ok = false;
                   counts.values++;
                 }
                 checked = false;
@@ -838,6 +846,8 @@ private object LookReferenceChecks {
         const points = scatter ? of("mark", "circle") : [];
         counts.dots += dots.length;
         counts.points += points.length;
+        const slices = pie ? (s.index.marks || []).filter((entry) => entry.shape.kind === "sector") : [];
+        counts.slices += slices.length;
         counts.labels += labels.length;
         counts.legends += legend.filter((p) => p.k === "text").length;
         // --- by state
@@ -886,6 +896,7 @@ private object LookReferenceChecks {
         // --- the end dot (contract §2 points): one per drawn line, on its last point
         if (e.dots !== undefined && dots.length !== e.dots) bad(dots.length + " end dots, the expect says " + e.dots);
         // --- scatter: one point per row drawn (brief 1062 D3), each inside the plot (D5, #1066's pad)
+        if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
         if (scatter && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
         points.forEach((p) => {
           if (p.cx - p.r < plot.x - TOL || p.cx + p.r > plot.x + plot.w + TOL || p.cy - p.r < plot.y - TOL || p.cy + p.r > plot.y + plot.h + TOL) bad("the point " + p.series + "/" + p.datum + " crosses the plot's edge");

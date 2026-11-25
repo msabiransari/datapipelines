@@ -50,6 +50,9 @@ enum class ChartType(
      * `scatter`; lane T1, #1062). A scatter with `size` is the bubble chart.
      */
     SCATTER("scatter", ChartChannelNodes.scatter, ChartMarkPolicy.POINT),
+
+    /** Shares of a whole, drawn as a ring by default (§4.5; lane #1068). */
+    PIE("pie", ChartChannelNodes.pie, ChartMarkPolicy.AREA),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -212,5 +215,12 @@ private object ChartChannelNodes {
             ),
             ChartChannel("size", required = false, node = ChannelNode.Shape("size")),
             ChartChannel("tooltip", required = false, node = tooltip),
+        )
+
+    /** A single measure split by series: no axes or authored tooltip. */
+    val pie: List<ChartChannel> =
+        listOf(
+            ChartChannel("theta", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel("color", required = true, node = ChannelNode.Shape("series")),
         )
 }

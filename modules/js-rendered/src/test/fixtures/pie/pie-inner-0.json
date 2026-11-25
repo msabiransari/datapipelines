@@ -1,0 +1,65 @@
+{
+  "source": [
+    "Design record \u00a74.5 pie; approved brief #1068 D14"
+  ],
+  "note": "inner 0: a pie",
+  "document": {
+    "display_name": "pie-inner-0",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "pie",
+        "inner": 0
+      },
+      "encoding": {
+        "theta": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "S1",
+      "S2",
+      "S3",
+      "S4"
+    ],
+    "v": [
+      50,
+      30,
+      15,
+      5
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

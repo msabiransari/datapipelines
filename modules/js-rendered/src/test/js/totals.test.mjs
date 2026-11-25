@@ -156,7 +156,7 @@ test("D1.3: an unstacked bar, a normalized stack, a line, an area and a scatter 
   const unstacked = ["parity-bar-grouped", "parity-bar-vertical"];
   const normalized = chartFixtures().filter((f) => f.wire === "bar" && channels(f.fixture.document).value.stack === "normalize");
   assert.ok(normalized.length >= 2, "normalized fixtures: " + normalized.length);
-  const others = chartFixtures().filter((f) => (f.wire === "bar" && channels(f.fixture.document).value.stack !== "zero") || f.wire === "line" || f.wire === "area" || f.wire === "scatter");
+  const others = chartFixtures().filter((f) => (f.wire === "bar" && channels(f.fixture.document).value.stack !== "zero") || f.wire === "line" || f.wire === "area" || f.wire === "scatter" || f.wire === "pie");
   assert.ok(others.some((f) => unstacked.includes(f.name)));
   for (const f of others) {
     const out = plain(R.render(inputOf(f.fixture, ...FRAME)));

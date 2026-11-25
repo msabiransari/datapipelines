@@ -500,6 +500,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SCATTER_CONFIG))
                     body.toString()
                 },
+                "pie" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(PIE_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -517,5 +523,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val SCATTER_CONFIG =
             """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
+
+        /** Pie over the board's INTEGER x categories and summed y measure (brief 1068 A.8). */
+        const val PIE_CONFIG =
+            """{"mark":{"type":"pie"},"encoding":{"theta":{"field":"y","type":"quantitative","aggregate":"sum"},""" +
+                """"color":{"field":"x","type":"nominal","sort":null}}}"""
     }
 }

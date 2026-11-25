@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: one entry per v1 family schema (enums.md §63, ChartType): bar, line, area, scatter.",
+      "description": "The family registry: one entry per v1 family schema (enums.md §63, ChartType): bar, line, area, scatter, pie.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -113,6 +113,9 @@
         },
         {
           "$ref": "scatter.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "pie.schema.json#/$defs/config"
         }
       ]
     },
