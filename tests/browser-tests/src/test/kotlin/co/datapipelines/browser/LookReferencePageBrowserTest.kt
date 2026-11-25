@@ -523,9 +523,11 @@ class LookReferencePageBrowserTest {
         // 920/936, values 6058/6120, elements 2926/2946, dots 118, labels 164, bars 257, legends 158; 61 cards).
         private const val MIN_TILES = 23
 
-        /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
+        /** Brief 1068: pie's seven tiles and the 29 sectors drawn across them. */
         private const val MIN_PIE_TILES = 7
         private const val MIN_SLICES = 29
+
+        /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
         private const val MIN_TEXTS = 850
