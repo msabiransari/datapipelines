@@ -136,8 +136,9 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
             }
         val locks =
             query(connection, LOCKS, bind = { it.setString(1, application) }) { rows ->
+                val advisory = "${rows.getString("classid")}/${rows.getString("objid")}/${rows.getString("objsubid")}"
                 "pid=${rows.getInt(1)} type=${rows.getString(2)} " +
-                    "relation=${rows.getString(3)} mode=${rows.getString(4)} granted=${rows.getBoolean(5)}"
+                    "relation=${rows.getString(3)} mode=${rows.getString(4)} granted=${rows.getBoolean(5)} advisory_key=$advisory"
             }
         val stack = threads.getThreadInfo(threadId, Int.MAX_VALUE)
         val invocation = running.get()?.let { System.identityHashCode(it).toString() } ?: "unknown"
@@ -148,8 +149,9 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
                 "invocation_start_nano=${startedAt.get()}\n" +
                 "activity=$activity\nlocks=$locks\nstack=${stack?.stackTrace?.joinToString("\n") ?: "unknown"}",
         )
-        if (observed) println("HELD_LOCK_OBSERVED app=$application $now activity=$activity locks=$locks")
-        return observed && !activity.startsWith("unknown(")
+        val confirmed = observed && !activity.startsWith("unknown(")
+        if (confirmed) println("HELD_LOCK_OBSERVED app=$application $now activity=$activity locks=$locks")
+        return confirmed
     }
 
     private fun classify(query: String): String =
@@ -272,7 +274,7 @@ internal class ManagedLakeReadsHeldLockDiagnosis(
             """
             SELECT l.pid, l.locktype,
                    CASE WHEN c.relname IN ('lake_tables_managed', 'datasource_workspaces') THEN c.relname ELSE 'other' END,
-                   l.mode, l.granted
+                   l.mode, l.granted, l.classid, l.objid, l.objsubid
             FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
             LEFT JOIN pg_class c ON c.oid = l.relation
             WHERE l.locktype IN ('relation', 'advisory') AND
