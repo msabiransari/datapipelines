@@ -35,7 +35,7 @@ class JsRenderedPieBrowserTest {
                 val point = point(page, where)
                 hover(page, point)
                 withClue(where) { page.evaluate(CARD_JS) shouldBe emptyList<String>() }
-                page.evaluate("() => document.querySelectorAll('path.dp-mark[transform]').length") shouldBe 0
+                page.evaluate(STILL_JS) shouldBe true
             }
             // S1 has half the shown total. Hiding it makes S2's share 60%, while its colour slot stays the same.
             val legend = point(page, "legend")
@@ -167,10 +167,17 @@ class JsRenderedPieBrowserTest {
               const o=window.ChartPie.last(), svg=document.getElementById('chart');
               const s=o.index.marks.find(m=>m.series===id).shape, a=(s.from+s.to)/2*Math.PI/180;
               const p=svg.querySelector('g.dp-mark[data-series="'+id+'"] path.dp-mark');
-              const tr=p.getAttribute('transform'), n=tr && tr.match(/[-\d.]+/g).map(Number);
+              const m=p.parentNode.getCTM().inverse().multiply(p.getCTM());
               return {card:[...svg.querySelectorAll('text.dp-tooltip')].map(t=>t.textContent),
-                move:!!n && Math.abs(n[0]-5*Math.sin(a))<0.02 && Math.abs(n[1]+5*Math.cos(a))<0.02};
+                move:Math.abs(m.e-5*Math.sin(a))<0.02 && Math.abs(m.f+5*Math.cos(a))<0.02};
             }
+            """.trimIndent()
+        private val STILL_JS =
+            """
+            () => [...document.querySelectorAll('path.dp-mark')].every(p => {
+              const m=p.parentNode.getCTM().inverse().multiply(p.getCTM());
+              return Math.abs(m.e)<0.02 && Math.abs(m.f)<0.02;
+            })
             """.trimIndent()
         private val HIDDEN_JS =
             """
