@@ -225,7 +225,7 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
   scatter's `y`, a pie's `theta`, a tooltip detail.
 - **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
-- **`scale` (on a value or a number axis):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
+- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
   `zero`; a value at or below zero is then not drawn.
 
