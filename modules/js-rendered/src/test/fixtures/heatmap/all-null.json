@@ -1,0 +1,97 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "every shade null: no mark, no-data",
+  "document": {
+    "display_name": "all-null",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "c01",
+      "c02",
+      "c03",
+      "c01",
+      "c02",
+      "c03",
+      "c01",
+      "c02",
+      "c03"
+    ],
+    "y": [
+      "r01",
+      "r01",
+      "r01",
+      "r02",
+      "r02",
+      "r02",
+      "r03",
+      "r03",
+      "r03"
+    ],
+    "v": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

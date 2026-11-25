@@ -1,0 +1,55 @@
+{
+  "display_name": "grid-4x3",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "x",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "y",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "heatmap"
+    },
+    "encoding": {
+      "x": {
+        "field": "x",
+        "type": "nominal",
+        "sort": null
+      },
+      "y": {
+        "field": "y",
+        "type": "nominal",
+        "sort": null
+      },
+      "color": {
+        "field": "v",
+        "aggregate": "sum",
+        "type": "quantitative",
+        "scale": "sequential",
+        "unit": "kg"
+      }
+    },
+    "title": {
+      "text": "Orders by day and hour"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "a full grid with a title",
+  "document": {
+    "display_name": "grid-4x3",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      },
+      "title": {
+        "text": "Orders by day and hour"
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c01",
+      "c02",
+      "c03",
+      "c04"
+    ],
+    "y": [
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r03",
+      "r03",
+      "r03",
+      "r03"
+    ],
+    "v": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

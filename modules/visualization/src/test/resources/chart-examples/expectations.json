@@ -1,5 +1,5 @@
 {
- "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and \u00a74.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
+ "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and §4.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
  "examples": {
   "valid/bar-vertical.json": {
    "valid": true
@@ -109,7 +109,7 @@
   },
   "valid/display-name-120.json": {
    "valid": true,
-   "note": "the product bound exactly (design record \u00a74.2)"
+   "note": "the product bound exactly (design record §4.2)"
   },
   "invalid/display-name-61-astral.json": {
    "valid": false,
@@ -280,7 +280,7 @@
    "layer": "schema",
    "keyword": "oneOf",
    "path": "/config/encoding/x",
-   "note": "record \u00a74.2: a temporal x has ONE form on the line family"
+   "note": "record §4.2: a temporal x has ONE form on the line family"
   },
   "invalid/line-band-sort-by-total.json": {
    "valid": false,
@@ -583,6 +583,108 @@
    "valid": false,
    "layer": "save",
    "code": "chart.color.nullable"
+  },
+  "valid/heatmap-plain.json": {
+   "valid": true
+  },
+  "valid/heatmap-title.json": {
+   "valid": true
+  },
+  "valid/heatmap-diverging.json": {
+   "valid": true
+  },
+  "valid/heatmap-labels.json": {
+   "valid": true
+  },
+  "valid/heatmap-temporal.json": {
+   "valid": true
+  },
+  "valid/heatmap-legend-bottom.json": {
+   "valid": true
+  },
+  "valid/heatmap-legend-none.json": {
+   "valid": true
+  },
+  "invalid/heatmap-quantitative-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/heatmap-nominal-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/color/type"
+  },
+  "invalid/heatmap-sequential-mid.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/heatmap-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/heatmap-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/x/axis"
+  },
+  "invalid/heatmap-sort-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x/sort"
+  },
+  "invalid/heatmap-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/heatmap-sort-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/heatmap-encoding-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/heatmap-color-unit.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/color"
+  },
+  "invalid/heatmap-shade-on-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/heatmap-nullable-band.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/heatmap-unknown-field.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown"
+  },
+  "invalid/heatmap-shade-mid-infinite.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.shade.mid_invalid",
+   "pointer": "/config/encoding/color/mid"
   }
  }
 }

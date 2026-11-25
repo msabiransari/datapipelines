@@ -1,0 +1,130 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "a null shade is a cell with no mark",
+  "document": {
+    "display_name": "null-values",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05"
+    ],
+    "y": [
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r04",
+      "r04",
+      "r04",
+      "r04",
+      "r04"
+    ],
+    "v": [
+      0,
+      1,
+      2,
+      null,
+      4,
+      5,
+      6,
+      null,
+      8,
+      9,
+      10,
+      null,
+      12,
+      13,
+      14,
+      null,
+      16,
+      17,
+      18,
+      null
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

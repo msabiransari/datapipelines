@@ -1,0 +1,97 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "long names on both axes",
+  "document": {
+    "display_name": "wide-names",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "c-a-name-that-is-much-too-long-0",
+      "c-a-name-that-is-much-too-long-1",
+      "c-a-name-that-is-much-too-long-2",
+      "c-a-name-that-is-much-too-long-0",
+      "c-a-name-that-is-much-too-long-1",
+      "c-a-name-that-is-much-too-long-2",
+      "c-a-name-that-is-much-too-long-0",
+      "c-a-name-that-is-much-too-long-1",
+      "c-a-name-that-is-much-too-long-2"
+    ],
+    "y": [
+      "r-a-name-that-is-much-too-long-0",
+      "r-a-name-that-is-much-too-long-0",
+      "r-a-name-that-is-much-too-long-0",
+      "r-a-name-that-is-much-too-long-1",
+      "r-a-name-that-is-much-too-long-1",
+      "r-a-name-that-is-much-too-long-1",
+      "r-a-name-that-is-much-too-long-2",
+      "r-a-name-that-is-much-too-long-2",
+      "r-a-name-that-is-much-too-long-2"
+    ],
+    "v": [
+      0,
+      1,
+      2,
+      1,
+      2,
+      3,
+      2,
+      3,
+      4
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

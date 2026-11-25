@@ -30,6 +30,12 @@ import java.nio.file.Files
 class DocsRenderTest {
     private val catalog = DocsCatalog(javaClass.classLoader)
 
+    @Test
+    fun `heatmap is a row of the product chart type table`() {
+        val html = requireNotNull(catalog.render("enums")).html
+        Regex("""<tr>\s*<td><code>heatmap</code></td>""").containsMatchIn(html) shouldBe true
+    }
+
     private val engine =
         SpringTemplateEngine().apply {
             setTemplateResolver(

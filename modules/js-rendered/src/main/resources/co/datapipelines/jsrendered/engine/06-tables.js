@@ -26,6 +26,8 @@
     radiusMaxShare: f(0.5, "render", "§2 corners: the rounded end is never more than half the bar's width"),
     roundOuterOnly: f(true, "render", "§2 corners: in a stack only the outermost segment is rounded"),
     legendKeyBar: f("square", "render", "§4.2: a bar's legend key is a square (the shared layout also draws \"line\", a stroke across the key)"),
+    cellGapMaxShare: f(0.25, "render", "brief 1070 D7: gap takes at most a quarter of each cell slot, leaving positive sides at small frames"),
+    heatmapLabelsDefault: f("none", "render", "look contract §4.3: heatmap labels are absent unless the author asks for values"),
     labelsDefault: f("values", "render", "§4.3 and the record's §4.5: bar value labels are on by default"),
     stackTotalFormat: f("compact", "render", "§4.3: a stack's total is written in the short form"),
     // the record's §4.6: levels, ticks, rotation
@@ -116,6 +118,7 @@
     "area.rows": { kind: "row", limit: 10000, basis: "inherited", unit: "rows", note: "record §4.9: the line family's row cap, inherited from line (lane 989 D9 (a), round 3)" },
     "scatter.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "rows drawn", note: "record §4.9 Draft 13 (the numbers that stand): scatter's 1,000 is lane 977's browser table, as bar's 1,000 is (lane 977 S-CAP: scatter 1,000 passed, 2,000 failed by one frame of 50.1 ms); one mark per row drawn, never thinned" },
     "pie.marks": { kind: "semantic", limit: 8, basis: "fixed", unit: "slices", note: "Record §4.5 pie: eight slices, not measured (R19); marks are series, so the series cap refuses first." },
+    "heatmap.marks": { kind: "mark", limit: 1000, basis: "inherited", unit: "non-null cells", note: "record §4.9 heatmap row: min(2,500, 1,000) = 1,000 cells, inherited and not measured here (R19)" },
   };
 
   function look(name) {

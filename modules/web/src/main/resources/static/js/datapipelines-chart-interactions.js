@@ -1035,7 +1035,8 @@
   }
 
   /**
-   * What is shown for one state, pure: {prims, active, move}. focus = the keyboard's target; last = "key" | "pointer" | null;
+   * What is shown for one state, pure: {prims, active, activeMark, move}. activeMark holds the primitive positions of a
+   * selected mark without a series; active holds a selected series. focus = the keyboard's target; last = "key" | "pointer" | null;
    * hit = the pointer's lookup; pointer = its place. The card follows the input that acted last (D2a).
    */
   function scene(R, model, draw, m, width, state) {
@@ -1043,6 +1044,7 @@
     var under = [];
     var card = [];
     var active = null;
+    var activeMark = null;
     var move = null;
     var show = null;
     if (state.last === "key" && state.target !== null) show = { what: state.target, anchor: null };
@@ -1053,12 +1055,12 @@
       var entryT = what.kind === "entry" ? what.id : what.entry !== undefined ? what.entry : null;
       var cutT = what.kind === "cut" ? what.n : what.cut !== undefined ? what.cut : null;
       if (markT && model.marks) {
-        // A draw by mark (brief 1052 D6, D7): the mark's own card, its series (none for a mark without one) and its
-        // ring or move; no crosshair.
+        // A draw by mark: its own card and ring or move; highlight its series, or its own primitives when it has none.
         var n = markAt(model, markT.id, markT.datum);
         if (n >= 0) {
           var mk = model.marks[n];
           active = mk.series;
+          if (mk.series === null) activeMark = model.held[n];
           var mc = markCard(R, width, markLines(model, n), null, frame, m);
           var ma = show.anchor || mk.anchor;
           if (mc !== null) card = cardPrims(R, mc, place(mc.box, ma, frame, m.dist), m, false);
@@ -1084,7 +1086,7 @@
       }
     }
     var ring = focusPrims(R, model, state.target, m, frame);
-    return { prims: under.concat(ring, card), active: active, move: move };
+    return { prims: under.concat(ring, card), active: active, activeMark: activeMark, move: move };
   }
 
   // ===================================================================================== the DOM half
@@ -1207,6 +1209,7 @@
       made = [];
       marked.forEach(function (el) {
         setClass(el, "dp-active", false);
+        setClass(el, "dp-inactive", false);
       });
       marked = [];
       moved.forEach(function (el) {
@@ -1221,14 +1224,22 @@
       if (detached || st.model === null) return;
       if (st.last === "pointer" && st.pointer !== null) st.hit = lookup(R, st.model, st.pointer);
       var sc = scene(R, st.model, st.draw, st.m, st.width, st);
-      if (sc.active !== null) {
+      if (sc.active !== null || sc.activeMark !== null) {
         var prims = st.draw.output.primitives;
         var els = elementsOf(svg, prims.length);
         for (var i = 0; i < prims.length && i < els.length; i++) {
           var p = prims[i];
-          if (p.k === "group" && p.series === sc.active && (p.role === "mark" || p.role === "legend")) {
+          if (sc.active !== null && p.k === "group" && p.series === sc.active && (p.role === "mark" || p.role === "legend")) {
             setClass(els[i], "dp-active", true);
             marked.push(els[i]);
+          } else if (sc.activeMark !== null && p.series === null && p.role === "mark" && p.k !== "group" && p.k !== "text") {
+            var selected = sc.activeMark.indexOf(i) >= 0;
+            // A mark group owns its value label too (issue 1139). Fade once at that group, retaining the leaf's
+            // datum for lookup/ring geometry; unrelated guides outside it keep their normal opacity.
+            var owner = els[i];
+            while (owner.parentNode !== svg && classes(owner.parentNode).indexOf("dp-mark") >= 0) owner = owner.parentNode;
+            setClass(owner, selected ? "dp-active" : "dp-inactive", true);
+            marked.push(owner);
           }
         }
         setClass(svg, "dp-dimmed", true);

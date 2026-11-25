@@ -500,6 +500,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SCATTER_CONFIG))
                     body.toString()
                 },
+                "heatmap" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Heatmap")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
+                    body.toString()
+                },
                 "pie" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -516,6 +522,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             check(body.split(BAR_MARK).size == 2) { "the bar body holds its mark type once" }
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
+
+        /** Heatmap: x and y bands, summed y as a shade on the same INTEGER delivery. */
+        const val HEATMAP_CONFIG =
+            """{"mark":{"type":"heatmap"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
+                """"y":{"field":"y","type":"nominal","sort":null},""" +
+                """"color":{"field":"y","type":"quantitative","aggregate":"sum","scale":"sequential"}}}"""
 
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 

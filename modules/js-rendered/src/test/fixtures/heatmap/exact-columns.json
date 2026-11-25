@@ -1,0 +1,76 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "one cell",
+  "document": {
+    "display_name": "single",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "BIGINTEGER",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "BIGDECIMAL",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "9007199254740993",
+      "9007199254740994"
+    ],
+    "y": [
+      "r",
+      "r"
+    ],
+    "v": [
+      "1234567890123456.123456789",
+      "-0.000000000000000001"
+    ]
+  },
+  "types": {
+    "x": "BIGINTEGER",
+    "y": "STRING",
+    "v": "BIGDECIMAL"
+  }
+}
