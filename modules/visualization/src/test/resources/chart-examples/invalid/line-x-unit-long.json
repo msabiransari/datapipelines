@@ -1,0 +1,70 @@
+{
+ "display_name": "A long x unit",
+ "description": "G6: a unit is at most 16 characters.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "line"
+  },
+  "encoding": {
+   "x": {
+    "field": "units",
+    "type": "quantitative",
+    "title": "Units",
+    "unit": "kilowatt-hours/m2",
+    "scale": {
+     "type": "log"
+    }
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}
