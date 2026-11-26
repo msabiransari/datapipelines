@@ -37,12 +37,12 @@ class JsRenderedWaterfallBrowserTest {
             for ((datum, card) in CARDS.withIndex()) {
                 move(page, "bar", datum)
                 withClue("bar $datum") { shown(page) shouldBe card }
-                page.locator(".dp-focus").count() shouldBe 1
+                page.locator("rect.dp-guide[fill=none]").count() shouldBe 1
             }
             for (place in listOf("gap", "above")) {
                 move(page, place, 1)
                 withClue(place) { shown(page).shouldBeEmpty() }
-                page.locator(".dp-focus").count() shouldBe 0
+                page.locator("rect.dp-guide[fill=none]").count() shouldBe 0
             }
         }
     }
@@ -64,6 +64,48 @@ class JsRenderedWaterfallBrowserTest {
             for ((key, datum) in listOf("ArrowRight" to 6, "ArrowLeft" to 5, "Home" to 0, "End" to 6)) {
                 page.keyboard().press(key)
                 withClue(key) { shown(page) shouldBe CARDS[datum] }
+            }
+        }
+    }
+
+    @Test
+    fun `Right reaches shortened labels after the last bar and Left returns`() {
+        session { opened ->
+            val page = opened.page
+            for ((fixture, width) in listOf("basic" to 960, "long-labels" to 960, "hostile" to 480)) {
+                page.evaluate(
+                    "([f,w]) => ChartWaterfall.draw(f + '/960x540.input.json', {w:w,h:w===480?300:540})",
+                    listOf(fixture, width),
+                )
+                page.mouse().move((VIEW_W - 4).toDouble(), (VIEW_H - 4).toDouble())
+                page.locator("#chart").focus()
+                val count = (page.evaluate("() => ChartWaterfall.last().index.marks.length") as Number).toInt()
+                for (datum in 0 until count) {
+                    page.keyboard().press("ArrowRight")
+                    withClue("$fixture bar $datum") {
+                        page.evaluate("() => ChartWaterfall.target()") shouldBe
+                            mapOf("kind" to "mark", "id" to null, "datum" to datum)
+                    }
+                }
+                val last = page.evaluate("() => ChartWaterfall.target()")
+                page.keyboard().press("ArrowRight")
+                if (fixture == "basic") {
+                    page.evaluate("() => ChartWaterfall.target()") shouldBe last
+                } else {
+                    page.evaluate("() => ChartWaterfall.target()") shouldBe mapOf("kind" to "cut", "n" to 0)
+                    val full =
+                        if (fixture == "long-labels") {
+                            "Quarterly recurring revenue brought forward"
+                        } else {
+                            "<script>alert(1)</script>"
+                        }
+                    withClue("$fixture full shortened text") {
+                        shown(page).joinToString(" ") shouldBe full
+                    }
+                    page.keyboard().press("ArrowLeft")
+                    page.evaluate("() => ChartWaterfall.target()") shouldBe last
+                }
+                page.keyboard().press("Escape")
             }
         }
     }

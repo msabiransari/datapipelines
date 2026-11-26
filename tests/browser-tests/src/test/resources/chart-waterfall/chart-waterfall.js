@@ -54,6 +54,7 @@
 
   window.ChartWaterfall = {
     draw: draw,
+    target: function () { return layer.target(); },
     /** The last draw the page wrote. */
     last: function () {
       return last;

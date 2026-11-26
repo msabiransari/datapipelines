@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { engine, inputOf, chartFixtures, MODULE } from "./engine.mjs";
 import { plant } from "./forms.mjs";
-import { expectedWaterfallMarks, WIDTHS, HEIGHTS, violations, textBox } from "./geometry.mjs";
+import { expectedWaterfallMarks, WIDTHS, HEIGHTS, violations, textBox, markBox } from "./geometry.mjs";
 const KEY = "types/waterfall.js";
 const E = engine(s => plant(s, KEY, 'model: model, marks: marks,', 'model: function (d,c,t) { var m = model(d,c,t); R.modelSeen = m; return m; }, marks: function (m,hand,h) { R.handSeen = hand; return marks(m,hand,h); },'));
 const I = createRequire(import.meta.url)(join(MODULE, "../web/src/main/resources/static/js/datapipelines-chart-interactions.js"))._internal;
@@ -92,4 +92,171 @@ test("A.4/A.5: key-only legend, shape lookup, cards and keyboard plan at every s
     if(w === 80)console.log("waterfall 80x24 key cards:",entries.map(e=>e.card));
   }
   const d=draw(FX.basic);const e=d.r.index.marks;same(e[1].card.rows.map(x=>[x.name,x.value]),[["Increase","40 USD"],["Running total","140 USD"]]);same(e[2].card.rows.map(x=>[x.name,x.value]),[["Decrease","−15 USD"],["Running total","125 USD"]]);same(e[0].card.rows.map(x=>[x.name,x.value]),[["Opening","100 USD"]]);
+});
+
+
+test("R2/G4: after the bars, Right reaches shortened text only when present",()=>{
+  for(const [name,w,h,hasCuts] of [["basic",960,540,false],["long-labels",960,540,true],["hostile",480,300,true]]) {
+    const {r}=draw(FX[name],w,h), model=I.modelOf(E,r,E.measure.measurer(null).fn);
+    assert.equal(model.cuts.length>0,hasCuts,name);
+    let target=I.keyTarget(model,null,"ArrowRight").target;
+    for(let datum=0;datum<r.index.marks.length;datum++) {
+      same(target,{kind:"mark",id:null,datum});
+      for(const key of ["ArrowUp","ArrowDown"])same(I.keyTarget(model,target,key).target,target);
+      if(datum<r.index.marks.length-1)target=I.keyTarget(model,target,"ArrowRight").target;
+    }
+    const last=target;
+    same(I.keyTarget(model,last,"Home").target,{kind:"mark",id:null,datum:0});
+    same(I.keyTarget(model,last,"End").target,last);
+    same(I.keyTarget(model,last,"ArrowLeft").target,{kind:"mark",id:null,datum:last.datum-1});
+    target=I.keyTarget(model,last,"ArrowRight").target;
+    same(target,hasCuts?{kind:"cut",n:0}:last);
+    if(hasCuts) {
+      same(I.keyTarget(model,target,"ArrowLeft").target,last);
+      for(let n=0;n<model.cuts.length;n++) {
+        same(target,{kind:"cut",n});
+        assert.ok(model.cuts[n].text.length>0);
+        target=I.keyTarget(model,target,"ArrowRight").target;
+      }
+      same(target,{kind:"cut",n:model.cuts.length-1});
+    }
+    console.log("R2 keyboard",name,w,h,"cuts",model.cuts.length,"last",last);
+  }
+});
+
+
+test("A.5/G5: centres, top edges, gaps and thin or zero bars use the grown hit box",()=>{
+  let thin=0,hits=0;
+  for(const name of ["basic","wide-range","zero-steps"])for(const w of [80,160,480,960]) {
+    const {r,m,hand}=draw(FX[name],w,300), es=r.index.marks;
+    for(let i=0;i<es.length;i++) {
+      const b=es[i].shape,x=b.x+b.w/2,y=b.y+b.h/2,p=r.index.plot;
+      assert.equal(E.lookup.at(r.index,x,y,0),i);hits++;
+      const height=Math.abs(hand.value.scale(m.bars[i].from)-hand.value.scale(m.bars[i].to));
+      if(height<6&&y-3>=p.y&&y-3<=p.y+p.h) {thin++;assert.equal(E.lookup.at(r.index,x,y-3,0),i,"thin bar "+name);}
+      if(b.y>=p.y&&b.y<=p.y+p.h)assert.equal(E.lookup.at(r.index,x,b.y,0),i);
+      if(i+1<es.length)assert.equal(E.lookup.at(r.index,(b.x+b.w+es[i+1].shape.x)/2,y,0),-1);
+    }
+  }
+  assert.ok(thin>10&&hits>40);console.log("waterfall lookup",{thin,hits});
+  const {r}=draw(FX.basic),b=r.index.marks[1].shape;
+  assert.equal(E.lookup.at(r.index,b.x+b.w/2,(r.index.plot.y+b.y)/2,0),-1);
+});
+
+test("A.3: authored domains clamp the bars and labels never overlap",()=>{
+  let checked=0;
+  for(const domain of [[0,120],[-20,120],[0,60]])for(const w of WIDTHS)for(const h of HEIGHTS) {
+    const f=variant("basic",(f,e)=>{e.y.scale={domain};}),{r,hand}=draw(f,w,h);
+    for(const b of marks(r)) {const box=markBox(b);assert.ok(box);assert.ok(box[1]>=hand.plot.y-0.02&&box[3]<=hand.plot.y+hand.plot.h+0.02);checked++;}
+    assert.equal(violations(r.primitives,w,h).violations.length,0);
+  }
+  assert.ok(checked>1000);console.log("waterfall clamped bars",checked);
+});
+
+test("A.5: fitted cards keep the direction row and a flat bar has a ring",()=>{
+  const width=E.measure.measurer(null).fn, measures=I.measures(E,"light",width);
+  for(const [w,h] of [[80,24],[160,32],[960,540]]) {
+    const {r}=draw(FX.basic,w,h),model=I.modelOf(E,r,width);
+    const texts=[];
+    for(let i=0;i<r.index.marks.length;i++) {
+      const lines=I.markLines(model,i), card=I.markCard(E,width,lines,null,{w,h},measures);
+      assert.ok(card);assert.ok(card.lines.some(l=>l.line.kept));
+      if(h===24) {assert.equal(card.lines.length,1);assert.equal(card.lines[0].line.value,["100 USD","40 USD","−15 USD","−30 USD","−12 USD","22 USD","105 USD"][i]);}
+      texts.push(card.lines.map(l=>l.line.kind==="heading"?l.text:l.line.kind==="more"?l.text:[l.label,l.line.value].filter(Boolean).join(" ")));
+    }
+    console.log("waterfall fitted key cards",w,h,JSON.stringify(texts));
+  }
+  const {r}=draw(FX["zero-steps"]),model=I.modelOf(E,r,width);
+  const n=r.index.marks.findIndex(e=>e.shape.h===8);
+  assert.ok(n>=0);const ring=I.ringPrims(E,model,n,measures);
+  assert.equal(ring.length,1);assert.equal(ring[0].h,14);
+});
+
+// Every plant changes a fresh source copy in a VM. The product files and the pristine oracle stay untouched.
+test("G2-G7: each renderer guard is observed GREEN, targeted RED, GREEN",()=>{
+  const make=(from,to)=>engine(s=>{
+    plant(s,KEY,from,to);
+    plant(s,KEY,'model: model, marks: marks,','model: function(d,c,t){var m=model(d,c,t);R.seen=m;return m;}, marks: function(m,hand,h){R.seenHand=hand;return marks(m,hand,h);},');
+  });
+  const render=(R,f=FX.basic,w=960,h=540)=>R.render(inputOf(f,w,h));
+  const nums=(R,f)=>{render(R,f);return plain(R.seen.bars.map(b=>b.num));};
+  const picture=R=>{
+    let n=0;
+    for(const name of ["basic","decimal","fifty","zero-steps","wide-range"])for(const w of WIDTHS)for(const h of HEIGHTS) {
+      const r=render(R,FX[name],w,h);if(r.state!=="rendered")continue;
+      assert.equal(violations(r.primitives,w,h).violations.length,0,"picture bounds/overlap");
+      assert.equal(marks(r).length,expectedWaterfallMarks(FX[name]),"bar count");
+      const bs=marks(r),bw=r.index.marks[0].shape.w;
+      for(const p of labels(r)){const b=boxOf(p),plot=r.index.plot;assert.ok(b.w<=bw+6.03,"label width");assert.ok(b.x>=plot.x-0.02&&b.y>=plot.y-0.02&&b.x+b.w<=plot.x+plot.w+0.02&&b.y+b.h<=plot.y+plot.h+0.02,"label outside plot");}
+      for(let i=0;i<bs.length;i++){const b=markBox(bs[i]),level=R.seen.bars[i];
+        // The arc must stay in the vertical extent already represented by the lookup box.
+        const scale=R.seenHand.value.scale,p0=scale(level.from),p1=scale(level.to);assert.ok(b[1]>=Math.min(p0,p1)-0.03&&b[3]<=Math.max(p0,p1)+0.03,"arc outside bar");
+      } n++;
+    } assert.ok(n>500);
+  };
+  const fnull=rows([null,null,"A","B"],[1,2,null,4]);
+  const plants=[
+    ["G2 null value",'if (a.num === null) continue;','if (a.num === null) a.num = 0;',R=>same(nums(R,fnull),[4,4])],
+    ["G2 repeated warning",'if (seen[code] !== true)','if (true)',R=>same(warning(render(R,fnull)),["chart.rule.null-category"])],
+    ["G2 zero step",'if (a.num === null) continue;','if (a.num === null || a.num === 0) continue;',R=>assert.equal(render(R,FX["zero-steps"]).summary.marks,6)],
+    ["G2 repeated category",'var key = D.keyOf(X[i]),','var key = String(i),',R=>same(nums(R,FX["repeat-category"]),[17,5,-4,18])],
+    ["G2 order",'band.sort, function ()','null, function ()',R=>assert.equal(render(R,rows(["A","B","C"],[1e308,1e308,-1e308],"descending")).summary.marks,4)],
+    ["G3 overflow",'if (!finite(to))','if (false)',R=>assert.equal(render(R,FX.overflow).summary.marks,1)],
+    ["G3 exact sum",'running = allExact ? D.aggregate(parts, "sum", value.field || "count").exact : null;','running = String(to);',R=>{render(R,FX.decimal);assert.equal(R.seen.bars.at(-1).exact,"0.25");}],
+    ["G3 start",'from: level, to: to','from: 0, to: to',R=>{render(R);assert.equal(R.seen.bars[1].from,100);}],
+    ["G3 total cap",'var count = steps.length + (total === "end" && steps.length > 0 ? 1 : 0);','var count = steps.length;',R=>assert.equal(render(R,rows(Array.from({length:50},(_,i)=>String(i)),Array(50).fill(1))).state,"refused")],
+    ["G4 width",'if (width > bw + look("waterfallLabelSlack") + 1e-9)','if (false)',picture],
+    ["G4 overlap",'if (box[0] < p[2] && p[0] < box[2] && box[1] < p[3] && p[1] < box[3])','if (false)',picture],
+    ["G4 plot",'if (box[0] < plot.x || box[1] < plot.y || box[2] > plot.x + plot.w || box[3] > plot.y + plot.h)','if (false)',picture],
+    ["G4 radius",'bw * look("radiusMaxShare"), length','bw * look("radiusMaxShare")',picture],
+    ["G4 exact labels",'T.value(b.exact !== null ? b.exact : b.num, look("stackTotalFormat"))','T.value(b.num, look("stackTotalFormat"))',R=>{render(R,FX.decimal);assert.equal(R.seen.bars.at(-1).label,"0.2");}],
+    ["G4 connector",'h.rule("guide", "--chart-axis", x + bw','h.rule("mark", "--chart-axis", x + bw',R=>assert.equal(marks(render(R)).length,7)],
+    ["G5 hit box",'Math.max(length, look("waterfallHitMin"))','length',R=>assert.ok(render(R,FX["zero-steps"]).index.marks.every(e=>e.shape.h>=7.99))],
+    ["G5 emphasis",'emphasis: "ring"','emphasis: null',R=>assert.ok(render(R).index.marks.every(e=>e.emphasis==="ring"))],
+    ["G6 row",'row: 0, key: true','row: i, key: true',R=>{const r=render(R),m=I.modelOf(R,r,R.measure.measurer(null).fn);assert.equal(I.keyTarget(m,{kind:"mark",id:null,datum:0},"ArrowRight").target.datum,1);}],
+    ["G6 card order",'return { heading: b.name, rows: rows, keep: 0 };','return { heading: b.name, rows: rows.reverse(), keep: 0 };',R=>assert.equal(render(R).index.marks[1].card.rows[0].name,"Increase")],
+    ["G7 word field",'title: look("waterfallRiseText")','title: "Increase"',R=>{R.tables.LOOK.waterfallRiseText.value="Up";render(R);assert.equal(R.seen.keys[0].title,"Up");}],
+    ["G7 interaction field",'var step = hand.band.step,','var step = hand.band.step + look("markMove"),',R=>{const prior=R.tables.LOOK.markMove.value,before=render(R);R.tables.LOOK.markMove.value=prior*2;const after=render(R);R.tables.LOOK.markMove.value=prior;same(after,before);}],
+  ];
+  for(const [name,from,to,verify] of plants) {
+    const good=make(from,from+" ");verify(good);
+    assert.throws(()=>verify(make(from,to)),undefined,name+" must turn red");verify(good);
+    console.log(name+": GREEN / targeted RED / GREEN");
+  }
+});
+
+test("A.2/A.4: non-finite aggregates warn once, optional total and legend placement",()=>{
+  const f=rows(["A","A","B","B","C"],[1e308,1e308,1e308,1e308,3]),d=draw(f);
+  same(d.m.bars.map(b=>b.num),[3,3]);same(warning(d.r),["chart.rule.non-finite"]);
+  const one=variant("one-row",(f,e,mark)=>{mark.total="none";});assert.equal(draw(one).r.summary.marks,1);
+  const over=rows(Array.from({length:50},(_,i)=>String(i)),Array(50).fill(1));
+  same(draw(over).r.summary.refusal.details,{marks:51,limit:50});
+  for(const [w,h,level,want] of [[960,540,"full",["Increase","Decrease","Opening and total"]],[300,180,"compact",["Increase","Decrease","Opening and total"]],[240,180,"compact",["Increase","Decrease","+1"]],[80,24,"minimal",[]]]) {
+    const {r}=draw(FX.basic,w,h),ls=r.primitives.filter(p=>p.role==="legend"&&p.k==="text");
+    assert.equal(r.level,level);same(ls.map(p=>p.text),want);
+    for(const l of ls)assert.ok(level==="full"?l.y<r.index.plot.y:l.y>r.index.plot.y+r.index.plot.h);
+  }
+});
+
+test("A.3: both themes resolve direction colours, round the moving end and give strong labels to opening and total",()=>{
+  for(const theme of ["light","dark"])for(const name of ["basic","all-negative","negative-cross"]) {
+    const {r,m,hand}=draw(FX[name],960,540,{theme}),t=E.theme.resolve(theme);
+    for(const p of marks(r)) {
+      const b=m.bars[p.datum],token=b.kind==="rise"?"--chart-positive":b.kind==="fall"?"--chart-negative":"--chart-total";
+      assert.equal(p.color,t.css(token));
+      if(p.k==="path") {
+        const box=markBox(p),up=b.to>=b.from;
+        assert.ok(Math.abs(p.d[2]-(up?box[3]:box[1]))<0.02,"starts at the square end");
+        const arc=p.d.indexOf("A"),r=p.d[arc+1];
+        assert.ok(Math.abs(p.d[arc+3]-(up?box[1]:box[3]))<0.02,"arc at moving end");
+        assert.ok(r<=box[3]-box[1]+0.02);
+      }
+    }
+    for(const p of labels(r)) {
+      const i=Math.floor((p.x-hand.band.start)/hand.band.step),b=m.bars[i],strong=b.kind==="opening"||b.kind==="total";
+      assert.equal(p.fill,strong?"--chart-ink":"--chart-ink-2");
+      assert.equal(p.weight,strong?t.n("--chart-title-weight"):400);
+      if(b.num<0)assert.ok(p.text.startsWith("−"));else assert.ok(!p.text.startsWith("+"));
+    }
+  }
 });

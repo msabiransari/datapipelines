@@ -1091,7 +1091,9 @@ renderer shows the resolved value" for this case only).
 
 On a waterfall a bar's card heads with its category, then Increase or Decrease with its value and
 Running total; the opening and total have one row. Left/Right walk the bars, Home/End go to the first/last,
-and Up/Down stay on the bar. Every bar has keyboard row 0; the legend is a key only.
+and Up/Down stay on the bar. Right from the last bar selects the first shortened text when present
+and otherwise stays on that bar; Left from the first shortened text returns to the last bar.
+Every bar has keyboard row 0; the legend is a key only.
 
 ### 6.4 The chart engine on the page
 
