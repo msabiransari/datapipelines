@@ -159,7 +159,7 @@ to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a 
 - **A time `x` is a position, never a band**, on a line or an area: `{field, type: "temporal", format?}` — a
   continuous UTC axis (`format` `date`, `month`, `year` or `datetime`), no `sort`. A number `x` is a position too
   (`type: "quantitative"`, a number format, optional `unit` and `scale`). A category `x` is a band, as on a bar
-  (`nominal` or `ordinal`, `sort` required).
+  (`nominal` or `ordinal`, `sort` required). A time `x` and a category `x` take no `unit`.
 - **The look is fixed:** a smooth line that never overshoots its points, a dot on each line's last point, and with
   2 to 4 series their names at the lines' ends. You may write `mark.curve` (`smooth`, `step`, `linear`),
   `mark.points` (`end`, `markers`, `none`), `mark.labels: "last"` (the last value at the line's end) and a legend
@@ -253,7 +253,8 @@ Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail.
+  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail. On an axis the unit also follows the title
+  (`Distance (km)`; `title: null` writes neither title nor unit), never a tick.
 - **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
 - **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no

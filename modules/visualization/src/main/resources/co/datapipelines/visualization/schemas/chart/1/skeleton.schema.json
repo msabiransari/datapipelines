@@ -485,7 +485,7 @@
       ]
     },
     "unit": {
-      "description": "G6: a unit written after the number in tooltips, value labels and the value axis's title, never on a tick: plain text of 1 to 16 characters.",
+      "description": "G6: a unit written after the number in tooltips, value labels and the title of the value axis or of a number x axis, never on a tick: plain text of 1 to 16 characters.",
       "type": "string",
       "allOf": [
         {
