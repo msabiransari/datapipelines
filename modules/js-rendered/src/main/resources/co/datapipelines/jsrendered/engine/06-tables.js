@@ -73,6 +73,14 @@
     pieLabelRadius: f(0.66, "render", "brief 1068 D13: pieLabelRadius"),
     pieOtherText: f("Other", "render", "brief 1068 D13: pieOtherText"),
     pieMoveAllowance: f(5, "render", "brief 1068 D13: pieMoveAllowance"),
+    boxShare: f(0.5, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxShare"),
+    boxMaxWidth: f(56, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxMaxWidth"),
+    boxCapShare: f(0.44, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxCapShare"),
+    boxMinLines: f(3, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxMinLines"),
+    boxOutsideLess: f(1, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutsideLess"),
+    boxOutsideOpacity: f(0.75, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutsideOpacity"),
+    boxOutsideRing: f(0.75, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutsideRing"),
+    boxOutliersDefault: f("points", "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutliersDefault"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -119,6 +127,9 @@
     "scatter.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "rows drawn", note: "record §4.9 Draft 13 (the numbers that stand): scatter's 1,000 is lane 977's browser table, as bar's 1,000 is (lane 977 S-CAP: scatter 1,000 passed, 2,000 failed by one frame of 50.1 ms); one mark per row drawn, never thinned" },
     "pie.marks": { kind: "semantic", limit: 8, basis: "fixed", unit: "slices", note: "Record §4.5 pie: eight slices, not measured (R19); marks are series, so the series cap refuses first." },
     "heatmap.marks": { kind: "mark", limit: 1000, basis: "inherited", unit: "non-null cells", note: "record §4.9 heatmap row: min(2,500, 1,000) = 1,000 cells, inherited and not measured here (R19)" },
+    "box.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "boxes", note: "record §4.5 box cap and §4.9 box row: 50 boxes; inherited, not measured for box (R19)" },
+    "box.outliers": { kind: "mark", limit: 1000, basis: "inherited", unit: "outside points drawn, over all boxes", note: "record §4.9 box row: 1,000 outlier points; inherited, not measured for box (R19)" },
+    "box.outliers_each": { kind: "semantic", limit: 200, basis: "fixed", unit: "outside points drawn per box", note: "record §4.9 semantic limits box row: 200 outlier points per box; fixed, not measured for box (R19)" },
   };
 
   function look(name) {

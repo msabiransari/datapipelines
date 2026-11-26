@@ -500,6 +500,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SCATTER_CONFIG))
                     body.toString()
                 },
+                "box" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Box")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(BOX_CONFIG))
+                    body.toString()
+                },
                 "heatmap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Heatmap")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -528,6 +534,11 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             """{"mark":{"type":"heatmap"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
                 """"y":{"field":"y","type":"nominal","sort":null},""" +
                 """"color":{"field":"y","type":"quantitative","aggregate":"sum","scale":"sequential"}}}"""
+
+        /** Box over the same INTEGER columns, one distribution per x category (brief 1072 A.7). */
+        const val BOX_CONFIG =
+            """{"mark":{"type":"box"},"encoding":{"x":{"field":"x","type":"nominal","sort":"ascending"},""" +
+                """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
 
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 

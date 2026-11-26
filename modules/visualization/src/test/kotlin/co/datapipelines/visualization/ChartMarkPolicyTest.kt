@@ -44,6 +44,7 @@ class ChartMarkPolicyTest {
                 "scatter" to ChartMarkPolicy.POINT,
                 "pie" to ChartMarkPolicy.AREA,
                 "heatmap" to ChartMarkPolicy.BAR,
+                "box" to ChartMarkPolicy.POINT,
             )
     }
 

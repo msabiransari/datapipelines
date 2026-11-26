@@ -30,3 +30,4 @@ types/area.js
 types/scatter.js
 types/pie.js
 types/heatmap.js
+types/box.js

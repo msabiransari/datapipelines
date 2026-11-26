@@ -87,7 +87,17 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box")
+    }
+
+    @Test
+    fun `box has an optional band and a required quantitative position under the point policy`() {
+        ChartType.BOX.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to false, "node" to mapOf("node" to "shape", "name" to "band")),
+                mapOf("key" to "y", "required" to true, "node" to mapOf("node" to "shape", "name" to "position")),
+            )
+        ChartType.BOX.policy shouldBe ChartMarkPolicy.POINT
     }
 
     @Test

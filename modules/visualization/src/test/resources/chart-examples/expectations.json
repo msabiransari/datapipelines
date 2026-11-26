@@ -685,6 +685,109 @@
    "layer": "save",
    "code": "chart.shade.mid_invalid",
    "pointer": "/config/encoding/color/mid"
+  },
+  "valid/box-plain.json": {
+   "valid": true
+  },
+  "valid/box-one.json": {
+   "valid": true
+  },
+  "valid/box-no-outliers.json": {
+   "valid": true
+  },
+  "valid/box-log-unit.json": {
+   "valid": true
+  },
+  "valid/box-temporal.json": {
+   "valid": true
+  },
+  "valid/box-title.json": {
+   "valid": true
+  },
+  "invalid/box-outliers-all.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/outliers"
+  },
+  "invalid/box-outliers-boolean.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/outliers"
+  },
+  "invalid/box-mark-unknown.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/box-y-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/type"
+  },
+  "invalid/box-y-aggregate.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/y"
+  },
+  "invalid/box-y-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/y"
+  },
+  "invalid/box-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/box-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/box-no-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/box-no-sort.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/box-y-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/box-nullable-x.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/box-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/box-log-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log"
+  },
+  "invalid/box-reversed-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
   }
  }
 }
