@@ -145,9 +145,9 @@ test("A.3: huge finite spans take the fraction first; seeded angles have small i
 
 test("A.6: row oracle directly handles count without field, nulls and overflowing domains", async()=>{
   const {expectedGaugeMarks}=await import("./geometry.mjs");
-  const cases=[["count",[null,null],1],["count",[],0],["count",Array(7).fill(null),1],["sum",[],0],["sum",[null],0],["sum",[10,20,30],1],["mean",[10,null,30],1],["min",[1,2],1],["max",[1,2],1],["sum",[1e308,1e308],0],["sum",[0],1],["sum",[-1],1],["mean",[null,null],0],["count",[null,null,null],1],["sum",[13],1]];
-  for(const [agg,vs,want] of cases) {
-    const f=fx("plain",(f,e)=>{f.columns.v=vs;e.aggregate=agg;if(agg==="count")delete e.field;});
+  const cases=[["count",[null,null],1],["count",[],0],["count",Array(7).fill(null),1],["sum",[],0],["sum",[null],0],["sum",[10,20,30],1],["mean",[10,null,30],1],["min",[1,2],1],["max",[1,2],1],["sum",[1e308,1e308],0],["sum",[0],1],["sum",[-1],1],["mean",[null,null],0],["count",[null,null,null],1],["count",[null],0,[-1e308,1e308]]];
+  for(const [agg,vs,want,domain=[0,100]] of cases) {
+    const f=fx("plain",(f,e)=>{f.columns.v=vs;e.aggregate=agg;e.scale.domain=domain;if(agg==="count")delete e.field;});
     assert.equal(expectedGaugeMarks(f),want);assert.equal(draw(f).summary.marks,want);
   }
 });
