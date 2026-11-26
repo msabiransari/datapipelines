@@ -31,8 +31,8 @@ import javax.imageio.ImageIO
 
 /**
  * **The two visualization test tools through `/mcp` with a real key (#353, L4b)** — what an agent runs, on the real
- * transport and the real dispatcher (the catalog row, the key role, the audit row): `docs_get {"name":"dashboards"}`
- * serves the test loop; `visualizations_test_start` answers the preview URL the agent's browser opens with no key;
+ * transport and the real dispatcher (the catalog row, the key role, the audit row): `docs_get` serves the dashboards
+ * guide's test loop section; `visualizations_test_start` answers the preview URL the agent's browser opens with no key;
  * `visualizations_test_submit` answers GREEN and the single-use upload, which the agent POSTs over plain HTTP — and
  * the MCP key itself is refused there (an `mcp` key reaches `/mcp` only). A promoter key is refused by its role; a
  * revoked key's submit is the transport's refusal, and its session's preview dies with it (the starter re-check); a
@@ -57,10 +57,12 @@ class McpVisualizationTestsE2eTest {
     @Test
     @Order(1)
     fun `the manual's dashboards guide serves the test loop through docs_get`() {
-        val (payload, isError) = callTool(AUTHOR_KEY.plaintext, "docs_get", mapOf("name" to "dashboards"))
-        isError shouldBe false
-        val text = payload.toString()
-        text shouldContain "Proving a visualization"
+        val section = "proving-a-visualization--the-test-loop"
+        val (payload, isError) =
+            callTool(AUTHOR_KEY.plaintext, "docs_get", mapOf("name" to "dashboards", "section" to section))
+        withClue(payload.toString()) { isError shouldBe false }
+        payload["section"].asText() shouldBe section
+        val text = payload["markdown"].asText()
         text shouldContain "visualizations_test_start"
         text shouldContain "visualizations_test_submit"
         text shouldContain "Upload one screenshot"
