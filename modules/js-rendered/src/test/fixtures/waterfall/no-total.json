@@ -1,0 +1,65 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "total none: the bars stop at the last step",
+  "document": {
+    "display_name": "no-total",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall",
+        "total": "none"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Start",
+      "Sales",
+      "Refunds",
+      "Costs"
+    ],
+    "v": [
+      100,
+      40,
+      -15,
+      -30
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

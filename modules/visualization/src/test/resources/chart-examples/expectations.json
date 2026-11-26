@@ -788,6 +788,105 @@
    "valid": false,
    "layer": "save",
    "code": "chart.scale.domain_invalid"
+  },
+  "valid/waterfall-plain.json": {
+   "valid": true
+  },
+  "valid/waterfall-total-none.json": {
+   "valid": true
+  },
+  "valid/waterfall-labels-none.json": {
+   "valid": true
+  },
+  "valid/waterfall-unit.json": {
+   "valid": true
+  },
+  "valid/waterfall-temporal.json": {
+   "valid": true
+  },
+  "valid/waterfall-domain.json": {
+   "valid": true
+  },
+  "invalid/waterfall-total.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/total"
+  },
+  "invalid/waterfall-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/waterfall-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/waterfall-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/waterfall-sort-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/sort"
+  },
+  "invalid/waterfall-log.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/waterfall-zero.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/scale/zero"
+  },
+  "invalid/waterfall-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/waterfall-quantitative-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/waterfall-text-y.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/waterfall-no-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-no-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
   }
  }
 }

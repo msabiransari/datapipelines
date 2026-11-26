@@ -1,0 +1,64 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "a running total beyond float64 stops the chart there",
+  "document": {
+    "display_name": "overflow",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "DOUBLE",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "v": [
+      1e+308,
+      1e+308,
+      5,
+      7
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "DOUBLE"
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/waterfall.schema.json",
+  "title": "datapipelines chart document, version 1, family waterfall",
+  "description": "Running changes over a category band, with an optional closing total (record §4.5; #1073).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "waterfall"
+            },
+            "total": {
+              "enum": [
+                "none",
+                "end"
+              ],
+              "default": "end"
+            },
+            "labels": {
+              "enum": [
+                "none",
+                "values"
+              ],
+              "default": "values"
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/band"
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        }
+      }
+    },
+    "band": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/band"
+        }
+      ],
+      "properties": {
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        }
+      }
+    },
+    "value": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "scale": {
+          "type": "object",
+          "properties": {
+            "zero": {
+              "const": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

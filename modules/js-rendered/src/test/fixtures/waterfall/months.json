@@ -1,0 +1,65 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "a temporal band in input order",
+  "document": {
+    "display_name": "months",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "DATE",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "temporal",
+          "sort": null,
+          "format": "month"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "2026-01-01",
+      "2026-02-01",
+      "2026-03-01",
+      "2026-04-01"
+    ],
+    "v": [
+      10,
+      5,
+      -3,
+      8
+    ]
+  },
+  "types": {
+    "s": "DATE",
+    "v": "INTEGER"
+  }
+}
