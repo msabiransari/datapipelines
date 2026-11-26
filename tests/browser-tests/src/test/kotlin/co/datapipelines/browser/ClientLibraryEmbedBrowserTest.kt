@@ -500,10 +500,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SCATTER_CONFIG))
                     body.toString()
                 },
-                "box" to {
-                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Box")
+                "pie" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
                     val body = JsonParser.parseString(bar).asJsonObject
-                    body.add("config", JsonParser.parseString(BOX_CONFIG))
+                    body.add("config", JsonParser.parseString(PIE_CONFIG))
                     body.toString()
                 },
                 "heatmap" to {
@@ -512,16 +512,16 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
                     body.toString()
                 },
+                "box" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Box")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(BOX_CONFIG))
+                    body.toString()
+                },
                 "waterfall" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Waterfall")
                     val body = JsonParser.parseString(bar).asJsonObject
                     body.add("config", JsonParser.parseString(WATERFALL_CONFIG))
-                    body.toString()
-                },
-                "pie" to {
-                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
-                    val body = JsonParser.parseString(bar).asJsonObject
-                    body.add("config", JsonParser.parseString(PIE_CONFIG))
                     body.toString()
                 },
             )

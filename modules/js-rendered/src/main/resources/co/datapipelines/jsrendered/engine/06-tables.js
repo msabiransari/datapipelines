@@ -127,7 +127,6 @@
   };
 
   var CAPS = {
-    "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
     rows: { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9, every type: lane 985 D12 measured bar by S-CAP (re-taken in round 2 on the corrected engine); 20,000 passes aggregating to 60 marks and on the refusal path (every row its own group), which fails at 50,000 (longest drag frame 83.4 ms over 3.5 × D = 58.45 ms); F5 measures the line" },
     series: { kind: "semantic", limit: 8, basis: "fixed", unit: "series", note: "O-15: 8 series on any type with a legend" },
     "bar.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "non-null aggregated cells", note: "lane 977 S-CAP: bar 200 × 5 passed, 1,000 × 5 failed" },
@@ -141,6 +140,7 @@
     "box.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "boxes", note: "record §4.5 box cap and §4.9 box row: 50 boxes; inherited, not measured for box (R19)" },
     "box.outliers": { kind: "mark", limit: 1000, basis: "inherited", unit: "outside points drawn, over all boxes", note: "record §4.9 box row: 1,000 outlier points; inherited, not measured for box (R19)" },
     "box.outliers_each": { kind: "semantic", limit: 200, basis: "fixed", unit: "outside points drawn per box", note: "record §4.9 semantic limits box row: 200 outlier points per box; fixed, not measured for box (R19)" },
+    "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
   };
 
   function look(name) {
