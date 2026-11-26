@@ -1,0 +1,942 @@
+[
+ {
+  "id": "five-stages",
+  "title": "Five stages, the share of the first",
+  "document": {
+   "display_name": "From visit to renewal",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "From visit to renewal",
+     "subtitle": "Last 30 days"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Visited",
+    "Signed up",
+    "Activated",
+    "Subscribed",
+    "Renewed"
+   ],
+   "v": [
+    12400,
+    5300,
+    3100,
+    1240,
+    890
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "previous",
+  "title": "The share of the step before",
+  "document": {
+   "display_name": "Orders at each step",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel",
+     "labels": "percent_of_previous"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Orders at each step"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "A",
+    "B",
+    "C",
+    "D"
+   ],
+   "v": [
+    900,
+    450,
+    90,
+    45
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "values",
+  "title": "Values only, with a unit",
+  "document": {
+   "display_name": "Orders at each step",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel",
+     "labels": "value"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "orders",
+      "title": "Orders"
+     }
+    },
+    "title": {
+     "text": "Orders at each step"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Orders",
+    "Paid",
+    "Shipped",
+    "Returned"
+   ],
+   "v": [
+    9000,
+    4500,
+    300,
+    20
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "steep",
+  "title": "A steep drop: the least width and under 1%",
+  "document": {
+   "display_name": "From impression to buyer",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "From impression to buyer"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Impressions",
+    "Clicks",
+    "Carts",
+    "Buyers"
+   ],
+   "v": [
+    1000000,
+    1500,
+    90,
+    1
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "rising",
+  "title": "Rising values: a share over 100%",
+  "document": {
+   "display_name": "Leads to won",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Leads to won"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Leads",
+    "Qualified",
+    "Won"
+   ],
+   "v": [
+    10,
+    20,
+    35
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "zero-stage",
+  "title": "A zero stage in the middle",
+  "document": {
+   "display_name": "From seen to bought",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "From seen to bought"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Seen",
+    "Clicked",
+    "Bought"
+   ],
+   "v": [
+    100,
+    0,
+    40
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "twelve",
+  "title": "Twelve stages, the cap",
+  "document": {
+   "display_name": "Twelve steps",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Twelve steps"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Step 1",
+    "Step 2",
+    "Step 3",
+    "Step 4",
+    "Step 5",
+    "Step 6",
+    "Step 7",
+    "Step 8",
+    "Step 9",
+    "Step 10",
+    "Step 11",
+    "Step 12"
+   ],
+   "v": [
+    1200,
+    1110,
+    1020,
+    930,
+    840,
+    750,
+    660,
+    570,
+    480,
+    390,
+    300,
+    210
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 640,
+   "h": 320
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "long-names",
+  "title": "Names cut to their column",
+  "document": {
+   "display_name": "Checkout",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Checkout"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Customers who completed checkout and paid in full",
+    "Signed up",
+    "Activated an account in the first week"
+   ],
+   "v": [
+    300,
+    200,
+    100
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "id": "empty",
+  "title": "No rows",
+  "document": {
+   "display_name": "Orders by step",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Orders by step"
+    }
+   }
+  },
+  "columns": {
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data"
+  }
+ },
+ {
+  "id": "too-many",
+  "title": "Thirteen stages: refused",
+  "document": {
+   "display_name": "Thirteen steps",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Thirteen steps"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Step 1",
+    "Step 2",
+    "Step 3",
+    "Step 4",
+    "Step 5",
+    "Step 6",
+    "Step 7",
+    "Step 8",
+    "Step 9",
+    "Step 10",
+    "Step 11",
+    "Step 12",
+    "Step 13"
+   ],
+   "v": [
+    1300,
+    1210,
+    1120,
+    1030,
+    940,
+    850,
+    760,
+    670,
+    580,
+    490,
+    400,
+    310,
+    220
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "code": "chart.too_many_marks"
+  }
+ },
+ {
+  "id": "refused",
+  "title": "A negative stage: refused",
+  "document": {
+   "display_name": "Orders by step",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "Orders by step"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "A",
+    "B",
+    "C"
+   ],
+   "v": [
+    50,
+    -2,
+    10
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "code": "chart.rule.negative-part"
+  }
+ },
+ {
+  "id": "hostile",
+  "title": "Hostile names (text, never markup)",
+  "document": {
+   "display_name": "<b>bold?</b> & <i>title</i>",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "funnel"
+    },
+    "encoding": {
+     "stage": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "value": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "<b>bold?</b> & <i>title</i>",
+     "subtitle": "<script>alert(0)</script>"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "\" onmouseover=\"x"
+   ],
+   "v": [
+    30,
+    25,
+    20,
+    10,
+    5
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ }
+]

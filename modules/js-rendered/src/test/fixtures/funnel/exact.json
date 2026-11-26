@@ -1,0 +1,62 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "an exact column: the value text is the exact text",
+  "document": {
+    "display_name": "exact",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "BIGINTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Wide",
+      "Half",
+      "Few"
+    ],
+    "v": [
+      "9007199254740993",
+      "4503599627370497",
+      "100"
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "BIGINTEGER"
+  }
+}

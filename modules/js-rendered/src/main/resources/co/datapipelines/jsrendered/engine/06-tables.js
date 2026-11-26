@@ -91,6 +91,15 @@
     waterfallTotalText: f("Total", "render", "brief 1073 D10: waterfallTotalText"),
     waterfallKeyTotalText: f("Opening and total", "render", "brief 1073 D10: waterfallKeyTotalText"),
     waterfallRunningText: f("Running total", "render", "brief 1073 D10: waterfallRunningText"),
+    funnelLeast: f(6, "render", "brief 1074 D13: funnelLeast"),
+    funnelFit: f(12, "render", "brief 1074 D13: funnelFit"),
+    funnelShareMaxEm: f(6, "render", "brief 1074 D13: funnelShareMaxEm"),
+    funnelNameShare: f(0.5, "render", "brief 1074 D13: funnelNameShare"),
+    funnelGapShare: f(0.5, "render", "brief 1074 D13: funnelGapShare"),
+    funnelLabelsDefault: f("percent_of_first", "render", "brief 1074 D13: funnelLabelsDefault"),
+    funnelFirstText: f("Of the first step", "render", "brief 1074 D13: funnelFirstText"),
+    funnelPreviousText: f("Of the step before", "render", "brief 1074 D13: funnelPreviousText"),
+    funnelTinyText: f("<1%", "render", "brief 1074 D13: funnelTinyText"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -141,6 +150,7 @@
     "box.outliers": { kind: "mark", limit: 1000, basis: "inherited", unit: "outside points drawn, over all boxes", note: "record §4.9 box row: 1,000 outlier points; inherited, not measured for box (R19)" },
     "box.outliers_each": { kind: "semantic", limit: 200, basis: "fixed", unit: "outside points drawn per box", note: "record §4.9 semantic limits box row: 200 outlier points per box; fixed, not measured for box (R19)" },
     "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
+    "funnel.marks": { kind: "semantic", limit: 12, basis: "fixed", unit: "stages", note: "record §4.5 and §4.9: at most 12 stages; the thirteenth refuses with chart.too_many_marks. A semantic limit, not measured (R19)." },
   };
 
   function look(name) {

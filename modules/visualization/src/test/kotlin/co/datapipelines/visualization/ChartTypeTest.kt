@@ -87,7 +87,7 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel")
     }
 
     @Test
@@ -193,5 +193,15 @@ class ChartTypeTest {
                         mapOf("shape" to "value", "types" to listOf("quantitative")),
                     ),
             )
+    }
+
+    @Test
+    fun `funnel has a stage band and a single value with area policy`() {
+        ChartType.FUNNEL.channels shouldBe
+            listOf(
+                ChartChannel("stage", required = true, node = ChannelNode.Shape("band")),
+                ChartChannel("value", required = true, node = ChannelNode.Shape("value")),
+            )
+        ChartType.FUNNEL.policy shouldBe ChartMarkPolicy.AREA
     }
 }

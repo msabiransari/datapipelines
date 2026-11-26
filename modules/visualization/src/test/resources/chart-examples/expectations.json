@@ -1,5 +1,5 @@
 {
- "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and §4.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
+ "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and \u00a74.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
  "examples": {
   "valid/bar-vertical.json": {
    "valid": true
@@ -109,7 +109,7 @@
   },
   "valid/display-name-120.json": {
    "valid": true,
-   "note": "the product bound exactly (design record §4.2)"
+   "note": "the product bound exactly (design record \u00a74.2)"
   },
   "invalid/display-name-61-astral.json": {
    "valid": false,
@@ -280,7 +280,7 @@
    "layer": "schema",
    "keyword": "oneOf",
    "path": "/config/encoding/x",
-   "note": "record §4.2: a temporal x has ONE form on the line family"
+   "note": "record \u00a74.2: a temporal x has ONE form on the line family"
   },
   "invalid/line-band-sort-by-total.json": {
    "valid": false,
@@ -887,6 +887,118 @@
    "layer": "schema",
    "keyword": "required",
    "path": "/config/encoding"
+  },
+  "valid/funnel-plain.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-value.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-first.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-previous.json": {
+   "valid": true
+  },
+  "valid/funnel-unit-title.json": {
+   "valid": true
+  },
+  "valid/funnel-descending.json": {
+   "valid": true
+  },
+  "invalid/funnel-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/funnel-value-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-stage-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/stage"
+  },
+  "invalid/funnel-stage-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/stage"
+  },
+  "invalid/funnel-stage-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/stage/type"
+  },
+  "invalid/funnel-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-mark-unknown.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/funnel-missing-stage.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-missing-value.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-text-value.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/funnel-nullable-stage.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
   }
  }
 }

@@ -46,6 +46,7 @@ class ChartMarkPolicyTest {
                 "heatmap" to ChartMarkPolicy.BAR,
                 "box" to ChartMarkPolicy.POINT,
                 "waterfall" to ChartMarkPolicy.AREA,
+                "funnel" to ChartMarkPolicy.AREA,
             )
     }
 

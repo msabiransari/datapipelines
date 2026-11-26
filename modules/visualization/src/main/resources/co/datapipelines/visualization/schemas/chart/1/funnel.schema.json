@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/funnel.schema.json",
+  "title": "datapipelines chart document, version 1, family funnel",
+  "description": "Centred stage bars with shares of the first or previous stage (#1074).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "funnel"
+            },
+            "labels": {
+              "enum": [
+                "value",
+                "percent_of_first",
+                "percent_of_previous"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "value"
+      ],
+      "properties": {
+        "stage": {
+          "$ref": "#/$defs/stage"
+        },
+        "value": {
+          "$ref": "#/$defs/value"
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/band"
+        }
+      ],
+      "properties": {
+        "type": {
+          "$ref": "skeleton.schema.json#/$defs/seriesType"
+        },
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "axis"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      }
+    },
+    "value": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "scale"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "labels percent_of_previous",
+  "document": {
+    "display_name": "previous",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel",
+        "labels": "percent_of_previous"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "v": [
+      900,
+      450,
+      90,
+      45
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

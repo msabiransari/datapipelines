@@ -1,0 +1,66 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "a null stage name and a stage with only null values",
+  "document": {
+    "display_name": "null-stage",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "A",
+      null,
+      "C",
+      "C",
+      "D"
+    ],
+    "v": [
+      10,
+      5,
+      null,
+      7,
+      3
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}
