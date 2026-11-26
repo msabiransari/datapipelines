@@ -1,0 +1,73 @@
+{
+ "display_name": "A count with a field",
+ "description": "A count value takes no field: the schema refuses the field.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "line"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "count",
+    "format": "integer"
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Channel"
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}

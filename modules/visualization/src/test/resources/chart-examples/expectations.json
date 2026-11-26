@@ -16,6 +16,10 @@
   "valid/bar-normalized.json": {
    "valid": true
   },
+  "valid/bar-count.json": {
+   "valid": true,
+   "note": "1112: a count value (no field) through the save path"
+  },
   "invalid/unknown-property.json": {
    "valid": false,
    "layer": "schema",
@@ -130,6 +134,10 @@
   "valid/line-temporal.json": {
    "valid": true
   },
+  "valid/line-count.json": {
+   "valid": true,
+   "note": "1112: a count value (no field) through the save path"
+  },
   "valid/line-nominal-direct.json": {
    "valid": true
   },
@@ -147,6 +155,14 @@
   },
   "valid/area-stacked.json": {
    "valid": true
+  },
+  "valid/area-count.json": {
+   "valid": true,
+   "note": "1112: a count value (no field) through the save path"
+  },
+  "valid/area-count-normalized.json": {
+   "valid": true,
+   "note": "1112: a normalized count value (no field) through the save path"
   },
   "valid/area-normalized-fields.json": {
    "valid": true
@@ -302,6 +318,13 @@
    "keyword": "not",
    "path": "/config/encoding/y",
    "note": "line: no stack"
+  },
+  "invalid/line-count-field.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y",
+   "note": "1112: a count value takes no field"
   },
   "invalid/area-stack-without-series.json": {
    "valid": false,

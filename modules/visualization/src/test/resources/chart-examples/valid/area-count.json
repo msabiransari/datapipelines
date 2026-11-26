@@ -1,0 +1,74 @@
+{
+ "display_name": "Rows by month, stacked by channel",
+ "description": "An area per channel counting rows, stacked from zero.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "area",
+   "curve": "smooth"
+  },
+  "encoding": {
+   "x": {
+    "field": "month",
+    "type": "temporal",
+    "format": "month",
+    "title": "Month"
+   },
+   "y": {
+    "type": "quantitative",
+    "aggregate": "count",
+    "format": "integer",
+    "stack": "zero"
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Channel"
+   }
+  },
+  "title": {
+   "text": "Rows by month, stacked by channel"
+  }
+ }
+}
