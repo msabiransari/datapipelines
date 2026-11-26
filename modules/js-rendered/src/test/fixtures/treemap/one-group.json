@@ -1,0 +1,85 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "one first-level value: one colour and no legend",
+  "document": {
+    "display_name": "one-group",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Only group",
+      "Only group",
+      "Only group",
+      "Only group",
+      "Only group",
+      "Only group"
+    ],
+    "b": [
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5"
+    ],
+    "v": [
+      30,
+      22,
+      18,
+      14,
+      9,
+      7
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}

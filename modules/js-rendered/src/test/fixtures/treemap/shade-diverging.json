@@ -1,0 +1,86 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "colour by value, diverging about 0",
+  "document": {
+    "display_name": "shade-diverging",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "INTEGER",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "s",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "diverging",
+          "mid": 0
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
+    ],
+    "s": [
+      -8,
+      -2,
+      0,
+      3,
+      9
+    ],
+    "v": [
+      40,
+      25,
+      15,
+      12,
+      8
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "INTEGER",
+    "v": "INTEGER"
+  }
+}

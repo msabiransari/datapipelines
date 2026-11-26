@@ -1,0 +1,1221 @@
+[
+  {
+    "document": {
+      "display_name": "plain",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative",
+            "unit": "GB"
+          }
+        },
+        "title": {
+          "text": "Storage by region"
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "North",
+        "South",
+        "East",
+        "West"
+      ],
+      "v": [
+        50,
+        30,
+        15,
+        5
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "plain",
+    "title": "one level, four cells, no colour channel, labels by default",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 4,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "nested",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        },
+        "title": {
+          "text": "Sales"
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1"
+      ],
+      "b": [
+        "Leaf 0",
+        "Leaf 1",
+        "Leaf 2",
+        "Leaf 3",
+        "Leaf 4",
+        "Leaf 5",
+        "Leaf 6",
+        "Leaf 7",
+        "Leaf 8",
+        "Leaf 9",
+        "Leaf 10",
+        "Leaf 11",
+        "Leaf 12",
+        "Leaf 13"
+      ],
+      "v": [
+        5,
+        22,
+        39,
+        56,
+        20,
+        37,
+        54,
+        18,
+        35,
+        52,
+        16,
+        33,
+        50,
+        14
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "nested",
+    "title": "two levels, three groups of leaves",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 14,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "deep",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "c",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            },
+            {
+              "field": "c"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        },
+        "title": {
+          "text": "Cost centres"
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0",
+        "Region 1",
+        "Region 2",
+        "Region 0"
+      ],
+      "b": [
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4",
+        "Site 0",
+        "Site 1",
+        "Site 2",
+        "Site 3",
+        "Site 4"
+      ],
+      "c": [
+        "Unit 0",
+        "Unit 1",
+        "Unit 2",
+        "Unit 3",
+        "Unit 4",
+        "Unit 5",
+        "Unit 6",
+        "Unit 7",
+        "Unit 8",
+        "Unit 9",
+        "Unit 10",
+        "Unit 11",
+        "Unit 12",
+        "Unit 13",
+        "Unit 14",
+        "Unit 15",
+        "Unit 16",
+        "Unit 17",
+        "Unit 18",
+        "Unit 19",
+        "Unit 20",
+        "Unit 21",
+        "Unit 22",
+        "Unit 23",
+        "Unit 24",
+        "Unit 25",
+        "Unit 26",
+        "Unit 27",
+        "Unit 28",
+        "Unit 29",
+        "Unit 30",
+        "Unit 31",
+        "Unit 32",
+        "Unit 33",
+        "Unit 34",
+        "Unit 35",
+        "Unit 36",
+        "Unit 37",
+        "Unit 38",
+        "Unit 39"
+      ],
+      "v": [
+        3,
+        32,
+        61,
+        29,
+        58,
+        26,
+        55,
+        23,
+        52,
+        20,
+        49,
+        17,
+        46,
+        14,
+        43,
+        11,
+        40,
+        8,
+        37,
+        5,
+        34,
+        63,
+        31,
+        60,
+        28,
+        57,
+        25,
+        54,
+        22,
+        51,
+        19,
+        48,
+        16,
+        45,
+        13,
+        42,
+        10,
+        39,
+        7,
+        36
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "c": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "deep",
+    "title": "three levels; the card heading joins the two levels above the leaf",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 40,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "color-series",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "c",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          },
+          "color": {
+            "field": "c",
+            "type": "nominal",
+            "sort": [
+              "p",
+              "q",
+              "r"
+            ]
+          }
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2",
+        "Group 0",
+        "Group 1",
+        "Group 2"
+      ],
+      "b": [
+        "Leaf 0",
+        "Leaf 1",
+        "Leaf 2",
+        "Leaf 3",
+        "Leaf 4",
+        "Leaf 5",
+        "Leaf 0",
+        "Leaf 1",
+        "Leaf 2",
+        "Leaf 3",
+        "Leaf 4",
+        "Leaf 5",
+        "Leaf 0",
+        "Leaf 1",
+        "Leaf 2",
+        "Leaf 3",
+        "Leaf 4",
+        "Leaf 5"
+      ],
+      "c": [
+        "p",
+        "q",
+        "r",
+        "p",
+        "q",
+        "r",
+        "p",
+        "q",
+        "r",
+        "p",
+        "q",
+        "r",
+        "p",
+        "q",
+        "r",
+        "p",
+        "q",
+        "r"
+      ],
+      "v": [
+        4,
+        27,
+        50,
+        26,
+        49,
+        25,
+        48,
+        24,
+        47,
+        23,
+        46,
+        22,
+        45,
+        21,
+        44,
+        20,
+        43,
+        19
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "c": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "series",
+    "title": "colour by a field outside the path: two cells of one path split by it",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 6,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "shade",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "s",
+              "type": "INTEGER",
+              "nullable": true
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          },
+          "color": {
+            "field": "s",
+            "aggregate": "sum",
+            "type": "quantitative",
+            "scale": "sequential"
+          }
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G0",
+        "G1",
+        "G2",
+        "G3"
+      ],
+      "b": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6",
+        "L7",
+        "L8",
+        "L9",
+        "L10",
+        "L11",
+        "L12",
+        "L13",
+        "L14",
+        "L15"
+      ],
+      "s": [
+        0,
+        3,
+        6,
+        9,
+        12,
+        null,
+        18,
+        21,
+        24,
+        27,
+        30,
+        33,
+        36,
+        39,
+        42,
+        45
+      ],
+      "v": [
+        6,
+        25,
+        44,
+        22,
+        41,
+        19,
+        38,
+        16,
+        35,
+        13,
+        32,
+        10,
+        29,
+        7,
+        26,
+        45
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "s": "INTEGER",
+      "v": "INTEGER"
+    },
+    "id": "shade",
+    "title": "colour by value, sequential; one cell has no shade",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 16,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "shade-diverging",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "s",
+              "type": "INTEGER",
+              "nullable": true
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          },
+          "color": {
+            "field": "s",
+            "aggregate": "sum",
+            "type": "quantitative",
+            "scale": "diverging",
+            "mid": 0
+          }
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "s": [
+        -8,
+        -2,
+        0,
+        3,
+        9
+      ],
+      "v": [
+        40,
+        25,
+        15,
+        12,
+        8
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "s": "INTEGER",
+      "v": "INTEGER"
+    },
+    "id": "diverging",
+    "title": "colour by value, diverging about 0",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 5,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "one-group",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "Only group",
+        "Only group",
+        "Only group",
+        "Only group",
+        "Only group",
+        "Only group"
+      ],
+      "b": [
+        "Leaf 0",
+        "Leaf 1",
+        "Leaf 2",
+        "Leaf 3",
+        "Leaf 4",
+        "Leaf 5"
+      ],
+      "v": [
+        30,
+        22,
+        18,
+        14,
+        9,
+        7
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "one-group",
+    "title": "one first-level value: one colour and no legend",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "none",
+      "struck": [],
+      "labels": "none",
+      "cells": 6,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "empty",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        },
+        "title": {
+          "text": "Treemap with no rows"
+        }
+      }
+    },
+    "columns": {
+      "a": [],
+      "v": []
+    },
+    "types": {
+      "a": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "empty",
+    "title": "no rows: the empty state",
+    "frame": {
+      "w": 360,
+      "h": 240
+    },
+    "hidden": [],
+    "expect": {
+      "state": "no-data",
+      "level": "full",
+      "legend": "none",
+      "struck": [],
+      "labels": "none",
+      "cells": 0,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "<b>bold?</b> & <i>title</i>",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "b",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            },
+            {
+              "field": "b"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        },
+        "title": {
+          "text": "<b>bold?</b> & <i>title</i>",
+          "subtitle": "<script>alert(0)</script>"
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "<script>alert(1)</script>",
+        "<script>alert(1)</script>",
+        "g2 & g3",
+        "g2 & g3",
+        "__proto__"
+      ],
+      "b": [
+        "<script>alert(1)</script>",
+        "a \"quoted\" name",
+        "__proto__",
+        "<img src=x onload=alert(1)>",
+        "'; DROP TABLE t; --"
+      ],
+      "v": [
+        30,
+        20,
+        25,
+        15,
+        10
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "b": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "hostile",
+    "title": "text that must stay text: markup, a quote, an ampersand, an event name, __proto__",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "rendered",
+      "level": "full",
+      "legend": "top",
+      "struck": [],
+      "labels": "none",
+      "cells": 5,
+      "dots": 0
+    }
+  },
+  {
+    "document": {
+      "display_name": "negative",
+      "renderer": {
+        "kind": "chart",
+        "version": "1"
+      },
+      "inputs": {
+        "result": {
+          "columns": [
+            {
+              "name": "a",
+              "type": "STRING",
+              "nullable": false
+            },
+            {
+              "name": "v",
+              "type": "INTEGER",
+              "nullable": true
+            }
+          ]
+        }
+      },
+      "config": {
+        "mark": {
+          "type": "treemap"
+        },
+        "encoding": {
+          "path": [
+            {
+              "field": "a"
+            }
+          ],
+          "size": {
+            "field": "v",
+            "aggregate": "sum",
+            "type": "quantitative"
+          }
+        }
+      }
+    },
+    "columns": {
+      "a": [
+        "A",
+        "B",
+        "C"
+      ],
+      "v": [
+        5,
+        -2,
+        3
+      ]
+    },
+    "types": {
+      "a": "STRING",
+      "v": "INTEGER"
+    },
+    "id": "refused",
+    "title": "a negative leaf refuses the chart (chart.rule.negative-part)",
+    "frame": {
+      "w": 480,
+      "h": 300
+    },
+    "hidden": [],
+    "expect": {
+      "state": "refused",
+      "level": "full",
+      "legend": "none",
+      "struck": [],
+      "labels": "none",
+      "cells": 0,
+      "dots": 0,
+      "code": "chart.rule.negative-part"
+    }
+  }
+]

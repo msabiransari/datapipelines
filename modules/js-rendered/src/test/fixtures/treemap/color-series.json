@@ -1,0 +1,156 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "colour by a field outside the path: two cells of one path split by it",
+  "document": {
+    "display_name": "color-series",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "c",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "c",
+          "type": "nominal",
+          "sort": [
+            "p",
+            "q",
+            "r"
+          ]
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 0",
+      "Group 1",
+      "Group 2"
+    ],
+    "b": [
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5",
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5",
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5"
+    ],
+    "c": [
+      "p",
+      "q",
+      "r",
+      "p",
+      "q",
+      "r",
+      "p",
+      "q",
+      "r",
+      "p",
+      "q",
+      "r",
+      "p",
+      "q",
+      "r",
+      "p",
+      "q",
+      "r"
+    ],
+    "v": [
+      4,
+      27,
+      50,
+      26,
+      49,
+      25,
+      48,
+      24,
+      47,
+      23,
+      46,
+      22,
+      45,
+      21,
+      44,
+      20,
+      43,
+      19
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "c": "STRING",
+    "v": "INTEGER"
+  }
+}

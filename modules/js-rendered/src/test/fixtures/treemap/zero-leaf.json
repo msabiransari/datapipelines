@@ -1,0 +1,62 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "a cell of 0 draws nothing and keeps its legend entry",
+  "document": {
+    "display_name": "zero-leaf",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "A",
+      "B",
+      "C"
+    ],
+    "v": [
+      5,
+      0,
+      3
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "INTEGER"
+  }
+}

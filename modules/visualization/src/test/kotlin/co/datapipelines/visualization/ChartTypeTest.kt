@@ -87,7 +87,25 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge")
+        ChartType.WIRE_VALUES shouldBe
+            listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+    }
+
+    @Test
+    fun `treemap has one to three levels, one value and optional series or shade under the area policy`() {
+        val channels = ChartType.TREEMAP.channels
+        channels.map { it.key } shouldBe listOf("path", "size", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels[0].node shouldBe ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))
+        channels[1].node shouldBe ChannelNode.Shape("value")
+        channels[2].node shouldBe
+            ChannelNode.OneOf(
+                listOf(
+                    ShapeAlternative("series", listOf("nominal", "ordinal")),
+                    ShapeAlternative("shade", listOf("quantitative")),
+                ),
+            )
+        ChartType.TREEMAP.policy shouldBe ChartMarkPolicy.AREA
     }
 
     @Test

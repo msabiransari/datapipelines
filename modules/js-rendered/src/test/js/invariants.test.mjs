@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
-import { violations, expectedBarMarks, expectedLineMarks, expectedScatterMarks, expectedPieMarks, expectedHeatmapMarks, expectedBoxMarks, expectedWaterfallMarks, expectedFunnelMarks, expectedGaugeMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
+import { violations, expectedBarMarks, expectedLineMarks, expectedScatterMarks, expectedPieMarks, expectedHeatmapMarks, expectedBoxMarks, expectedWaterfallMarks, expectedFunnelMarks, expectedGaugeMarks, expectedTreemapMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
 
 const R = engine();
 const FIXTURES = chartFixtures();
@@ -29,6 +29,7 @@ const ORACLE = {
   waterfall: { expected: expectedWaterfallMarks, held: fromPrimitives, what: "primitives" },
   funnel: { expected: expectedFunnelMarks, held: fromLookup, what: "index's marks" },
   gauge: { expected: expectedGaugeMarks, held: fromLookup, what: "index's marks" },
+  treemap: { expected: expectedTreemapMarks, held: fromLookup, what: "index's marks" },
 };
 
 test("I3's oracle table holds every wire of the fixtures", () => {
@@ -36,7 +37,7 @@ test("I3's oracle table holds every wire of the fixtures", () => {
 });
 
 /** Non-vacuity floors: the fixture set, the frames, and what the checker saw. */
-const FLOOR = { fixtures: 276, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
+const FLOOR = { fixtures: 297, widths: 35, heights: 5, texts: 50000, marks: 33000, levels: 3 };
 
 test("the invariant sweep is not vacuous (floors)", () => {
   assert.ok(FIXTURES.length >= FLOOR.fixtures, "chart fixtures: " + FIXTURES.length);

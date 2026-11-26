@@ -1144,6 +1144,128 @@
    "valid": false,
    "layer": "save",
    "code": "chart.measure.not_numeric"
+  },
+  "valid/treemap-plain.json": {
+   "valid": true
+  },
+  "valid/treemap-unit.json": {
+   "valid": true
+  },
+  "valid/treemap-labels.json": {
+   "valid": true
+  },
+  "valid/treemap-three-levels.json": {
+   "valid": true
+  },
+  "valid/treemap-color-series.json": {
+   "valid": true
+  },
+  "valid/treemap-shade.json": {
+   "valid": true
+  },
+  "invalid/treemap-path-empty.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/path"
+  },
+  "invalid/treemap-path-four.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/path"
+  },
+  "invalid/treemap-path-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/treemap-size-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/treemap-size-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/size"
+  },
+  "invalid/treemap-size-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/size"
+  },
+  "invalid/treemap-size-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/size"
+  },
+  "invalid/treemap-size-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/size"
+  },
+  "invalid/treemap-size-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/size"
+  },
+  "invalid/treemap-size-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/treemap-path-nullable.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/treemap-series-nullable.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.color.nullable"
+  },
+  "invalid/treemap-shade-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/treemap-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/treemap-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/treemap-labels-values.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/treemap-series-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/treemap-mark-unknown.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
   }
  }
 }

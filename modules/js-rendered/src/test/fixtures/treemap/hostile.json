@@ -1,0 +1,82 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "text that must stay text: markup, a quote, an ampersand, an event name, __proto__",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "<script>alert(1)</script>",
+      "<script>alert(1)</script>",
+      "g2 & g3",
+      "g2 & g3",
+      "__proto__"
+    ],
+    "b": [
+      "<script>alert(1)</script>",
+      "a \"quoted\" name",
+      "__proto__",
+      "<img src=x onload=alert(1)>",
+      "'; DROP TABLE t; --"
+    ],
+    "v": [
+      30,
+      20,
+      25,
+      15,
+      10
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}

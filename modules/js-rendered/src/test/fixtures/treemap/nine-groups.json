@@ -1,0 +1,121 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "nine first-level values: refused with chart.too_many_series",
+  "document": {
+    "display_name": "nine-groups",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 3",
+      "Group 4",
+      "Group 5",
+      "Group 6",
+      "Group 7",
+      "Group 8",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 3",
+      "Group 4",
+      "Group 5",
+      "Group 6",
+      "Group 7",
+      "Group 8"
+    ],
+    "b": [
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5",
+      "Leaf 6",
+      "Leaf 7",
+      "Leaf 8",
+      "Leaf 9",
+      "Leaf 10",
+      "Leaf 11",
+      "Leaf 12",
+      "Leaf 13",
+      "Leaf 14",
+      "Leaf 15",
+      "Leaf 16",
+      "Leaf 17"
+    ],
+    "v": [
+      4,
+      11,
+      18,
+      6,
+      13,
+      20,
+      8,
+      15,
+      22,
+      10,
+      17,
+      5,
+      12,
+      19,
+      7,
+      14,
+      21,
+      9
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "1e300, 1, 1e-300 and 5e-324 in one chart: the shares stay finite",
+  "document": {
+    "display_name": "edge-values",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "DOUBLE",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Huge",
+      "One",
+      "Tiny",
+      "Denormal"
+    ],
+    "v": [
+      1e+300,
+      1,
+      1e-300,
+      5e-324
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "DOUBLE"
+  }
+}
