@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: bar, line, area, scatter, pie, heatmap, box, waterfall, funnel.",
+      "description": "The family registry: bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -128,6 +128,9 @@
         },
         {
           "$ref": "funnel.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "gauge.schema.json#/$defs/config"
         }
       ]
     },

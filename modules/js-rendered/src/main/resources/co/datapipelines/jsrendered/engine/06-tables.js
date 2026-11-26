@@ -137,6 +137,7 @@
 
   var CAPS = {
     rows: { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9, every type: lane 985 D12 measured bar by S-CAP (re-taken in round 2 on the corrected engine); 20,000 passes aggregating to 60 marks and on the refusal path (every row its own group), which fails at 50,000 (longest drag frame 83.4 ms over 3.5 × D = 58.45 ms); F5 measures the line" },
+    "gauge.marks": { kind: "semantic", limit: 1, basis: "fixed", unit: "marks", note: "record §4.5 gauge and §4.9 semantic limits: one aggregate, one arc; not a measured cap (#1075)" },
     series: { kind: "semantic", limit: 8, basis: "fixed", unit: "series", note: "O-15: 8 series on any type with a legend" },
     "bar.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "non-null aggregated cells", note: "lane 977 S-CAP: bar 200 × 5 passed, 1,000 × 5 failed" },
     "line.points": { kind: "mark", limit: 2000, basis: "measured", unit: "points per series drawn in full, then thinned", note: "record §4.9: lane 989 D9 (d) by S-CAP (round 3), the smooth line in full at 2 series, two runs: 2,000 passes (longest drag frame 33.4 ms both runs), 5,000 fails (66.7 ms both runs, over 3.5 × D = 58.45 ms)" },

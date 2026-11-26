@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/gauge.schema.json",
+  "title": "datapipelines chart document, version 1, family gauge",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "gauge"
+            },
+            "target": {
+              "type": "number"
+            },
+            "bands": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "to",
+                  "tone"
+                ],
+                "properties": {
+                  "to": {
+                    "type": "number"
+                  },
+                  "tone": {
+                    "enum": [
+                      "good",
+                      "warn",
+                      "bad"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "encoding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value"
+          ],
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/value"
+            }
+          }
+        }
+      }
+    },
+    "value": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "required": [
+        "scale"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "scale": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "domain"
+          ],
+          "properties": {
+            "domain": {
+              "$ref": "skeleton.schema.json#/$defs/domain"
+            }
+          }
+        }
+      }
+    }
+  }
+}

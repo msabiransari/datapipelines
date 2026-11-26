@@ -87,7 +87,14 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge")
+    }
+
+    @Test
+    fun `gauge has one value channel under the line policy`() {
+        ChartType.GAUGE.channels.map { it.wire() } shouldBe
+            listOf(mapOf("key" to "value", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")))
+        ChartType.GAUGE.policy shouldBe ChartMarkPolicy.LINE
     }
 
     @Test

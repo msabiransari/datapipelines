@@ -65,6 +65,9 @@ enum class ChartType(
 
     /** Centred stage bars, one value per stage (§4.5; #1074). */
     FUNNEL("funnel", ChartChannelNodes.funnel, ChartMarkPolicy.AREA),
+
+    /** One aggregate on an authored range, drawn as an open arc (§4.5; #1075). */
+    GAUGE("gauge", listOf(ChartChannel("value", required = true, node = ChannelNode.Shape("value"))), ChartMarkPolicy.LINE),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
