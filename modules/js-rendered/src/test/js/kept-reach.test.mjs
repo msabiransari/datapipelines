@@ -2,7 +2,9 @@
 // frame. The rule's arithmetic is written HERE (asked, kept = the smaller of asked and a quarter of the frame's smaller
 // side, share = kept / asked) and the pictures must agree: the line family's dots at the minimal level (K1), the bare
 // frame's plot, dot and last value (K2), the hand and plot of the frames without axes (K3), and the reach kept at the
-// left where the axes are drawn (K4), where the dot keeps its size. Each test is falsified in its own plant test.
+// left where the axes are drawn (K4), where the dot keeps its size. Brief 1131 (the owner's ruling of 2026-11-24): the
+// minimal cartesian inset caps each side at a quarter of that side, min(max(edge, kept), side / 4), so a wide small
+// frame keeps the plot's height (K6). Each test is falsified in its own plant test.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, engineWith, chartFixtures, inputOf, testTypeKey, typeInputOf, typeFixtures } from "./engine.mjs";
@@ -268,4 +270,104 @@ test("K5: the rule is one function of the layout, read by every frame", () => {
   assert.deepEqual(k(6, 80, 24), { asked: 6, kept: 6 });
   assert.deepEqual(k(0, 80, 24), { asked: 0, kept: 0 });
   assert.deepEqual(k(20, 24, 400), { asked: 20, kept: 6 });
+});
+
+// ---------------------------------------------------------------- K6: the minimal per-side inset (#1131)
+
+/**
+ * The minimal level's per-side inset as this file computes it (the owner's ruling of 2026-11-24, #1131): the edge or
+ * the kept reach, whichever is larger, capped on each side at a quarter of that side — min(max(edge, kept), W/4)
+ * horizontally and min(max(edge, kept), H/4) vertically. The line family's asked reach is the end dot's radius and half
+ * its ring (16-lines.js): point + gap / 2.
+ */
+const inset = (e, kept, W, H) => ({ x: Math.min(Math.max(e, kept), W / 4), y: Math.min(Math.max(e, kept), H / 4) });
+
+/** The y-coordinates a stroked mark path stands on (its M, L and C ends), across every drawn series. */
+function markYs(prims) {
+  const ys = [], ARITY = { M: 2, L: 2, A: 3, C: 6, Z: 0 };
+  for (const p of prims) {
+    if (p.k !== "path" || p.role !== "mark" || p.stroke === null) continue;
+    for (let i = 0; i < p.d.length; ) {
+      const c = p.d[i], n = ARITY[c];
+      if (c === "M" || c === "L") ys.push(p.d[i + 2]);
+      else if (c === "C") ys.push(p.d[i + 6]);
+      i += 1 + n;
+    }
+  }
+  return ys;
+}
+
+/** The span of a picture's stroked mark y's (0 when the line family drew no line). */
+function ySpan(prims) {
+  const ys = markYs(prims);
+  return ys.length === 0 ? 0 : Math.max.apply(null, ys) - Math.min.apply(null, ys);
+}
+
+test("K6: at the minimal level each side's inset is capped at a quarter of that side, and the line and area are not flat", () => {
+  const R = engine(), F = chartFixtures();
+  // [W, H, text, wantX, wantY] — the edge is text / 2; kept is the default reach 5, never above the caps here.
+  const rows = [
+    [80, 24, 23, 11.5, 6], [80, 24, 32, 16, 6], [160, 24, 23, 11.5, 6], [160, 24, 32, 16, 6], [120, 40, 32, 16, 10], [120, 40, 23, 11.5, 10],
+  ];
+  let pictures = 0;
+  for (const wire of ["line", "area"]) for (const [W, H, text, wantX, wantY] of rows) {
+    const fx = F.find((f) => f.wire === wire && f.name === "one-series").fixture;
+    const r = R.render(inputOf(fx, W, H, { theme: themeOf(4, 2, text) }));
+    const where = `${wire}/one-series ${W}x${H} text ${text}`;
+    assert.equal(r.level, "minimal", where);
+    pictures++;
+    const p = r.index.plot;
+    assert.ok(near(p.x, wantX) && near(p.y, wantY), `${where}: plot ${JSON.stringify(p)}, want x ${wantX} y ${wantY}`);
+    assert.ok(p.w >= W / 2 - 0.011 && p.h >= H / 2 - 0.011, `${where}: plot ${JSON.stringify(p)} keeps less than half of a dimension`);
+    assert.ok(ySpan(r.primitives) > 1, `${where}: the marks' y span is ${r2(ySpan(r.primitives))} px (flat)`);
+    const v = violations(r.primitives, W, H).violations;
+    assert.equal(v.length, 0, `${where}: ${v[0] && v[0].inv} ${v[0] && v[0].what}`);
+  }
+  assert.ok(pictures === rows.length * 2, "pictures checked: " + pictures);
+});
+
+test("K6: the per-side inset is the rule's one function, and the same rule holds at the level boundary and every admitted extreme", () => {
+  const R = engine(), ins = (e, kept, W, H) => JSON.parse(JSON.stringify(R.cartesian.insets(e, kept, W, H)));
+  assert.deepEqual(ins(16, 5, 80, 24), { x: 16, y: 6 });
+  assert.deepEqual(ins(11.5, 5, 80, 24), { x: 11.5, y: 6 });
+  assert.deepEqual(ins(16, 5, 120, 40), { x: 16, y: 10 });
+  assert.deepEqual(ins(6, 5, 80, 24), { x: 6, y: 6 });
+  assert.deepEqual(ins(4, 20, 80, 200), { x: 20, y: 20 });
+  assert.deepEqual(ins(16, 5, 80, 80), { x: 16, y: 16 });
+  const F = chartFixtures();
+  let pictures = 0;
+  for (const wire of ["line", "area"]) for (const name of ["one-series", "negative"]) {
+    const fx = F.find((f) => f.wire === wire && f.name === name).fixture;
+    for (const point of [1, 16]) for (const gap of [0, 8]) for (const text of [8, 12, 32]) for (const [W, H] of [[80, 24], [160, 24], [120, 40], [81, 25], [100, 31], [200, 40]]) {
+      const r = R.render(inputOf(fx, W, H, { theme: themeOf(point, gap, text) }));
+      const where = `${wire}/${name} ${W}x${H} point ${point} gap ${gap} text ${text}`;
+      assert.equal(r.level, "minimal", where);
+      pictures++;
+      const p = r.index.plot;
+      assert.ok(p.w >= W / 2 - 0.011 && p.h >= H / 2 - 0.011, `${where}: plot ${JSON.stringify(p)}`);
+      const v = violations(r.primitives, W, H).violations;
+      assert.equal(v.length, 0, `${where}: ${v[0] && v[0].inv} ${v[0] && v[0].what}`);
+    }
+  }
+  assert.ok(pictures === 2 * 2 * 2 * 2 * 3 * 6, "pictures checked: " + pictures);
+  // The level boundary: the smallest frame draws at minimal; just below it nothing is drawn.
+  const fx = F.find((f) => f.wire === "line" && f.name === "one-series").fixture;
+  assert.equal(R.render(inputOf(fx, 80, 24)).state, "rendered");
+  assert.equal(R.render(inputOf(fx, 79, 24)).state, "too-small");
+  assert.equal(R.render(inputOf(fx, 80, 23)).state, "too-small");
+});
+
+test("K6 plants: the vertical cap taken off, and both caps set to H/4: each breaks K6", () => {
+  const want = (E) => {
+    const F = chartFixtures(), fx = F.find((f) => f.wire === "line" && f.name === "one-series").fixture;
+    return E.render(inputOf(fx, 80, 24, { theme: themeOf(4, 2, 32) })).index.plot;
+  };
+  const control = want(engine());
+  assert.ok(near(control.x, 16) && near(control.y, 6) && near(control.h, 12), "the control: " + JSON.stringify(control));
+  // Gate 1: with the vertical cap off (the old max(edge, reach)), the 80×24 case loses its 12 px plot.
+  const noY = engine((s) => plant(s, CARTESIAN, "y: Math.min(asked, H / 4)", "y: asked"));
+  assert.ok(near(want(noY).h, 1), "the vertical cap off leaves the plot one pixel high: " + JSON.stringify(want(noY)));
+  // Gate 2: with both caps set to H/4, the horizontal side no longer keeps its quarter, so x=16 fails.
+  const bothH = engine((s) => plant(s, CARTESIAN, "x: Math.min(asked, W / 4)", "x: Math.min(asked, H / 4)"));
+  assert.ok(near(want(bothH).x, 6), "both caps at H/4 lose the wide frame's x: " + JSON.stringify(want(bothH)));
 });
