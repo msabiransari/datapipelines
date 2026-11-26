@@ -27,6 +27,25 @@ function handed(f, w, h) {
 const target = (r, i) => ({ kind: "mark", id: r.index.marks[i].series, datum: i });
 const layer = r => I.modelOf(R, r, R.measure.measurer(null).fn);
 function permutations(a) { return a.length ? a.flatMap((x, i) => permutations(a.filter((_, j) => i !== j)).map(p => [x, ...p])) : [[]]; }
+// The area/label sweeps use integer-sum fixtures. Derive their leaves from rows, independently of cards or layout.
+const identity = (heading,name,series) => JSON.stringify([heading,name,series]);
+function rowLeaves(f) {
+  const e=f.document.config.encoding,parts=new Map();assert.equal(e.size.aggregate,"sum");assert.equal(e.size.format,undefined);
+  for(let i=0;i<f.columns[e.path[0].field].length;i++) {
+    const path=e.path.map(p=>f.columns[p.field][i]),color=e.color;
+    const raw=color&&color.type!=="quantitative"?f.columns[color.field][i]:path[0];
+    if(path.some(p=>p==null)||raw==null||f.columns[e.size.field][i]==null)continue;
+    const series=color&&color.type==="quantitative"?"cell":typeof raw+":"+String(raw);
+    const heading=path.length>1?path.slice(0,-1).join(" / "):null,name=String(path.at(-1)),key=identity(heading,name,series);
+    if(!parts.has(key))parts.set(key,{name,heading,series,value:0});
+    parts.get(key).value+=f.columns[e.size.field][i];
+  }
+  return parts;
+}
+const rowPart = (parts,entry) => {
+  const part=parts.get(identity(entry.card.heading,entry.card.rows[0].name,entry.series));
+  assert.ok(part,"the cell's identity is present in the fixture rows");return part;
+};
 
 test("D4 leaves: nulls and non-finite once, negative aggregates refuse, zeros have no cell", () => {
   const f = input([5, -2, 0, null, 3, 4], ["A", "A", "B", "C", null, null]);
@@ -105,7 +124,7 @@ test("D6/D7 cells reconstruct slots, conserve area, have the gap and rounded pai
   let checked=0, clamped=0;
   for(const name of ["plain","nested","deep","color-series","shade"]) for(const [w,h] of [[960,540],[480,320],[200,140],[80,24]]) {
     const {r,hand}=handed(FX[name],w,h), bs=cells(r), plot=hand.plot; let total=0, minimum=false;
-    const vals=r.index.marks.map(m=>Number(m.card.rows[0].value.replaceAll(",","").replace(" GB",""))), vmax=Math.max(...vals), sum=vals.reduce((s,v)=>s+Math.max(v/vmax,1e-12),0);
+    const parts=rowLeaves(FX[name]),vals=r.index.marks.map(m=>rowPart(parts,m).value),vmax=Math.max(...vals),sum=vals.reduce((s,v)=>s+Math.max(v/vmax,1e-12),0);
     bs.forEach((b,i)=>{ checked++; assert.equal(b.rx,2.5); assert.ok(b.fill.startsWith("--chart-")); assert.equal(b.datum,i);
       for(const k of ["x","y","w","h"])near(b[k]*100,Math.round(b[k]*100),1e-7);
       same(r.index.marks[i].box,{x:b.x,y:b.y,w:b.w,h:b.h},"paint and lookup share the rounded cell");
@@ -129,9 +148,11 @@ test("D8 whole labels inside their cell's half-room over the sweep and each opti
   let names=0,values=0,pictures=0;
   for(const name of ["plain","nested","deep","long-names","shade","unit-title"]) for(const option of [undefined,"none","names"]) for(const w of WIDTHS) for(const h of HEIGHTS) {
     const f=structuredClone(FX[name]); if(option)f.document.config.mark.labels=option;
-    const r=draw(f,w,h);pictures++;same(violations(r.primitives,w,h).violations,[]);
+    const r=draw(f,w,h),parts=rowLeaves(f);pictures++;same(violations(r.primitives,w,h).violations,[]);
     for(let i=0;i<r.primitives.length;i++){const p=r.primitives[i];if(p.k!=="group"||p.role!=="mark")continue;
-      const kids=r.primitives.slice(i+1,i+1+p.n),box=kids.find(k=>k.k==="rect"),ts=kids.filter(k=>k.k==="text");
+      const kids=r.primitives.slice(i+1,i+1+p.n),box=kids.find(k=>k.k==="rect"),ts=kids.filter(k=>k.k==="text"),part=rowPart(parts,r.index.marks[box.datum]);
+      assert.equal(p.label,part.name);if(ts[0])assert.equal(ts[0].text,part.name);
+      if(ts[1])assert.equal(ts[1].text,String(part.value)+(f.document.config.encoding.size.unit?" "+f.document.config.encoding.size.unit:""));
       if(option==="none"||r.level==="minimal")assert.equal(ts.length,0); if(option==="names")assert.ok(ts.length<=1);
       ts.forEach((t,j)=>{assert.notEqual(t.text,"");assert.ok(t.shown===null||t.shown===t.text);if(j===0)names++;else values++;
         const points=textBox(t);assert.ok(Math.min(...points.map(p=>p[0]))>=box.x+6-0.02);assert.ok(Math.max(...points.map(p=>p[0]))<=box.x+box.w-6+0.02);
