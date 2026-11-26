@@ -1,0 +1,241 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "three levels; the card heading joins the two levels above the leaf",
+  "document": {
+    "display_name": "deep",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "c",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          },
+          {
+            "field": "c"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      },
+      "title": {
+        "text": "Cost centres"
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0",
+      "Region 1",
+      "Region 2",
+      "Region 0"
+    ],
+    "b": [
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4",
+      "Site 0",
+      "Site 1",
+      "Site 2",
+      "Site 3",
+      "Site 4"
+    ],
+    "c": [
+      "Unit 0",
+      "Unit 1",
+      "Unit 2",
+      "Unit 3",
+      "Unit 4",
+      "Unit 5",
+      "Unit 6",
+      "Unit 7",
+      "Unit 8",
+      "Unit 9",
+      "Unit 10",
+      "Unit 11",
+      "Unit 12",
+      "Unit 13",
+      "Unit 14",
+      "Unit 15",
+      "Unit 16",
+      "Unit 17",
+      "Unit 18",
+      "Unit 19",
+      "Unit 20",
+      "Unit 21",
+      "Unit 22",
+      "Unit 23",
+      "Unit 24",
+      "Unit 25",
+      "Unit 26",
+      "Unit 27",
+      "Unit 28",
+      "Unit 29",
+      "Unit 30",
+      "Unit 31",
+      "Unit 32",
+      "Unit 33",
+      "Unit 34",
+      "Unit 35",
+      "Unit 36",
+      "Unit 37",
+      "Unit 38",
+      "Unit 39"
+    ],
+    "v": [
+      3,
+      32,
+      61,
+      29,
+      58,
+      26,
+      55,
+      23,
+      52,
+      20,
+      49,
+      17,
+      46,
+      14,
+      43,
+      11,
+      40,
+      8,
+      37,
+      5,
+      34,
+      63,
+      31,
+      60,
+      28,
+      57,
+      25,
+      54,
+      22,
+      51,
+      19,
+      48,
+      16,
+      45,
+      13,
+      42,
+      10,
+      39,
+      7,
+      36
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "c": "STRING",
+    "v": "INTEGER"
+  }
+}

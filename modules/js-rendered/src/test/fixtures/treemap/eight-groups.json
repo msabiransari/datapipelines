@@ -1,0 +1,139 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "eight first-level values: the series cap",
+  "document": {
+    "display_name": "eight-groups",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 3",
+      "Group 4",
+      "Group 5",
+      "Group 6",
+      "Group 7",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 3",
+      "Group 4",
+      "Group 5",
+      "Group 6",
+      "Group 7",
+      "Group 0",
+      "Group 1",
+      "Group 2",
+      "Group 3",
+      "Group 4",
+      "Group 5",
+      "Group 6",
+      "Group 7"
+    ],
+    "b": [
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5",
+      "Leaf 6",
+      "Leaf 7",
+      "Leaf 8",
+      "Leaf 9",
+      "Leaf 10",
+      "Leaf 11",
+      "Leaf 12",
+      "Leaf 13",
+      "Leaf 14",
+      "Leaf 15",
+      "Leaf 16",
+      "Leaf 17",
+      "Leaf 18",
+      "Leaf 19",
+      "Leaf 20",
+      "Leaf 21",
+      "Leaf 22",
+      "Leaf 23"
+    ],
+    "v": [
+      3,
+      16,
+      29,
+      13,
+      26,
+      10,
+      23,
+      7,
+      20,
+      4,
+      17,
+      30,
+      14,
+      27,
+      11,
+      24,
+      8,
+      21,
+      5,
+      18,
+      31,
+      15,
+      28,
+      12
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}

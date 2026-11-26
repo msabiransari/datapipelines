@@ -26,7 +26,7 @@ test("the test types' sweep is not vacuous (floors), and the product's fixture s
   // stacks beyond the number range; brief 1062's thirty-five scatter fixtures).
   const product = chartFixtures();
   assert.equal(product.filter((f) => f.wire.startsWith("test_") || f.wire === "_types").length, 0);
-  assert.equal(product.length, 156);
+  assert.equal(product.length, 297);
 });
 
 const seen = { pictures: 0, rendered: 0, texts: 0, marks: 0, levels: new Set(), states: new Set() };

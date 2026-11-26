@@ -1,5 +1,5 @@
 // Brief 1051 A.5 (D7): the frame `bare` over test_bare. The fit rule of the last value is computed HERE from the
-// tests' fixed-width measurer (SIX) and the theme's numbers (the inset max(edge, reach), the gap directGap, one text
+// tests' fixed-width measurer (SIX) and the theme's numbers (the inset max(edge, kept reach), the gap max(directGap, kept reach), one text
 // line lineHeight × the text size), never read from the engine, and the picture must agree: the value's text where the
 // rule holds and not where it does not, both outcomes in the table. Then the rule's borders on the pure function, the
 // four cases with no value to write, and the chrome the frame never draws. G5 and G6 are falsified here.
@@ -27,7 +27,7 @@ function input(name, last, text) {
 
 /** The rule as the test computes it: [holds, its numbers]. */
 function rule(W, H, value, text = 12) {
-  const point = 4, gapToken = 2, reach = point - 0.5 + gapToken / 2, inset = Math.max(EDGE_EM * text, reach), gap = GAP_EM * text, line = LINE * text, w = SIX(value);
+  const point = 4, gapToken = 2, reach = Math.min(point - 0.5 + gapToken / 2, Math.min(W, H) / 4), inset = Math.max(EDGE_EM * text, reach), gap = Math.max(GAP_EM * text, reach), line = LINE * text, w = SIX(value);
   return [H >= line && W - 2 * inset - gap - w >= W / 2, { inset, gap, line, w }];
 }
 

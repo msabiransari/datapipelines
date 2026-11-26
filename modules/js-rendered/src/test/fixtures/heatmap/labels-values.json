@@ -1,0 +1,176 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "labels values: the numbers that fit",
+  "document": {
+    "display_name": "labels-values",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap",
+        "labels": "values"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c06",
+      "c07",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c06",
+      "c07",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c06",
+      "c07",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c06",
+      "c07",
+      "c01",
+      "c02",
+      "c03",
+      "c04",
+      "c05",
+      "c06",
+      "c07"
+    ],
+    "y": [
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r01",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r02",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r03",
+      "r04",
+      "r04",
+      "r04",
+      "r04",
+      "r04",
+      "r04",
+      "r04",
+      "r05",
+      "r05",
+      "r05",
+      "r05",
+      "r05",
+      "r05",
+      "r05"
+    ],
+    "v": [
+      1234.5,
+      1334.5,
+      1434.5,
+      1534.5,
+      1634.5,
+      1734.5,
+      1834.5,
+      2469,
+      2569,
+      2669,
+      2769,
+      2869,
+      2969,
+      3069,
+      3703.5,
+      3803.5,
+      3903.5,
+      4003.5,
+      4103.5,
+      4203.5,
+      4303.5,
+      4938,
+      5038,
+      5138,
+      5238,
+      5338,
+      5438,
+      5538,
+      6172.5,
+      6272.5,
+      6372.5,
+      6472.5,
+      6572.5,
+      6672.5,
+      6772.5
+    ]
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

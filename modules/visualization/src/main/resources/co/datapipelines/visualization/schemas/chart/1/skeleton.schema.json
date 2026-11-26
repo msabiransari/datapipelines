@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: one entry per v1 family schema (enums.md §63, ChartType): bar, line, area, scatter.",
+      "description": "The family registry: bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -113,6 +113,27 @@
         },
         {
           "$ref": "scatter.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "pie.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "heatmap.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "box.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "waterfall.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "funnel.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "gauge.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "treemap.schema.json#/$defs/config"
         }
       ]
     },

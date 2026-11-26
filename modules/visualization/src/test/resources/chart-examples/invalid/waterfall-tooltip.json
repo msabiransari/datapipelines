@@ -1,0 +1,68 @@
+{
+  "display_name": "Running changes",
+  "description": "Opening, changes and closing total.",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "sales": {
+      "columns": [
+        {
+          "name": "region",
+          "type": "STRING"
+        },
+        {
+          "name": "day",
+          "type": "DATE"
+        },
+        {
+          "name": "amount",
+          "type": "DECIMAL",
+          "nullable": true
+        },
+        {
+          "name": "units",
+          "type": "INTEGER"
+        },
+        {
+          "name": "weight",
+          "type": "DECIMAL",
+          "nullable": true
+        },
+        {
+          "name": "margin",
+          "type": "DECIMAL",
+          "nullable": true
+        },
+        {
+          "name": "segment",
+          "type": "STRING"
+        },
+        {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "waterfall"
+    },
+    "encoding": {
+      "x": {
+        "field": "region",
+        "type": "nominal",
+        "sort": null
+      },
+      "y": {
+        "field": "amount",
+        "type": "quantitative",
+        "aggregate": "sum"
+      },
+      "tooltip": []
+    }
+  }
+}

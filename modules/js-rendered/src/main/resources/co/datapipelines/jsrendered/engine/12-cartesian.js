@@ -10,7 +10,8 @@
 // extent gives [smallest positive, largest] or [null, null]); `x` (a continuous x axis in place of the bands: {kind:
 // "time" | "linear" | "log", lo, hi (seconds for time; for log the smallest positive and the largest), gran (time),
 // format, domain (linear, log), zero (linear)}); `right` (px kept right of the plot for the end labels); `reach` (px a
-// mark reaches beyond its point: the end dot and its ring), kept inside the frame.
+// mark reaches beyond its point: the end dot and its ring), kept inside the frame; without axes, at most a quarter
+// of the frame's smaller side is kept and the template draws the dot and ring smaller by kept / asked (L10, #1128).
 // The other axis forms (brief 1051 D2 to D6; record §9 G3), each asked for by an OPTIONAL member; a layout part without
 // it takes the code path it took before: `rows` ([{text, under}], two category axes: a second list of categories down
 // y in place of the value axis; vertical only, never beside x, log, second, endLabels or a right room); `second`
@@ -141,6 +142,15 @@
     return typeof r === "number" && r > 0 ? r : 0;
   }
 
+  /**
+   * What a frame with no axes keeps of a reach (look contract §4.5, L10; #1128): {asked, kept}, kept never more than a
+   * quarter of the frame's smaller side. The frame insets its plot by kept and hands both numbers to the template, which
+   * draws its dot and the dot's ring smaller by kept / asked: the dot is never left out and never leaves the frame.
+   */
+  function keepOf(asked, W, H) {
+    return { asked: asked, kept: Math.min(asked, Math.min(W, H) / 4) };
+  }
+
   /** The room a layout part asks for inside the plot's edges (pad(h), px), or null when it has no `pad`; a bad value throws. */
   function padOf(L, h) {
     if (!has(L.pad)) return null;
@@ -206,7 +216,7 @@
       var plotBottom = b.bottom - bandTitleH - reserve - extra;
       var plotH = Math.max(1, plotBottom - plotTop);
       ax = valueAxisOf(lvl, L, ext, plotH, L.endLabels === null ? 0 : h.boxH(h.small) + look("valueLabelGap") * h.small);
-      var plotX = b.left + titleCol + widestOf(h, ax.texts, s) + tg;
+      var plotX = Math.max(b.left + titleCol + widestOf(h, ax.texts, s) + tg, reach);
       plot = { x: r2(plotX), y: r2(plotTop), w: r2(Math.max(1, b.right - right - plotX)), h: r2(plotH) };
       kept = keptOf(L, h, plot);
       scale = kept === null ? A.scaleOf(ax, plot.y + plot.h, plot.y) : A.scaleOf(ax, plot.y + plot.h - kept.y, plot.y + kept.y);
@@ -465,11 +475,13 @@
    */
   function minimal(h, W, H, e, L, visible, right) {
     checkForms(L);
-    var inset = Math.max(e, reachOf(L, h)), room = typeof right === "number" && right > 0 ? right : 0;
+    var keep = keepOf(reachOf(L, h), W, H);
+    var inset = Math.max(e, keep.kept), room = typeof right === "number" && right > 0 ? right : 0;
     var plot = { x: r2(inset), y: r2(inset), w: r2(Math.max(1, W - 2 * inset - room)), h: r2(Math.max(1, H - 2 * inset)) };
     var n = L.bands.length, len = L.vertical ? plot.h : plot.w;
     var step = (L.vertical ? plot.w : plot.h) / Math.max(1, n);
     var out = { plot: plot, value: null, band: { start: L.vertical ? plot.x : plot.y, step: step, n: n }, x: null, under: [], over: [], axes: [], corner: "clear", rotated: false, labelTop: plot.y + plot.h, boxTop: plot.y };
+    out.reach = keep;
     if (has(L.rows)) {
       out.rows = { start: plot.y, step: plot.h / Math.max(1, L.rows.length), n: L.rows.length };
       return out;
@@ -537,6 +549,7 @@
     var hand = { plot: geo.plot, value: geo.value, band: geo.band, x: geo.x };
     if (has(geo.rows)) hand.rows = geo.rows;
     if (has(geo.pad)) hand.pad = geo.pad;
+    if (has(geo.reach)) hand.reach = geo.reach;
     if (has(geo.value2)) hand.value2 = { lo: geo.value2.lo, hi: geo.value2.hi, ticks: geo.value2.ticks, scale: geo.value2.scale, log: geo.value2.log };
     return hand;
   }
@@ -571,5 +584,5 @@
     },
   };
 
-  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, hand: handOf };
+  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, keep: keepOf, hand: handOf };
 })(JsRendered);

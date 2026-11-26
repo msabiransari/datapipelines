@@ -500,6 +500,48 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SCATTER_CONFIG))
                     body.toString()
                 },
+                "pie" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(PIE_CONFIG))
+                    body.toString()
+                },
+                "heatmap" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Heatmap")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
+                    body.toString()
+                },
+                "box" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Box")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(BOX_CONFIG))
+                    body.toString()
+                },
+                "waterfall" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Waterfall")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(WATERFALL_CONFIG))
+                    body.toString()
+                },
+                "funnel" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Funnel")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(FUNNEL_CONFIG))
+                    body.toString()
+                },
+                "gauge" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Gauge")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(GAUGE_CONFIG))
+                    body.toString()
+                },
+                "treemap" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Treemap")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(TREEMAP_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -511,11 +553,46 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
 
+        private const val TREEMAP_CONFIG =
+            """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],""" +
+                """"size":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+
+        /** Gauge on the board's INTEGER y: 10 + 20 + 30 + 40 = 100 of 200 (#1075). */
+        const val GAUGE_CONFIG =
+            """{"mark":{"type":"gauge"},"encoding":{"value":{"field":"y","type":"quantitative",""" +
+                """"aggregate":"sum","scale":{"domain":[0,200]}}}}"""
+
+        /** Heatmap: x and y bands, summed y as a shade on the same INTEGER delivery. */
+        const val HEATMAP_CONFIG =
+            """{"mark":{"type":"heatmap"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
+                """"y":{"field":"y","type":"nominal","sort":null},""" +
+                """"color":{"field":"y","type":"quantitative","aggregate":"sum","scale":"sequential"}}}"""
+
+        /** Box over the same INTEGER columns, one distribution per x category (brief 1072 A.7). */
+        const val BOX_CONFIG =
+            """{"mark":{"type":"box"},"encoding":{"x":{"field":"x","type":"nominal","sort":"ascending"},""" +
+                """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
+
+        /** Waterfall over the board's category and summed INTEGER measure (#1073). */
+        const val WATERFALL_CONFIG =
+            """{"mark":{"type":"waterfall"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
+                """"y":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+
+        /** Funnel over the board's non-null category and summed INTEGER measure (#1074). */
+        const val FUNNEL_CONFIG =
+            """{"mark":{"type":"funnel"},"encoding":{"stage":{"field":"x","type":"nominal","sort":null},""" +
+                """"value":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 
         /** Scatter's config over the same two INTEGER columns: a point per row, no aggregate (brief 1062 A.8). */
         const val SCATTER_CONFIG =
             """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
+
+        /** Pie over the board's INTEGER x categories and summed y measure (brief 1068 A.8). */
+        const val PIE_CONFIG =
+            """{"mark":{"type":"pie"},"encoding":{"theta":{"field":"y","type":"quantitative","aggregate":"sum"},""" +
+                """"color":{"field":"x","type":"nominal","sort":null}}}"""
     }
 }

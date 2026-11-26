@@ -209,8 +209,8 @@ test("the input is closed: an unknown member, an unknown type or a wrong frame t
 });
 
 test("the registry: types() lists bar, line, area and scatter with their descriptors; a second registration or a wrong member throws", () => {
-  same(R.types().map((t) => t.name), ["bar", "line", "area", "scatter"]);
-  const keys = { bar: ["x", "y", "color", "tooltip"], line: ["x", "y", "color", "tooltip"], area: ["x", "y", "color", "tooltip"], scatter: ["x", "y", "color", "size", "tooltip"] };
+  same(R.types().map((t) => t.name), ["bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap"]);
+  const keys = { funnel: ["stage", "value"], gauge: ["value"], waterfall: ["x", "y"], box: ["x", "y"], bar: ["x", "y", "color", "tooltip"], line: ["x", "y", "color", "tooltip"], area: ["x", "y", "color", "tooltip"], scatter: ["x", "y", "color", "size", "tooltip"], pie: ["theta", "color"], heatmap: ["x", "y", "color"], treemap: ["path", "size", "color"] };
   for (const t of R.types()) same(t.channels.map((c) => c.key), keys[t.name]);
   const ok = { channels: [], model: () => null, marks: () => [], axes: "cartesian" };
   assert.throws(() => R.type("bar", ok), /already registered/);

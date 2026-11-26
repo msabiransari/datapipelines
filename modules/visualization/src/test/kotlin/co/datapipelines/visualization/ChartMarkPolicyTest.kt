@@ -42,6 +42,13 @@ class ChartMarkPolicyTest {
                 "line" to ChartMarkPolicy.LINE,
                 "area" to ChartMarkPolicy.AREA,
                 "scatter" to ChartMarkPolicy.POINT,
+                "pie" to ChartMarkPolicy.AREA,
+                "heatmap" to ChartMarkPolicy.BAR,
+                "box" to ChartMarkPolicy.POINT,
+                "waterfall" to ChartMarkPolicy.AREA,
+                "funnel" to ChartMarkPolicy.AREA,
+                "gauge" to ChartMarkPolicy.LINE,
+                "treemap" to ChartMarkPolicy.AREA,
             )
     }
 

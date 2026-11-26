@@ -1,0 +1,874 @@
+[
+ {
+  "id": "bridge",
+  "title": "Opening, changes and total",
+  "document": {
+   "display_name": "basic",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "USD"
+     }
+    },
+    "title": {
+     "text": "Cash bridge"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Start",
+    "Sales",
+    "Refunds",
+    "Costs",
+    "Tax",
+    "Bonus"
+   ],
+   "v": [
+    100,
+    40,
+    -15,
+    -30,
+    -12,
+    22
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "no-total",
+  "title": "no-total",
+  "document": {
+   "display_name": "no-total",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall",
+     "total": "none"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Start",
+    "Sales",
+    "Refunds",
+    "Costs"
+   ],
+   "v": [
+    100,
+    40,
+    -15,
+    -30
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "negative",
+  "title": "negative",
+  "document": {
+   "display_name": "negative-cross",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Open",
+    "A",
+    "B",
+    "C",
+    "D"
+   ],
+   "v": [
+    -50,
+    30,
+    40,
+    -90,
+    20
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "labels-none",
+  "title": "labels-none",
+  "document": {
+   "display_name": "labels-none",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall",
+     "labels": "none"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Start",
+    "Sales",
+    "Refunds"
+   ],
+   "v": [
+    100,
+    40,
+    -15
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "zero-steps",
+  "title": "zero-steps",
+  "document": {
+   "display_name": "zero-steps",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DOUBLE",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Open",
+    "Flat",
+    "Tiny",
+    "Down",
+    "Flat2"
+   ],
+   "v": [
+    100,
+    0,
+    0.4,
+    -50,
+    0
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "fifty",
+  "title": "fifty",
+  "document": {
+   "display_name": "fifty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "C0",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8",
+    "C9",
+    "C10",
+    "C11",
+    "C12",
+    "C13",
+    "C14",
+    "C15",
+    "C16",
+    "C17",
+    "C18",
+    "C19",
+    "C20",
+    "C21",
+    "C22",
+    "C23",
+    "C24",
+    "C25",
+    "C26",
+    "C27",
+    "C28",
+    "C29",
+    "C30",
+    "C31",
+    "C32",
+    "C33",
+    "C34",
+    "C35",
+    "C36",
+    "C37",
+    "C38",
+    "C39",
+    "C40",
+    "C41",
+    "C42",
+    "C43",
+    "C44",
+    "C45",
+    "C46",
+    "C47",
+    "C48"
+   ],
+   "v": [
+    500,
+    12,
+    19,
+    -26,
+    10,
+    17,
+    -24,
+    8,
+    15,
+    -22,
+    6,
+    13,
+    -20,
+    27,
+    11,
+    -18,
+    25,
+    9,
+    -16,
+    23,
+    7,
+    -14,
+    21,
+    5,
+    -12,
+    19,
+    26,
+    -10,
+    17,
+    24,
+    -8,
+    15,
+    22,
+    -6,
+    13,
+    20,
+    -27,
+    11,
+    18,
+    -25,
+    9,
+    16,
+    -23,
+    7,
+    14,
+    -21,
+    5,
+    12,
+    -19
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 640,
+   "h": 320
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "hostile",
+  "title": "hostile",
+  "document": {
+   "display_name": "hostile",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    },
+    "title": {
+     "text": "<b>bold? <img src=x onerror=alert(1)>",
+     "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "\" onmouseover=\"x"
+   ],
+   "v": [
+    5,
+    3,
+    -2,
+    4,
+    6
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "empty",
+  "title": "empty",
+  "document": {
+   "display_name": "empty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  },
+  "study": null
+ },
+ {
+  "id": "refused",
+  "title": "refused",
+  "document": {
+   "display_name": "basic",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "waterfall"
+    },
+    "encoding": {
+     "x": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "USD"
+     }
+    },
+    "title": {
+     "text": "Cash bridge"
+    }
+   }
+  },
+  "columns": {
+   "s": [
+    "Step 0",
+    "Step 1",
+    "Step 2",
+    "Step 3",
+    "Step 4",
+    "Step 5",
+    "Step 6",
+    "Step 7",
+    "Step 8",
+    "Step 9",
+    "Step 10",
+    "Step 11",
+    "Step 12",
+    "Step 13",
+    "Step 14",
+    "Step 15",
+    "Step 16",
+    "Step 17",
+    "Step 18",
+    "Step 19",
+    "Step 20",
+    "Step 21",
+    "Step 22",
+    "Step 23",
+    "Step 24",
+    "Step 25",
+    "Step 26",
+    "Step 27",
+    "Step 28",
+    "Step 29",
+    "Step 30",
+    "Step 31",
+    "Step 32",
+    "Step 33",
+    "Step 34",
+    "Step 35",
+    "Step 36",
+    "Step 37",
+    "Step 38",
+    "Step 39",
+    "Step 40",
+    "Step 41",
+    "Step 42",
+    "Step 43",
+    "Step 44",
+    "Step 45",
+    "Step 46",
+    "Step 47",
+    "Step 48",
+    "Step 49",
+    "Step 50"
+   ],
+   "v": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+   ]
+  },
+  "types": {
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0,
+   "code": "chart.too_many_marks"
+  },
+  "study": null
+ }
+]

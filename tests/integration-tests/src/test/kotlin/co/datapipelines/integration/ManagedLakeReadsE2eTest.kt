@@ -502,9 +502,7 @@ class ManagedLakeReadsE2eTest {
             countOn(portOf(held)) shouldBe ICEBERG_ROWS
             val recorder = held.getBean(ScheduledJobsSchedulerE2eTest.TickRecorder::class.java)
             ParkedSiblings(listOfNotNull(contextA, instanceB, instanceF)).use {
-                insertOwnerPhase(recorder, capture)
-                keyWaiterPhase(recorder, capture)
-                oneBudgetPhase(capture)
+                heldTickPhases(held, recorder, capture)
             }
         } finally {
             logger.detachAppender(capture)
@@ -513,13 +511,30 @@ class ManagedLakeReadsE2eTest {
         }
     }
 
+    private fun heldTickPhases(
+        held: ApplicationContext,
+        recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
+        capture: SnapshotListAppender,
+    ) {
+        ManagedLakeReadsHeldLockDiagnosis(APP_G, ManagedLakeReadsHeldLockDiagnosis.identify(held), held) {
+            recorder.countOf(FRESHNESS_JOB)
+        }.use { diagnosis ->
+            ParkedSiblings(listOf(held)).use { park -> insertOwnerPhase(recorder, capture, diagnosis, park) }
+            ParkedSiblings(listOf(held)).use { park -> keyWaiterPhase(recorder, capture, diagnosis, park) }
+            ParkedSiblings(listOf(held)).use { park -> oneBudgetPhase(recorder, capture, diagnosis, park) }
+        }
+    }
+
     /** Phase 1 of G: G owns the key and the INSERT; both of the tick's steps are cancelled at the bound. */
     @Suppress("LongMethod") // one held-lock timeline on the real scheduler is the witness; its instants are asserted together
     private fun insertOwnerPhase(
         recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
         capture: SnapshotListAppender,
+        diagnosis: ManagedLakeReadsHeldLockDiagnosis,
+        park: ParkedSiblings,
     ) {
         val phase = "phase 1 (INSERT owner, instance G)"
+        diagnosis.beforeLocks()
         lateinit var lacking: UUID
         fixture.metadata { lock ->
             lock.autoCommit = false
@@ -531,6 +546,7 @@ class ManagedLakeReadsE2eTest {
                 val mark = capture.events().size
                 lacking = sqlWorkspace("g841_owner")
                 fixture.metadata { watcher ->
+                    startHeldTick(watcher, recorder, diagnosis, park, phase)
                     val read =
                         cancelledWhileHeld(
                             watcher,
@@ -538,9 +554,17 @@ class ManagedLakeReadsE2eTest {
                             CATALOG_READ_TEXT,
                             "lake_tables_managed",
                             "AccessExclusiveLock",
+                            diagnosis,
                         )
                     val regrant =
-                        cancelledWhileHeld(watcher, "$phase: the regrant INSERT", REGRANT_TEXT, "datasource_workspaces", "ShareLock") {
+                        cancelledWhileHeld(
+                            watcher,
+                            "$phase: the regrant INSERT",
+                            REGRANT_TEXT,
+                            "datasource_workspaces",
+                            "ShareLock",
+                            diagnosis,
+                        ) {
                             withClue("$phase: G's queued INSERT runs under G's own hold of the datasource key") {
                                 lakeKeyLocks(watcher, granted = true, application = APP_G) shouldBe 1
                             }
@@ -614,8 +638,11 @@ class ManagedLakeReadsE2eTest {
     private fun keyWaiterPhase(
         recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
         capture: SnapshotListAppender,
+        diagnosis: ManagedLakeReadsHeldLockDiagnosis,
+        park: ParkedSiblings,
     ) {
         val phase = "phase 2 (key waiter, instance G)"
+        diagnosis.beforeLocks()
         lateinit var lacking: UUID
         fixture.metadata { key ->
             key.autoCommit = false
@@ -624,12 +651,15 @@ class ManagedLakeReadsE2eTest {
                 val mark = capture.events().size
                 lacking = sqlWorkspace("g841_waiter")
                 fixture.metadata { watcher ->
-                    awaitTrue(
-                        Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS),
+                    startHeldTick(watcher, recorder, diagnosis, park, phase)
+                    diagnosis.await(
+                        watcher,
+                        Duration.ofSeconds(BOUND_SLACK_SECONDS),
                         "$phase: G queuing on the key",
-                    ) {
-                        lakeKeyLocks(watcher, granted = false, application = APP_G) > 0
-                    }
+                        condition = {
+                            lakeKeyLocks(watcher, granted = false, application = APP_G) > 0
+                        },
+                    )
                     val queuedAt = System.nanoTime()
                     val reaps = recorder.countOf(REAP_JOB)
                     var insertSent = false
@@ -691,8 +721,14 @@ class ManagedLakeReadsE2eTest {
      * [STEP_ALLOWANCE_MILLIS] (two bounds back to back would be ~[KEY_HOLD_MILLIS] + 5 000 ms).
      */
     @Suppress("LongMethod") // one held-lock timeline on the real scheduler is the witness; its instants are asserted together
-    private fun oneBudgetPhase(capture: SnapshotListAppender) {
+    private fun oneBudgetPhase(
+        recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
+        capture: SnapshotListAppender,
+        diagnosis: ManagedLakeReadsHeldLockDiagnosis,
+        park: ParkedSiblings,
+    ) {
         val phase = "phase 3 (one budget, instance G)"
+        diagnosis.beforeLocks()
         lateinit var lacking: UUID
         fixture.metadata { table ->
             table.autoCommit = false
@@ -705,21 +741,25 @@ class ManagedLakeReadsE2eTest {
                             key.autoCommit = false
                             holdLakeKey(key)
                             lacking = sqlWorkspace("g841_budget")
-                            awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + BOUND_SLACK_SECONDS), "$phase: G queuing on the key") {
-                                lakeKeyLocks(watcher, granted = false, application = APP_G) > 0
-                            }
+                            startHeldTick(watcher, recorder, diagnosis, park, phase)
+                            diagnosis.await(
+                                watcher,
+                                Duration.ofSeconds(BOUND_SLACK_SECONDS),
+                                "$phase: G queuing on the key",
+                                condition = { lakeKeyLocks(watcher, granted = false, application = APP_G) > 0 },
+                            )
                             System.nanoTime().also {
                                 Thread.sleep(KEY_HOLD_MILLIS)
                                 key.rollback()
                             }
                         }
-                    awaitTrue(
-                        Duration.ofSeconds(FRESHNESS_BOUND_SECONDS),
-                        "$phase: G's INSERT queuing on the table once the key was released",
-                    ) {
-                        waitingOnLock(watcher, REGRANT_TEXT)
-                    }
                     val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
+                    diagnosis.await(
+                        watcher,
+                        Duration.ofNanos((deadline - System.nanoTime()).coerceAtLeast(0)),
+                        "$phase: G's INSERT queuing on the table once the key was released",
+                        REGRANT_TEXT,
+                    )
                     while (System.nanoTime() < deadline && waitingOnLock(watcher, REGRANT_TEXT)) Thread.sleep(WATCH_MILLIS)
                     val step = Duration.ofNanos(System.nanoTime() - queuedAt).toMillis()
                     awaitTrue(Duration.ofSeconds(BOUND_SLACK_SECONDS), "$phase: G's cancellation WARN") {
@@ -757,6 +797,33 @@ class ManagedLakeReadsE2eTest {
             lacking in
                 grantedWorkspaces()
         }
+    }
+
+    /** #1099: the acknowledged park precedes the locks; a baseline and actual start precede the statement observation. */
+    private fun startHeldTick(
+        watcher: Connection,
+        recorder: ScheduledJobsSchedulerE2eTest.TickRecorder,
+        diagnosis: ManagedLakeReadsHeldLockDiagnosis,
+        park: ParkedSiblings,
+        phase: String,
+    ) {
+        diagnosis.beginWindow(watcher)
+        val baseline = recorder.countOf(FRESHNESS_JOB)
+        // A chosen observation deadline, not a production whole-job maximum: other jobs may queue ahead of the tick.
+        val operationSeconds = 25L
+        val budget = Duration.ofSeconds(operationSeconds + BOUND_SLACK_SECONDS)
+        val openedAt = System.nanoTime()
+        park.close()
+        diagnosis.await(
+            watcher,
+            budget,
+            "$phase: the freshness tick did not start within ${budget.seconds} s: ticks_started_since_locks=0",
+            condition = { recorder.countOf(FRESHNESS_JOB) > baseline },
+        )
+        println(
+            "HELD_LOCK_TICK_STARTED phase=$phase window_open_nano=$openedAt start_observed_nano=${System.nanoTime()} " +
+                "baseline=$baseline ticks=${recorder.countOf(FRESHNESS_JOB)}",
+        )
     }
 
     /**
@@ -1242,7 +1309,15 @@ class ManagedLakeReadsE2eTest {
                 isDaemon = true
                 start()
             }
-        awaitTrue(Duration.ofSeconds(BUILD_READ_BOUND_SECONDS)) { waitingOnLock(watcher, CATALOG_READ_TEXT, APP_833) }
+        ManagedLakeReadsHeldLockDiagnosis(APP_833, build.threadId()).use { diagnosis ->
+            diagnosis.beginWindow(watcher)
+            diagnosis.await(
+                watcher,
+                Duration.ofSeconds(BUILD_READ_BOUND_SECONDS),
+                "the build catalog read queuing on lake_tables_managed",
+                CATALOG_READ_TEXT,
+            )
+        }
         val queuedAt = System.nanoTime()
         val servedWhileQueued = countOnLease(lease)
         val countedAt = System.nanoTime()
@@ -1465,11 +1540,15 @@ class ManagedLakeReadsE2eTest {
         instanceText: String,
         table: String,
         mode: String,
+        diagnosis: ManagedLakeReadsHeldLockDiagnosis,
         whileQueued: () -> Unit = {},
     ): Long {
-        awaitTrue(Duration.ofSeconds(HELD_TICK_SECONDS + FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS), "$what queuing on $table") {
-            waitingOnLock(watcher, instanceText)
-        }
+        diagnosis.await(
+            watcher,
+            Duration.ofSeconds(BOUND_SLACK_SECONDS),
+            "$what queuing on $table",
+            instanceText,
+        )
         val queuedAt = System.nanoTime()
         whileQueued()
         val deadline = queuedAt + Duration.ofSeconds(FRESHNESS_BOUND_SECONDS + BOUND_SLACK_SECONDS).toNanos()
@@ -1479,6 +1558,7 @@ class ManagedLakeReadsE2eTest {
             waitingOnLock(watcher, instanceText) shouldBe false
         }
         withClue("$what left the waiters only because the lock on $table went") { lockGranted(watcher, table, mode) shouldBe true }
+        println("HELD_LOCK_CANCELLED what=$what queued_nano=$queuedAt gone_nano=$goneAt")
         return Duration.ofNanos(goneAt - queuedAt).toMillis()
     }
 

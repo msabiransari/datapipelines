@@ -66,7 +66,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area` or `scatter` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -192,16 +192,71 @@ fourth its colour (`color` as a shade, as the bar's), or `color` can split the p
   per group) or pick another type. A row with a null `x`, `y` or size is not drawn.
 - `mark_count` counts the rows drawn.
 
+**Pie?** Parts of a whole, at most eight slices; default `inner: 0.6` is a ring, `inner: 0` a disc.
+With many parts prefer a bar. The smallest parts fold into Other, last. Negative aggregates refuse the chart.
+Labels stay inside slices where they fit; switching a slice off re-proportions the rest. Options: dashboards §2.1.2.
+
+```json
+"config": {"mark": {"type": "pie"}, "encoding": {
+  "theta": {"field": "amount", "type": "quantitative", "aggregate": "sum"},
+  "color": {"field": "channel", "type": "nominal", "sort": null}
+}}
+```
+
+**Heatmap?** Use `heatmap` for a measure over two categories, such as weekday by hour: a few dozen to 1,000 cells. Aggregate in the query above 1,000; use a line for an ordered time series. Missing or all-null cells are empty, not zero. Labels default to none; choose `values` for a few cells.
+```json
+"config": {"mark": {"type": "heatmap", "labels": "values"}, "encoding": {
+  "x": {"field": "hour", "type": "nominal", "sort": "ascending"},
+  "y": {"field": "weekday", "type": "nominal", "sort": null},
+  "color": {"field": "orders", "type": "quantitative", "aggregate": "sum", "scale": "sequential"}
+}}
+```
+
+**Box?** Use `box` for a number's spread in each category; use a bar for a total or one number per category.
+The median, interpolated quartiles and whiskers are fixed; `outliers` is `points` (default) or `none`.
+At most 50 boxes, 200 outside points per box and 1,000 drawn overall; the card counts every outside point.
+No legend or authored tooltip. A box's value axis includes zero only with `zero: true`. Options: dashboards §2.1.2.
+```json
+"config": {"mark": {"type": "box"}, "encoding": {
+  "x": {"field": "region", "type": "nominal", "sort": null},
+  "y": {"field": "amount", "type": "quantitative"}
+}}
+```
+
+**`waterfall`:** each bar starts where the previous one ended; the first is the opening and `total: "end"` (default) closes with the sum. `x` is a band (`sort: null` keeps row order), `y` one value (`aggregate` required; no `fields`, `stack`, `color` or `tooltip`; axis always holds zero, log refused). Options: `"total": "end" | "none"`, `"labels": "values" | "none"`. At most 50 bars. Repeated categories form one step; zero keeps its bar. Rises, falls and total take three theme colours; the legend is a key only. Example: `{"mark":{"type":"waterfall"},"encoding":{"x":{"field":"step","type":"nominal","sort":null},"y":{"field":"amount","type":"quantitative","aggregate":"sum","unit":"USD"}}}`.
+
+**`funnel`:** choose for the ordered steps something passes through, at most twelve; choose a bar to compare unrelated categories. `stage` is a nominal/ordinal band, `value` one aggregate. Zero remains a thin bar; negatives refuse. No legend, `color`, `tooltip`, temporal stage, value `fields`, `stack`, `scale` or `axis`. `labels` is `percent_of_first` (default), `percent_of_previous` or `value`; options and share edge cases: `docs/dashboards.md`. Example: `{"mark":{"type":"funnel"},"encoding":{"stage":{"field":"step","type":"nominal","sort":null},"value":{"field":"n","type":"quantitative","aggregate":"sum"}}}`.
+
+**Gauge?** Choose `gauge` for one number against a known range, with optional zones or a target. For a trend
+choose a line; for several values choose a bar. `value` aggregates all rows; its `scale.domain` is required.
+No `fields`, `stack`, channel title, axis, `color` or authored tooltip. The true number stays in the card
+when the arc clamps to an end. Bands and Target have keys, never switches. Options: `docs/dashboards.md`.
+```json
+{"mark":{"type":"gauge","target":70,"bands":[{"to":100,"tone":"good"}]},"encoding":{"value":{"field":"uptime","type":"quantitative","aggregate":"mean","scale":{"domain":[0,100]},"unit":"%"}}}
+```
+
+
+**Treemap?** Choose `treemap` for a whole split into nested parts by size: one to three levels, at most
+500 positive leaves. Use a bar for exact comparisons; negative aggregates refuse the chart.
+Without `color`, the first path level supplies colours; a series field splits paths by its values.
+A quantitative shade colours leaves by another aggregate. The legend is a key; ArrowRight reaches every cell.
+
+```json
+{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"region"},{"field":"product"}],"size":{"field":"amount","type":"quantitative","aggregate":"sum"}}}
+```
+
+Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
+
 **On every type, except where an item names its types:**
-- **`fields` instead of `color`** (bar, line and area only; a scatter's `y` takes one `field` and no `aggregate`):
+- **`fields` instead of `color`** (bar, line and area only; a scatter's and a box's `y` take one `field` and no `aggregate`):
   `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a tooltip detail.
-- **`encoding.tooltip`:** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar.
-- **`scale`:** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}`. A bar's and an area's value
-  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line or a scatter only, with no
+  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail.
+- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
+- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each

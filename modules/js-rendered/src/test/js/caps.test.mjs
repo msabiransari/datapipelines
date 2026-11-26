@@ -34,7 +34,7 @@ function counted(edit) {
 
 test("the cap table: every entry has a kind, a limit, a basis and a note; the bar and line-family needs are there", () => {
   const caps = R.tables.CAPS;
-  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "line.points", "line.rows", "rows", "scatter.marks", "series"]);
+  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "box.marks", "box.outliers", "box.outliers_each", "funnel.marks", "gauge.marks", "heatmap.marks", "line.points", "line.rows", "pie.marks", "rows", "scatter.marks", "series", "treemap.marks", "waterfall.marks"]);
   for (const [name, c] of Object.entries(caps)) {
     assert.ok(["row", "mark", "semantic"].includes(c.kind), name);
     assert.ok(Number.isInteger(c.limit) && c.limit > 0, name);
@@ -50,7 +50,7 @@ test("the cap table: every entry has a kind, a limit, a basis and a note; the ba
     ["area.points", 1000, "measured"],
     ["area.rows", 10000, "inherited"],
   ]);
-  assert.throws(() => R.tables.cap("pie.marks"), /no cap-table entry pie\.marks/);
+  assert.throws(() => R.tables.cap("not_a_type.marks"), /no cap-table entry not_a_type\.marks/);
 });
 
 test("exactly the row cap, aggregating to 60 marks, draws", () => {

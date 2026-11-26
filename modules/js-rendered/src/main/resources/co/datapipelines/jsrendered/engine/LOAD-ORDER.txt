@@ -28,3 +28,10 @@ types/bar.js
 types/line.js
 types/area.js
 types/scatter.js
+types/pie.js
+types/heatmap.js
+types/box.js
+types/waterfall.js
+types/funnel.js
+types/gauge.js
+types/treemap.js

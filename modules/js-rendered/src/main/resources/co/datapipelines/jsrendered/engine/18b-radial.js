@@ -180,7 +180,7 @@
     // The tick rule: the value axis's ticks over [0, the extent's hi] or the author's domain, for radialTickSpan × the radius.
     var ax = A.valueAxis(lvl, [0, L.ext[1]], L.domain, look("radialTickSpan") * radius, L.format, 0);
     var hi = ax.hi, scale = S.linear(0, hi, 0, radius);
-    var hand = { plot: plot, centre: centre, radius: radius, angles: angles, r: { lo: 0, hi: hi, ticks: ax.ticks, scale: scale } };
+    var hand = { plot: plot, centre: centre, radius: radius, angles: angles, r: { lo: 0, hi: hi, ticks: ax.ticks, scale: scale }, reach: pol.hand.reach };
     if (lvl === "minimal") return { plot: plot, hand: hand, under: pol.under, axes: pol.axes, over: [] };
     // One ring per tick above 0, and one at hi where hi is no tick (an author's domain); the last is the outermost.
     var rings = [];

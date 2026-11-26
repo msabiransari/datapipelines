@@ -1,0 +1,50 @@
+{
+  "source": [
+    "Issue #1075; design record §4.5 gauge"
+  ],
+  "note": "eight-digits",
+  "document": {
+    "display_name": "eight-digits",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "gauge"
+      },
+      "encoding": {
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "scale": {
+            "domain": [
+              0,
+              1000000000
+            ]
+          }
+        }
+      }
+    }
+  },
+  "columns": {
+    "v": [
+      12345678
+    ]
+  },
+  "types": {
+    "v": "INTEGER"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "source": [
+    "brief 1070 D12 synthetic fixture"
+  ],
+  "note": "no rows: the no-data state",
+  "document": {
+    "display_name": "empty",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "y",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "heatmap"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "y",
+          "type": "nominal",
+          "sort": null
+        },
+        "color": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [],
+    "y": [],
+    "v": []
+  },
+  "types": {
+    "x": "STRING",
+    "y": "STRING",
+    "v": "INTEGER"
+  }
+}

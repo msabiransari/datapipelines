@@ -30,7 +30,7 @@ class ChartTypeTest {
     fun `fromWire maps each wire value to its entry and refuses any other`() {
         ChartType.entries.forEach { ChartType.fromWire(it.wire) shouldBe it }
         ChartType.fromWire("Bar") shouldBe null
-        ChartType.fromWire("pie") shouldBe null
+        ChartType.fromWire("not_a_type") shouldBe null
     }
 
     @Test
@@ -87,7 +87,52 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter")
+        ChartType.WIRE_VALUES shouldBe
+            listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+    }
+
+    @Test
+    fun `treemap has one to three levels, one value and optional series or shade under the area policy`() {
+        val channels = ChartType.TREEMAP.channels
+        channels.map { it.key } shouldBe listOf("path", "size", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels[0].node shouldBe ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))
+        channels[1].node shouldBe ChannelNode.Shape("value")
+        channels[2].node shouldBe
+            ChannelNode.OneOf(
+                listOf(
+                    ShapeAlternative("series", listOf("nominal", "ordinal")),
+                    ShapeAlternative("shade", listOf("quantitative")),
+                ),
+            )
+        ChartType.TREEMAP.policy shouldBe ChartMarkPolicy.AREA
+    }
+
+    @Test
+    fun `gauge has one value channel under the line policy`() {
+        ChartType.GAUGE.channels.map { it.wire() } shouldBe
+            listOf(mapOf("key" to "value", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")))
+        ChartType.GAUGE.policy shouldBe ChartMarkPolicy.LINE
+    }
+
+    @Test
+    fun `box has an optional band and a required quantitative position under the point policy`() {
+        ChartType.BOX.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to false, "node" to mapOf("node" to "shape", "name" to "band")),
+                mapOf("key" to "y", "required" to true, "node" to mapOf("node" to "shape", "name" to "position")),
+            )
+        ChartType.BOX.policy shouldBe ChartMarkPolicy.POINT
+    }
+
+    @Test
+    fun `pie has one value and one series under the area policy`() {
+        ChartType.PIE.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "theta", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")),
+                mapOf("key" to "color", "required" to true, "node" to mapOf("node" to "shape", "name" to "series")),
+            )
+        ChartType.PIE.policy shouldBe ChartMarkPolicy.AREA
     }
 
     @Test
@@ -152,6 +197,16 @@ class ChartTypeTest {
             mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")))
     }
 
+    @Test
+    fun `waterfall has a band and one value under the area policy`() {
+        ChartType.WATERFALL.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to true, "node" to mapOf("node" to "shape", "name" to "band")),
+                mapOf("key" to "y", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")),
+            )
+        ChartType.WATERFALL.policy shouldBe ChartMarkPolicy.AREA
+    }
+
     private companion object {
         val ROW = Regex("^\\| `([a-z][a-z0-9_]*)` \\|", RegexOption.MULTILINE)
         val BAND_OR_VALUE =
@@ -163,5 +218,15 @@ class ChartTypeTest {
                         mapOf("shape" to "value", "types" to listOf("quantitative")),
                     ),
             )
+    }
+
+    @Test
+    fun `funnel has a stage band and a single value with area policy`() {
+        ChartType.FUNNEL.channels shouldBe
+            listOf(
+                ChartChannel("stage", required = true, node = ChannelNode.Shape("band")),
+                ChartChannel("value", required = true, node = ChannelNode.Shape("value")),
+            )
+        ChartType.FUNNEL.policy shouldBe ChartMarkPolicy.AREA
     }
 }

@@ -894,7 +894,14 @@ private object MarkChecks {
             const dimmed = svg.classList.contains("dp-dimmed");
             const active = all().filter((e) => /\bdp-active\b/.test(cls(e)));
             if (mk.series === null) {
-              if (dimmed || active.length > 0) p.push(mk.datum + ": a mark without a series dims (dp-dimmed " + dimmed + ", dp-active " + active.length + ")");
+              if (!dimmed) p.push(mk.datum + ": a mark without a series must dim the other marks");
+              const els = writtenEls(), own = held(n);
+              if (active.length !== own.length || own.some(i=>!active.includes(els[i]))) p.push(mk.datum + ": wrong active primitives");
+              const other = marks.findIndex((m,i)=>i!==n && m.series===null);
+              for (const i of own) if (getComputedStyle(els[i]).opacity !== '1') p.push(mk.datum + ": selected cell faded");
+              if (other>=0) for (const i of held(other)) {
+                if (getComputedStyle(els[i]).opacity !== String(TH.n('--chart-dim'))) p.push(mk.datum + ": other mark did not fade");
+              }
             } else {
               if (!dimmed) p.push(mk.datum + ": the picture has no dp-dimmed");
               const group = svg.querySelector('g.dp-mark[data-series="' + mk.series + '"]');

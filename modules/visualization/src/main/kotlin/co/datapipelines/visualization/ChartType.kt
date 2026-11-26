@@ -50,6 +50,27 @@ enum class ChartType(
      * `scatter`; lane T1, #1062). A scatter with `size` is the bubble chart.
      */
     SCATTER("scatter", ChartChannelNodes.scatter, ChartMarkPolicy.POINT),
+
+    /** Shares of a whole, drawn as a ring by default (§4.5; lane #1068). */
+    PIE("pie", ChartChannelNodes.pie, ChartMarkPolicy.AREA),
+
+    /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
+    HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
+
+    /** Quartiles and whiskers per category, with outside points (§4.5 box; #1072). */
+    BOX("box", ChartChannelNodes.box, ChartMarkPolicy.POINT),
+
+    /** Running changes over a category band, with an optional closing total (§4.5; #1073). */
+    WATERFALL("waterfall", ChartChannelNodes.waterfall, ChartMarkPolicy.AREA),
+
+    /** Centred stage bars, one value per stage (§4.5; #1074). */
+    FUNNEL("funnel", ChartChannelNodes.funnel, ChartMarkPolicy.AREA),
+
+    /** One aggregate on an authored range, drawn as an open arc (§4.5; #1075). */
+    GAUGE("gauge", listOf(ChartChannel("value", required = true, node = ChannelNode.Shape("value"))), ChartMarkPolicy.LINE),
+
+    /** Nested leaf rectangles, with a key-only legend (§4.5 treemap; #1078). */
+    TREEMAP("treemap", ChartChannelNodes.treemap, ChartMarkPolicy.AREA),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -158,6 +179,48 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val treemap: List<ChartChannel> =
+        listOf(
+            ChartChannel("path", required = true, node = ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))),
+            ChartChannel("size", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel(
+                "color",
+                required = false,
+                node =
+                    ChannelNode.OneOf(
+                        listOf(
+                            ShapeAlternative("series", listOf("nominal", "ordinal")),
+                            ShapeAlternative("shade", listOf("quantitative")),
+                        ),
+                    ),
+            ),
+        )
+
+    val funnel: List<ChartChannel> =
+        listOf(
+            ChartChannel("stage", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("value", required = true, node = ChannelNode.Shape("value")),
+        )
+
+    val waterfall: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("value")),
+        )
+
+    val box: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = false, node = ChannelNode.Shape("band")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("position")),
+        )
+
+    val heatmap: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("color", required = true, node = ChannelNode.Shape("shade")),
+        )
+
     val bandOrValue: ChannelNode =
         ChannelNode.OneOf(
             listOf(
@@ -212,5 +275,12 @@ private object ChartChannelNodes {
             ),
             ChartChannel("size", required = false, node = ChannelNode.Shape("size")),
             ChartChannel("tooltip", required = false, node = tooltip),
+        )
+
+    /** A single measure split by series: no axes or authored tooltip. */
+    val pie: List<ChartChannel> =
+        listOf(
+            ChartChannel("theta", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel("color", required = true, node = ChannelNode.Shape("series")),
         )
 }

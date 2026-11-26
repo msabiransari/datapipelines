@@ -1,0 +1,60 @@
+{
+  "source": [
+    "Issue #1075; design record §4.5 gauge"
+  ],
+  "note": "short-bands",
+  "document": {
+    "display_name": "short-bands",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "gauge",
+        "bands": [
+          {
+            "to": 50,
+            "tone": "bad"
+          },
+          {
+            "to": 80,
+            "tone": "warn"
+          }
+        ]
+      },
+      "encoding": {
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "scale": {
+            "domain": [
+              0,
+              100
+            ]
+          }
+        }
+      }
+    }
+  },
+  "columns": {
+    "v": [
+      90
+    ]
+  },
+  "types": {
+    "v": "INTEGER"
+  }
+}

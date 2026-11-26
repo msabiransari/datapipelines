@@ -1,0 +1,145 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "colour by value, sequential; one cell has no shade",
+  "document": {
+    "display_name": "shade",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "INTEGER",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "s",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "scale": "sequential"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G0",
+      "G1",
+      "G2",
+      "G3"
+    ],
+    "b": [
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+      "L5",
+      "L6",
+      "L7",
+      "L8",
+      "L9",
+      "L10",
+      "L11",
+      "L12",
+      "L13",
+      "L14",
+      "L15"
+    ],
+    "s": [
+      0,
+      3,
+      6,
+      9,
+      12,
+      null,
+      18,
+      21,
+      24,
+      27,
+      30,
+      33,
+      36,
+      39,
+      42,
+      45
+    ],
+    "v": [
+      6,
+      25,
+      44,
+      22,
+      41,
+      19,
+      38,
+      16,
+      35,
+      13,
+      32,
+      10,
+      29,
+      7,
+      26,
+      45
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "s": "INTEGER",
+    "v": "INTEGER"
+  }
+}

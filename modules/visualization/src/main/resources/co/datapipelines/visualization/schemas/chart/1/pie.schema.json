@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/pie.schema.json",
+  "$comment": "Lane 1068: record \u00a74.5 pie; ring and disc share one type.",
+  "title": "datapipelines chart document, version 1, family pie",
+  "description": "Parts of a whole: theta aggregated by color, at most eight slices.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "pie"
+            },
+            "inner": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.8
+            },
+            "labels": {
+              "enum": [
+                "none",
+                "percent",
+                "value"
+              ]
+            },
+            "max_slices": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 8
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "theta",
+        "color"
+      ],
+      "properties": {
+        "theta": {
+          "$ref": "#/$defs/theta"
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        }
+      }
+    },
+    "theta": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "scale"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      }
+    },
+    "color": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "not": {
+        "required": [
+          "title"
+        ]
+      },
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legend"
+        }
+      }
+    }
+  }
+}

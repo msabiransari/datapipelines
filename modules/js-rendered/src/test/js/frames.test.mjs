@@ -230,7 +230,7 @@ test("D3: polar hands the template the plot, its centre and half its smaller sid
     for (const name of ["legend-left", "legend-top", "title-subtitle", "one-series"]) {
       const fx = fixture("test_polar", name), r = P.render(typeInputOf(fx, W, H)), hand = P.probeHand, p = expectedPlot(R, fx, W, H);
       const r2 = (v) => Math.round(v * 100) / 100;
-      assert.deepEqual(Object.keys(hand), ["plot", "centre", "radius", "visible", "level"]);
+      assert.deepEqual(Object.keys(hand), ["plot", "centre", "radius", "reach", "visible", "level"]);
       assert.ok(samePlot(hand.plot, p), `${name} ${W}x${H}: plot`);
       assert.ok(near(hand.centre.x, r2(p.x + p.w / 2)) && near(hand.centre.y, r2(p.y + p.h / 2)), `${name} ${W}x${H}: centre ${JSON.stringify(hand.centre)}`);
       assert.ok(near(hand.radius, r2(Math.min(p.w, p.h) / 2)), `${name} ${W}x${H}: radius ${hand.radius}`);
@@ -239,7 +239,7 @@ test("D3: polar hands the template the plot, its centre and half its smaller sid
   }
   const N = probe("test_plain", "var plot = hand.plot");
   N.render(typeInputOf(fixture("test_plain", "title-subtitle"), 960, 540));
-  assert.deepEqual(Object.keys(N.probeHand), ["plot", "visible", "level"]);
+  assert.deepEqual(Object.keys(N.probeHand), ["plot", "reach", "visible", "level"]);
 });
 
 // --------------------------------------------------------------------------------------- test_quiet: the booleans

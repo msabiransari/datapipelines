@@ -1,0 +1,68 @@
+{
+  "source": [
+    "Design record \u00a74.5 pie; approved brief #1068 D14"
+  ],
+  "note": "four slices, a unit and a title",
+  "document": {
+    "display_name": "four-unit",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "pie"
+      },
+      "encoding": {
+        "theta": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "unit": "payments"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      },
+      "title": {
+        "text": "Payments by method"
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "S1",
+      "S2",
+      "S3",
+      "S4"
+    ],
+    "v": [
+      50,
+      30,
+      15,
+      5
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

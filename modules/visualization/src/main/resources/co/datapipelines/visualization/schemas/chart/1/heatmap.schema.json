@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/heatmap.schema.json",
+  "title": "datapipelines chart document, version 1, family heatmap",
+  "description": "One shaded cell per x and y category pair. Missing cells are empty, not zero.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "heatmap"
+            },
+            "labels": {
+              "description": "values: each cell carries its formatted value where it fits; none: no labels (default).",
+              "enum": [
+                "none",
+                "values"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "color"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/band"
+        },
+        "y": {
+          "$ref": "#/$defs/band"
+        },
+        "color": {
+          "$ref": "skeleton.schema.json#/$defs/shade"
+        }
+      }
+    },
+    "band": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/band"
+        }
+      ],
+      "properties": {
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        },
+        "axis": false
+      }
+    }
+  }
+}

@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.92 (frozen contract — additive-only changes after this point)
+**Status:** v1.96 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-11-23
+**Last updated:** 2026-11-26
 
 ---
 
@@ -2086,7 +2086,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area or scatter), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2098,7 +2098,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2166,7 +2166,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area or scatter), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2178,7 +2178,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3173,6 +3173,10 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v1.96 | 1075 (#1075) | Chart mark type gauge and its one-arc mark count. |
+| 2026-11-26 | v1.95 | 1073 (#1073) | Chart configuration and mark counts include waterfall. |
+| 2026-11-25 | v1.94 | 1072 (#1072) | Chart configuration and mark counts include box. |
+| 2026-11-24 | v1.93 | 1068 (#1068) | Add the pie family: parts of a whole, one value split by series, a ring or disc, at most eight slices. |
 | 2026-11-23 | v1.92 | 1062 (#1062, js-rendered T1) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the fourth chart family, scatter; the `tests` description's `mark_count` names a scatter's rows drawn. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-23 | v1.91 | 1100 (#1100) | **§6.2.4 `pipelines_create`, §6.2.5 `pipelines_update` (additive):** optional `request_body` input — the pipeline-contract §3.4 declaration `{required}` (a JSON boolean, default `false`; `{}` and unknown inner keys read as optional), carried into the saved document and read back by `pipelines_get`. Both descriptions name it and its default; the update's says the whole document is replaced, so omitting the declaration removes it. Before this an MCP-authored pipeline could not declare a body (the schema refused the argument and the builder dropped it). No new tool, permission or refusal code. |
 | 2026-11-22 | v1.90 | 1040 (#1040) | **§6.2.23–§6.2.25 (additive):** `endpoints_create`, `endpoints_list` and `endpoints_get` answer `pipeline_version` (the current version's exact pin) and `request_body` (`mode` + the reading SCRIPT transformers, `null` with no current version or an unresolvable pin) — what an author must see before acting on a route; the REST management read carries the same spelling (rest-api §19.5a). The status line, stale at v1.85 since v1.86, is brought to this entry. No tool, input or permission change. |

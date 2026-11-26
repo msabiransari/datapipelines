@@ -1104,7 +1104,7 @@ pre-#485 `verification.lock`, so it is refused while any holder lives and refuse
 while it runs, older script copies included. A second holder for the SAME checkout is refused even
 with a slot free: one `build/` and one `.pregate-logs/` per checkout. Before taking anything a
 wrapper reads `MemAvailable` from `/proc/meminfo` and refuses below
-`DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB` (default 9216 MB, 1.5 × one pregate rounded up to the GB; `0` turns the floor off, a
+`DATAPIPELINES_VERIFICATION_MEM_FLOOR_MB` (default 10240 MB: the estimate from the recorded JVM peaks rounded up to the GB (Gradle daemon 2000 MB + Kotlin daemon 3738 MB + the test JVM 4468 MB at its 2g heap; the terms are peaks from separate observations of the daemons and web test JVM; the separate 6g integration heap and container memory are outside this estimate, and the floor follows the gate's precedent of omitting a 1.5 × margin); `0` turns the floor off, a
 non-integer falls back to the default with a warning). A pregate-class holder keeps its slot on
 fd 9 only, which is why a hand-typed run such as the focused example above needs exactly `9>&-`
 on its `./gradlew` line: an idle daemon that inherits the descriptor would hold the slot after the
@@ -1587,6 +1587,7 @@ the gate's "pregate self-test" stage. It covers cases 1–47 of #983 on fixture 
 prints how many cases it ran. Every fixture run of a copied wrapper, in this self-test and in the two
 existing ones, sets its temp base to a fixture directory. Each self-test fails when a summary line it
 captured names a base outside its fixtures.
+`TH_DOUBT_LOG=<file>` records why a reference was uncertain; the self-test prints that record when a case is red.
 
 ---
 

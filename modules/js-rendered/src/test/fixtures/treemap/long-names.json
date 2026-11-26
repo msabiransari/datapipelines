@@ -1,0 +1,104 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "names no small cell can hold",
+  "document": {
+    "display_name": "long-names",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap",
+        "labels": "names_values"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "A region with a very long name number 0",
+      "A region with a very long name number 1",
+      "A region with a very long name number 2",
+      "A region with a very long name number 0",
+      "A region with a very long name number 1",
+      "A region with a very long name number 2",
+      "A region with a very long name number 0",
+      "A region with a very long name number 1",
+      "A region with a very long name number 2",
+      "A region with a very long name number 0",
+      "A region with a very long name number 1",
+      "A region with a very long name number 2"
+    ],
+    "b": [
+      "A leaf with a name that cannot fit 0",
+      "A leaf with a name that cannot fit 1",
+      "A leaf with a name that cannot fit 2",
+      "A leaf with a name that cannot fit 3",
+      "A leaf with a name that cannot fit 4",
+      "A leaf with a name that cannot fit 5",
+      "A leaf with a name that cannot fit 6",
+      "A leaf with a name that cannot fit 7",
+      "A leaf with a name that cannot fit 8",
+      "A leaf with a name that cannot fit 9",
+      "A leaf with a name that cannot fit 10",
+      "A leaf with a name that cannot fit 11"
+    ],
+    "v": [
+      7,
+      18,
+      29,
+      40,
+      14,
+      25,
+      36,
+      10,
+      21,
+      32,
+      43,
+      17
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}

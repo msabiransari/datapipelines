@@ -1,0 +1,41 @@
+{
+  "display_name": "Parts of a whole",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "sales": {
+      "columns": [
+        {
+          "name": "s",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "pie",
+      "max_slices": 9
+    },
+    "encoding": {
+      "theta": {
+        "field": "v",
+        "type": "quantitative",
+        "aggregate": "sum"
+      },
+      "color": {
+        "field": "s",
+        "type": "nominal",
+        "sort": null
+      }
+    }
+  }
+}

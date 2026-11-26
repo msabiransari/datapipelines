@@ -1,0 +1,67 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "labels value, a unit and a value title",
+  "document": {
+    "display_name": "value-unit",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel",
+        "labels": "value"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "unit": "orders",
+          "title": "Orders"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Orders",
+      "Paid",
+      "Shipped",
+      "Returned"
+    ],
+    "v": [
+      9000,
+      4500,
+      300,
+      20
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}
