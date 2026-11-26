@@ -153,8 +153,19 @@
     var rows = [{ name: look("gaugeWordNow"), value: fmt(part(m.value)), colour: "--chart-series-1", color: theme.css("--chart-series-1") }];
     if (targeted) rows.push({ name: look("gaugeWordTarget"), value: fmt(m.target), colour: null, color: null });
     m.bands.forEach(function (b) { rows.push({ name: word(b.tone), value: look("gaugeWordTo") + " " + fmt(b.to), colour: TONES[b.tone], color: theme.css(TONES[b.tone]) }); });
+    var box = { kind: "box", x: r2(cx - outer), y: r2(top), w: r2(2 * outer), h: r2(used) };
+    var left = box.x, right = r2(box.x + box.w), upper = box.y, bottom = r2(box.y + box.h);
+    // The drawn end labels can overhang the arc. Union their written bounds without moving any ink (#1075 r2).
+    out.forEach(function (p) {
+      if (p.k !== "text" || p.role !== "tick") return;
+      var w = h.width(p.text, p.size, p.weight);
+      left = Math.min(left, r2(p.x - w / 2)); right = Math.max(right, r2(p.x + w / 2));
+      upper = Math.min(upper, r2(p.y - h.ascent(p.size))); bottom = Math.max(bottom, r2(p.y + h.descent(p.size)));
+    });
+    box.x = r2(Math.max(plot.x, left)); box.y = r2(Math.max(plot.y, upper));
+    box.w = r2(Math.min(plot.x + plot.w, right) - box.x); box.h = r2(Math.min(plot.y + plot.h, bottom) - box.y);
     return { primitives: out, lookup: [{ series: "measure", datum: 0, row: 0,
-      shape: { kind: "box", x: r2(cx - outer), y: r2(top), w: r2(2 * outer), h: r2(used) }, emphasis: null,
+      shape: box, emphasis: null,
       card: { heading: m.title, rows: rows, keep: 0 } }], count: 1 };
   }
   R.type("gauge", { channels: CHANNELS, model: model, marks: marks, axes: "polar" });

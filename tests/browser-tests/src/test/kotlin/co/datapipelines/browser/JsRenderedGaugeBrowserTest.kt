@@ -47,6 +47,16 @@ class JsRenderedGaugeBrowserTest {
     }
 
     @Test
+    fun `hover over the wide end label finds the gauge card`() {
+        session { page ->
+            draw(page, "eight-digits")
+            val point = page.evaluate(END_LABEL_POINT) as List<*>
+            page.mouse().move((point[0] as Number).toDouble(), (point[1] as Number).toDouble())
+            shown(page) shouldBe listOf("Now", "12,345,678")
+        }
+    }
+
+    @Test
     fun `tone and target keys never switch hide dim or take focus and dark tones follow tokens`() {
         session { page ->
             draw(page)
@@ -159,6 +169,13 @@ class JsRenderedGaugeBrowserTest {
             () => {
               const s=document.getElementById('chart'),p=s.createSVGPoint(),a=ChartGauge.last().primitives.find(p=>p.role==='mark' && p.k==='path');
               p.x=a.d[1];p.y=a.d[2];const m=s.getScreenCTM();return [m.a*p.x+m.c*p.y+m.e,m.b*p.x+m.d*p.y+m.f];
+            }
+            """.trimIndent()
+        private val END_LABEL_POINT =
+            """
+            () => {
+              const s=document.getElementById('chart'),p=s.createSVGPoint();p.x=324;p.y=226;
+              const m=s.getScreenCTM();return [m.a*p.x+m.c*p.y+m.e,m.b*p.x+m.d*p.y+m.f];
             }
             """.trimIndent()
         private val DOM =

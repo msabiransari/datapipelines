@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { engine, inputOf, chartFixtures, MODULE } from "./engine.mjs";
-import { violations, WIDTHS, HEIGHTS } from "./geometry.mjs";
+import { violations, textBox, WIDTHS, HEIGHTS } from "./geometry.mjs";
 const FX = Object.fromEntries(chartFixtures().filter(f => f.wire === "gauge").map(f => [f.name, f.fixture]));
 const R = engine();
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -57,6 +57,37 @@ test("A.5: every fixture pins lookup row zero, keys are keys alone and never swi
     for (const m of r.index.marks || []) { assert.equal(m.row,0);assert.equal(m.series,"measure");assert.equal(m.datum,0);assert.equal(m.emphasis,null);assert.equal(m.card.keep,0); }
   }
   for(const name of ["one-band","target-only"]) assert.ok(draw(FX[name]).primitives.some(p=>p.role === "legend"));
+});
+
+test("A.5 round 2: the overhanging drawn end label finds mark zero", () => {
+  const r = draw(FX["eight-digits"], 360, 240);
+  const label = r.primitives.find(p => p.k === "text" && p.role === "tick" && p.text === "1,000,000,000");
+  const box = textBox(label);
+  assert.ok(324 > box[0][0] && 324 < box[2][0] && 226 > box[0][1] && 226 < box[2][1]);
+  assert.equal(R.lookup.at(r.index, 324, 226, 24), 0, "drawn end-label overhang finds the gauge");
+});
+
+test("A.5 round 2: only the clipped union of drawn two-decimal end-label bounds grows the box", () => {
+  const old = mutate('if (p.k !== "text" || p.role !== "tick") return;', 'return;');
+  const r2 = v => Math.round(v * 100) / 100;
+  let pictures = 0, changed = 0;
+  for (const f of Object.values(FX)) for (const [w,h] of [[960,540],[360,240],[240,140],[120,60],[80,24]]) {
+    const r = draw(f,w,h), before = rd(old,f,w,h);
+    assert.deepEqual(plain(r.primitives),plain(before.primitives), "lookup must not change the picture");
+    if (!r.index.marks || !r.index.marks.length) continue;
+    const b = before.index.marks[0].shape, plot = r.index.plot;
+    const bounds = [[b.x,b.y,r2(b.x+b.w),r2(b.y+b.h)]];
+    for (const p of r.primitives.filter(p=>p.k === "text" && p.role === "tick")) {
+      const c = textBox(p); bounds.push([r2(c[0][0]),r2(c[0][1]),r2(c[2][0]),r2(c[2][1])]);
+    }
+    const x = Math.max(plot.x,Math.min(...bounds.map(b=>b[0]))), y = Math.max(plot.y,Math.min(...bounds.map(b=>b[1])));
+    const box = {kind:"box",x:r2(x),y:r2(y),w:r2(Math.min(plot.x+plot.w,Math.max(...bounds.map(b=>b[2])))-r2(x)),h:r2(Math.min(plot.y+plot.h,Math.max(...bounds.map(b=>b[3])))-r2(y))};
+    assert.deepEqual(plain(r.index.marks[0].shape),box);
+    if (JSON.stringify(box)!==JSON.stringify(b)) changed++;
+    for (const key of ["shape","box","anchor"]) before.index.marks[0][key] = r.index.marks[0][key];
+    assert.deepEqual(plain(r.index),plain(before.index), "fields independent of the box stay unchanged"); pictures++;
+  }
+  assert.ok(changed>0); assert.equal(pictures,70); console.log(`lookup union: ${pictures} rendered pictures, ${changed} boxes changed, primitive bytes unchanged`);
 });
 
 test("A.6: the gauge fixtures satisfy invariants at every sweep frame", () => {

@@ -290,7 +290,8 @@ each as `{field: [values]}` (§2.1.2).
   rules. The legend is keys only, including Target even without bands: no switches or keyboard stops.
   At small frames the ring and target drop if their fitted radius would be below 16 px; minimal has no text.
   The card heads with the chart title and rows Now, optional Target, then every band's word and `to` value,
-  units once per value; a reduced card keeps Now. One semantic mark, not a measured cap.
+  units once per value; a reduced card keeps Now. The pointer finds it over the arc's picture box and the
+  full drawn end labels, bounded by the plot. One semantic mark, not a measured cap.
 
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
