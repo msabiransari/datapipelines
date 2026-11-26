@@ -6,10 +6,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { engine, chartFixtures, inputOf } from "./engine.mjs";
+import { plant } from "./forms.mjs";
 
-const R = engine();
+// A spy on the cartesian value-axis allocator (the pattern of forms.mjs's D8 spy), so the label tests read the room the
+// layout actually reserved for the end labels and the exact text it measured — the endLabels array the allocator
+// consumed — rather than calling the model's producer after render. With no spy set the allocator is the file's own.
+const BAR = "types/bar.js";
+const CART = "12-cartesian.js";
+const ROOM_SPY_FROM = "  function valueAxisOf(lvl, L, ext, length, room) {";
+const ROOM_SPY_TO = "  function valueAxisOf(lvl, L, ext, length, room) { if (R.spyRoom) R.spyRoom(room, L.endLabels === null ? null : L.endLabels.slice());";
+const R = engine((s) => plant(s, CART, ROOM_SPY_FROM, ROOM_SPY_TO));
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const FRAME = [960, 540];
+
+// A fixed-width measurer (six px a code point, the pattern of forms.mjs's SIX) so a reserved room is a pinned number.
+const SIX = (text) => 6 * [...text].length;
+// The gap the value axis keeps between a bar's end and its label: 0.25 em of --chart-text-small (11 px at the light
+// default), so a horizontal draw's reservation is the measured text's width plus 2.75 px.
+const LABEL_GAP = R.tables.look("valueLabelGap") * R.theme.resolve("light").n("--chart-text-small");
+const roomOf = (text) => SIX(text) + LABEL_GAP;
 
 /** The value channel and the band channel of a bar document. */
 function channels(doc) {
@@ -127,13 +142,20 @@ test("D1: one series hidden: the total follows the visible series only", () => {
   assert.notDeepEqual(out.index.totals, all.index.totals, "hiding a series changes the totals");
 });
 
+/** The render input of a stacked bar of rows [[x, series, value]]; opts = {format, unit, types, hidden, horizontal}. */
+function barInput(rows, opts = {}) {
+  const value = { field: "v", type: "quantitative", aggregate: "sum", stack: "zero", format: opts.format || "compact" };
+  if (opts.unit) value.unit = opts.unit;
+  const band = { field: "x", type: "nominal", sort: "ascending" };
+  const color = { field: "s", type: "nominal", sort: "ascending" };
+  const document = { display_name: "t", config: { mark: { type: "bar" }, encoding: opts.horizontal ? { x: value, y: band, color } : { x: band, y: value, color } } };
+  const columns = { x: rows.map((r) => r[0]), s: rows.map((r) => r[1]), v: rows.map((r) => r[2]) };
+  return { type: "bar", document, columns, types: opts.types || { x: "STRING", s: "STRING", v: "DECIMAL" }, frame: { w: FRAME[0], h: FRAME[1] }, theme: "light", measure: opts.measure === undefined ? null : opts.measure, hidden: opts.hidden || [] };
+}
+
 /** A stacked bar of rows [[x, series, value]] at the default frame; opts = {format, unit, types, hidden}. */
 function hand(rows, opts = {}) {
-  const y = { field: "v", type: "quantitative", aggregate: "sum", stack: "zero", format: opts.format || "compact" };
-  if (opts.unit) y.unit = opts.unit;
-  const document = { display_name: "t", config: { mark: { type: "bar" }, encoding: { x: { field: "x", type: "nominal", sort: "ascending" }, y, color: { field: "s", type: "nominal", sort: "ascending" } } } };
-  const columns = { x: rows.map((r) => r[0]), s: rows.map((r) => r[1]), v: rows.map((r) => r[2]) };
-  return plain(R.render({ type: "bar", document, columns, types: opts.types || { x: "STRING", s: "STRING", v: "DECIMAL" }, frame: { w: FRAME[0], h: FRAME[1] }, theme: "light", measure: null, hidden: opts.hidden || [] }));
+  return plain(R.render(barInput(rows, opts)));
 }
 
 test("D1: the card's form, not the label's: the chart's format and unit, as a row's value carries them", () => {
@@ -164,4 +186,121 @@ test("D1.3: an unstacked bar, a normalized stack, a line, an area and a scatter 
   }
   const oneSeries = hand([["a", "P", "1"]]);
   assert.ok(Array.isArray(oneSeries.index.totals), "a stack of one series still carries its total");
+});
+
+// ---------------------------------------------------------------- #1118: the stack-total LABEL (owner 2026-11-24)
+
+/** A render with the value-axis allocator spy: {r, rooms}, rooms = every {room, els} the allocator was handed. */
+function drawRoom(rows, opts = {}) {
+  const rooms = [];
+  R.spyRoom = (room, els) => rooms.push({ room, els: els === null ? null : plain(els) });
+  try {
+    return { r: plain(R.render(barInput(rows, opts))), rooms };
+  } finally {
+    R.spyRoom = null;
+  }
+}
+
+/** The painted stack-total labels, in draw order. */
+const guides = (r) => r.primitives.filter((p) => p.k === "text" && p.role === "guide").map((p) => p.text);
+
+/** The one reservation a draw makes (its passes repeat the same room): the allocator's last {room, els}. */
+function reservation(d) {
+  assert.ok(d.rooms.length >= 1, "the value-axis allocator ran");
+  const last = d.rooms[d.rooms.length - 1];
+  for (const k of d.rooms) assert.equal(k.room, last.room, "the reserved room is stable across the allocator's passes");
+  return last;
+}
+
+/** The pinned BIGINT cases' wire types: exact decimal columns, not the helper's DECIMAL default. */
+const BIGINT = { x: "STRING", s: "STRING", v: "BIGINTEGER" };
+
+test("#1118: a BIGINT stack total is its exact sum in the short form, painted and measured", () => {
+  assert.equal(roomOf("9,007.2T"), 50.75, "pinned: 6 px × 8 code points + 2.75 px gap");
+  assert.equal(roomOf("10,007.2T"), 56.75, "pinned: 6 px × 9 code points + 2.75 px gap");
+  for (const [second, want] of [["2", "9,007.2T"], ["1000000000000001", "10,007.2T"]]) {
+    const v = drawRoom([["a", "P", "9007199254740993"], ["a", "Q", second]], { types: BIGINT });
+    assert.deepEqual(guides(v.r), [want], "painted label for +" + second);
+  }
+  const both = drawRoom([["a", "P", "9007199254740993"], ["a", "Q", "1000000000000001"]], { horizontal: true, types: BIGINT, measure: SIX });
+  assert.deepEqual(guides(both.r), ["10,007.2T"], "painted, horizontal");
+  const res = reservation(both);
+  assert.deepEqual(res.els, ["10,007.2T"], "the layout measured the exact-sum text");
+  assert.equal(res.room, roomOf("10,007.2T"), "the room passed to the value-axis allocator is the exact text's width");
+});
+
+test("#1118: hiding and restoring a contributor moves the measured reservation to the visible exact sum", () => {
+  const rows = [["a", "P", "9007199254740993"], ["a", "Q", "1000000000000001"]];
+  const both = drawRoom(rows, { horizontal: true, types: BIGINT, measure: SIX });
+  assert.equal(reservation(both).room, roomOf("10,007.2T"), "both visible");
+  const q = both.r.summary.series.find((s) => s.title === "Q").id;
+  const hid = drawRoom(rows, { horizontal: true, types: BIGINT, measure: SIX, hidden: [q] });
+  assert.equal(hid.r.summary.series.find((s) => s.title === "Q").hidden, true, "Q is hidden in this draw");
+  assert.deepEqual(guides(hid.r), ["9,007.2T"], "painted follows the visible series");
+  const hidRes = reservation(hid);
+  assert.deepEqual(hidRes.els, ["9,007.2T"], "the layout measured the visible exact sum");
+  assert.equal(hidRes.room, roomOf("9,007.2T"), "the reserved room follows the visible series");
+  const back = drawRoom(rows, { horizontal: true, types: BIGINT, measure: SIX });
+  assert.equal(reservation(back).room, roomOf("10,007.2T"), "restoring the contributor restores the reservation");
+});
+
+test("#1118: DECIMAL fractions and mixed signs sum exactly; null and nonexact keep their forms", () => {
+  const frac = drawRoom([["a", "P", "1.5"], ["a", "Q", "2.25"]]);
+  assert.deepEqual(guides(frac.r), [R.text.value("3.75", "compact")], "fractional sum");
+  const neg = drawRoom([["a", "P", "-5"], ["a", "Q", "2"]]);
+  assert.deepEqual(guides(neg.r), ["−3"], "the sign is the engine's minus");
+  const nulls = drawRoom([["a", "P", null], ["b", "P", "5"]]);
+  assert.deepEqual(guides(nulls.r), ["5"], "only the drawn category carries a label");
+  const float = drawRoom([["a", "P", 1e15], ["a", "Q", 2]], { types: { x: "STRING", s: "STRING", v: "DOUBLE" } });
+  assert.deepEqual(guides(float.r), [R.text.value(1e15 + 2, "compact")], "a nonexact stack keeps the numeric total format");
+});
+
+test("#1118: a normalized stack paints no total label", () => {
+  const value = { field: "v", type: "quantitative", aggregate: "sum", stack: "normalize", format: "compact" };
+  const document = { display_name: "t", config: { mark: { type: "bar" }, encoding: { x: { field: "x", type: "nominal", sort: "ascending" }, y: value, color: { field: "s", type: "nominal", sort: "ascending" } } } };
+  const columns = { x: ["a", "a"], s: ["P", "Q"], v: ["1", "3"] };
+  const r = plain(R.render({ type: "bar", document, columns, types: BIGINT, frame: { w: FRAME[0], h: FRAME[1] }, theme: "light", measure: null, hidden: [] }));
+  assert.deepEqual(guides(r), [], "a normalized stack draws no total label");
+});
+
+// ---------------------------------------------------------------- #1118 falsifications (each in its own copy)
+
+/** A horizontal BIGINT draw on a fresh engine carrying the extra plants: {r, last: the allocator's last {room, els}}. */
+function falsifiedDraw(edits) {
+  const Rf = engine((s) => {
+    plant(s, CART, ROOM_SPY_FROM, ROOM_SPY_TO);
+    for (const [key, from, to] of edits) plant(s, key, from, to);
+  });
+  const rooms = [];
+  Rf.spyRoom = (room, els) => rooms.push({ room, els: els === null ? null : plain(els) });
+  const r = plain(Rf.render(barInput([["a", "P", "9007199254740993"], ["a", "Q", "1000000000000001"]], { horizontal: true, types: BIGINT, measure: SIX })));
+  return { r, last: rooms[rooms.length - 1] };
+}
+
+const PAINT_FROM = "      var lb = labelAt(m, plot, hp, outerBox, m.stackTotalText(plot.visible, c), groupW, groupW, placed);";
+const PAINT_TO = "      var lb = labelAt(m, plot, hp, outerBox, T.value(total, look(\"stackTotalFormat\")), groupW, groupW, placed);";
+const RESERVE_FROM = "          var text = stackTotalText(visible, c3);";
+const RESERVE_TO = "          var text = null; var fs = 0, fa = false; for (var fx = 0; fx < series.length; fx++) { if (visible[series[fx].id] !== true) continue; var fcv = cells[fx][c3]; if (fcv.num === null) continue; fa = true; fs += fcv.num; } if (fa) text = T.value(fs, look(\"stackTotalFormat\"));";
+const CONSUME_FROM = "widestOf(h, L.endLabels, h.small)";
+const CONSUME_TO = "0";
+
+test("#1118 falsification: a float paint site paints the float total while the reservation stays exact", () => {
+  const d = falsifiedDraw([[BAR, PAINT_FROM, PAINT_TO]]);
+  assert.deepEqual(guides(d.r), ["1e16"], "the paint site fell back to the float sum");
+  assert.equal(d.last.room, roomOf("10,007.2T"), "the reservation still measures the exact text");
+});
+
+test("#1118 falsification: a float reservation producer fails the room assertion while the paint stays exact", () => {
+  const d = falsifiedDraw([[BAR, RESERVE_FROM, RESERVE_TO]]);
+  assert.deepEqual(guides(d.r), ["10,007.2T"], "the paint site still uses the exact sum");
+  assert.equal(d.last.room, roomOf("1e16"), "the reservation fell back to the float text");
+  assert.notEqual(d.last.room, roomOf("10,007.2T"), "and no longer reserves the exact text's room");
+});
+
+test("#1118 falsification: bypassing the reservation consumer fails its own room assertion", () => {
+  const d = falsifiedDraw([[CART, CONSUME_FROM, CONSUME_TO]]);
+  assert.deepEqual(guides(d.r), ["10,007.2T"], "the paint site still uses the exact sum");
+  assert.deepEqual(d.last.els, ["10,007.2T"], "the measured text still names the exact sum");
+  assert.equal(d.last.room, LABEL_GAP, "the consumer was bypassed: only the gap remains");
+  assert.notEqual(d.last.room, roomOf("10,007.2T"), "so the room the guard asserts would fail");
 });
