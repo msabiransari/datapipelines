@@ -68,6 +68,9 @@ test("D5 first appearance, all series sorts, split another colour value, shade a
     assert.equal(r.primitives.filter(p=>p.k==="group" && p.role==="legend" && p.legend!==null).length,0);
   }
   f.document.config.encoding.color.legend = null; assert.equal(draw(f).primitives.filter(p=>p.role==="legend").length,0);
+  const counted=input([1,1,1,1,1,1,1],["A","A","B","B","C","C","C"]);counted.columns.s=[null,1,1,1,1,1,1];
+  counted.document.config.encoding.color={field:"s",type:"quantitative",aggregate:"count",scale:"sequential"};
+  const cr=draw(counted);same(Object.fromEntries(cr.index.marks.map((m,i)=>[m.card.rows[0].name,cells(cr)[i].fill])),{A:"--chart-seq-1",B:"--chart-seq-4",C:"--chart-seq-7"},"shade count counts non-null values");
 });
 
 test("D6 duplicate numeric inputs: all six orders keep sum, mean and shade geometry identical", () => {
@@ -91,7 +94,7 @@ test("D6 duplicate numeric inputs: all six orders keep sum, mean and shade geome
 
 test("D6 deterministic subtree sums and name ties across 20 shuffles", () => {
   let seed=1078; const next=()=> (seed=(Math.imul(seed,1664525)+1013904223)>>>0);
-  const f=input(Array.from({length:40},(_,i)=>[1e15,1,1e-9,3,7][i%5])); f.columns.b=f.columns.a; f.columns.a=f.columns.a.map((_,i)=>"G"+i%5); f.document.config.encoding.path.push({field:"b"});
+  const f=input(Array.from({length:40},(_,i)=>[7,7,7,3,3,9,1,1,1,1][i%10])); f.columns.b=f.columns.a; f.columns.a=f.columns.a.map((_,i)=>"G"+i%5); f.document.config.encoding.path.push({field:"b"});
   const signature=r=>r.index.marks.map(m=>[m.card.heading,m.card.rows[0].name,m.card.rows[0].value,m.box]);
   const want=signature(draw(f));
   for(let k=0;k<20;k++) { const order=Array.from({length:40},(_,i)=>i); for(let i=39;i>0;i--){const j=next()%(i+1);[order[i],order[j]]=[order[j],order[i]];} const q=structuredClone(f); for(const key of Object.keys(q.columns))q.columns[key]=order.map(i=>f.columns[key][i]); same(signature(draw(q)),want); }
@@ -105,6 +108,7 @@ test("D6/D7 cells reconstruct slots, conserve area, have the gap and rounded pai
     const vals=r.index.marks.map(m=>Number(m.card.rows[0].value.replaceAll(",","").replace(" GB",""))), vmax=Math.max(...vals), sum=vals.reduce((s,v)=>s+Math.max(v/vmax,1e-12),0);
     bs.forEach((b,i)=>{ checked++; assert.equal(b.rx,2.5); assert.ok(b.fill.startsWith("--chart-")); assert.equal(b.datum,i);
       for(const k of ["x","y","w","h"])near(b[k]*100,Math.round(b[k]*100),1e-7);
+      same(r.index.marks[i].box,{x:b.x,y:b.y,w:b.w,h:b.h},"paint and lookup share the rounded cell");
       if(b.w===1||b.h===1){clamped++;minimum=true;return;}
       const slot={x:b.x-1,y:b.y-1,w:b.w+2,h:b.h+2}; total+=slot.w*slot.h;
       assert.ok(slot.x>=plot.x-0.02&&slot.y>=plot.y-0.02&&slot.x+slot.w<=plot.x+plot.w+0.02&&slot.y+slot.h<=plot.y+plot.h+0.02);
@@ -152,6 +156,7 @@ test("D8 ink follows on-fill contrast, grid ink, and changed text tokens alter f
 test("D9/D10 lookup boxes match cells: centres, corners, gaps, dense last-containing and keys", () => {
   for(const [name,w,h]of[["deep",480,320],["many-leaves",120,60],["many-leaves",80,24]]) {
     const r=draw(FX[name],w,h),bs=cells(r),m=layer(r); assert.equal(r.index.marks.length,bs.length);
+    assert.ok(r.index.series.every(s=>s.at.length===0),"the reference page's series-point probe has no treemap point");
     for(const [i,b]of bs.entries()){const entry=r.index.marks[i];same(entry.box,{x:b.x,y:b.y,w:b.w,h:b.h});assert.equal(entry.row,0);assert.equal(entry.emphasis,"ring");
       for(const [x,y]of[[b.x+b.w/2,b.y+b.h/2],...(w>120?[[b.x+0.4,b.y+0.4],[b.x+b.w-0.4,b.y+b.h-0.4]]:[])]){
         const containing=r.index.marks.filter(e=>x>=e.box.x&&y>=e.box.y&&x<=e.box.x+e.box.w&&y<=e.box.y+e.box.h).at(-1);
@@ -182,4 +187,37 @@ test("D11 one keyboard row, ends and cut-title exit; D12 ring and dim", () => {
     const ring=scene.prims.find(p=>p.k==="rect"&&p.role==="guide");assert.ok(ring);assert.equal(ring.rx,4);assert.equal(ring.stroke,cells(r)[0].fill);
     const dim=cells(r).filter(p=>p.series!==scene.active).length;assert.equal(dim,name==="plain"?3:0);
   }
+});
+
+test("D10 reduced cards keep the leaf row, then add heading and share from fixture rows", () => {
+  const f=input([50,30,15,5],["Cars","Boats","Bikes","Trains"]);f.columns.g=Array(4).fill("Group 0");
+  f.document.config.encoding.path.unshift({field:"g"});f.document.config.encoding.size.unit="GB";
+  const width=R.measure.measurer(null).fn,measures=I.measures(R,"light");
+  for(const [depth,heights]of[[2,[24,40,55]],[1,[24,40,55]]]) {
+    const q=structuredClone(f);if(depth===1)q.document.config.encoding.path.shift();
+    for(const h of heights) {
+      const r=draw(q,240,h),card=I.markCard(R,width,I.markLines(layer(r),0),null,{w:240,h},measures);
+      const got=card.lines.map(l=>l.line.kind==="heading"?l.text:l.label+" | "+l.line.value);
+      const expected=h===24?["Cars | 50 GB"]:depth===2?(h===40?["Group 0","Cars | 50 GB"]:["Group 0","Cars | 50 GB","Share of all | 50%"]):["Cars | 50 GB","Share of all | 50%"];
+      same(got,expected);
+    }
+  }
+});
+
+test("D15 hostile treemap cell names are escaped by the string writer in both forms", () => {
+  const r=draw(FX.hostile,960,540);
+  assert.ok(r.primitives.some(p=>p.role==="mark"&&p.k==="text"&&p.text.includes("<script>")));
+  for(const form of ["page","standalone"]) {
+    const svg=R.writeString(r.primitives,form,"light");
+    assert.doesNotMatch(svg,/<script|<img|<foreignObject/i,"treemap hostile text must stay text");
+    assert.match(svg,/&lt;script&gt;/);assert.match(svg,/__proto__/);
+  }
+});
+
+test("D10 render never reads interaction fields, even when their value would be discarded", () => {
+  const E=engine();
+  for(const [name,field]of Object.entries(E.tables.LOOK)) if(field.consumer==="interaction") {
+    Object.defineProperty(field,"value",{get(){throw new Error(name+" reached render");}});
+  }
+  for(const f of Object.values(FX))for(const [w,h]of[[960,540],[200,140],[80,24]])draw(f,w,h,E);
 });

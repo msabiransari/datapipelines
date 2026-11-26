@@ -68,6 +68,7 @@ enum class ChartType(
 
     /** One aggregate on an authored range, drawn as an open arc (§4.5; #1075). */
     GAUGE("gauge", listOf(ChartChannel("value", required = true, node = ChannelNode.Shape("value"))), ChartMarkPolicy.LINE),
+
     /** Nested leaf rectangles, with a key-only legend (§4.5 treemap; #1078). */
     TREEMAP("treemap", ChartChannelNodes.treemap, ChartMarkPolicy.AREA),
     ;
@@ -185,12 +186,13 @@ private object ChartChannelNodes {
             ChartChannel(
                 "color",
                 required = false,
-                node = ChannelNode.OneOf(
-                    listOf(
-                        ShapeAlternative("series", listOf("nominal", "ordinal")),
-                        ShapeAlternative("shade", listOf("quantitative")),
+                node =
+                    ChannelNode.OneOf(
+                        listOf(
+                            ShapeAlternative("series", listOf("nominal", "ordinal")),
+                            ShapeAlternative("shade", listOf("quantitative")),
+                        ),
                     ),
-                ),
             ),
         )
 

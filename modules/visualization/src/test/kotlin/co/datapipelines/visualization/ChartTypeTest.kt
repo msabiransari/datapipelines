@@ -87,7 +87,8 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+        ChartType.WIRE_VALUES shouldBe
+            listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
     }
 
     @Test
@@ -97,12 +98,13 @@ class ChartTypeTest {
         channels.map { it.required } shouldBe listOf(true, true, false)
         channels[0].node shouldBe ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))
         channels[1].node shouldBe ChannelNode.Shape("value")
-        channels[2].node shouldBe ChannelNode.OneOf(
-            listOf(
-                ShapeAlternative("series", listOf("nominal", "ordinal")),
-                ShapeAlternative("shade", listOf("quantitative")),
-            ),
-        )
+        channels[2].node shouldBe
+            ChannelNode.OneOf(
+                listOf(
+                    ShapeAlternative("series", listOf("nominal", "ordinal")),
+                    ShapeAlternative("shade", listOf("quantitative")),
+                ),
+            )
         ChartType.TREEMAP.policy shouldBe ChartMarkPolicy.AREA
     }
 

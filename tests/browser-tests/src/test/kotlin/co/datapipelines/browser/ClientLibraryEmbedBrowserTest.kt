@@ -536,6 +536,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(GAUGE_CONFIG))
                     body.toString()
                 },
+                "treemap" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Treemap")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(TREEMAP_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -546,6 +552,9 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             check(body.split(BAR_MARK).size == 2) { "the bar body holds its mark type once" }
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
+
+        private const val TREEMAP_CONFIG =
+            """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],"size":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
 
         /** Gauge on the board's INTEGER y: 10 + 20 + 30 + 40 = 100 of 200 (#1075). */
         const val GAUGE_CONFIG =

@@ -140,7 +140,7 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge")) {
+                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +232,7 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/treemap") shouldBeGreaterThanOrEqual MIN_TREEMAP_TILES
                 counts.getValue("$theme/gauge") shouldBeGreaterThanOrEqual MIN_GAUGE_TILES
                 counts.getValue("$theme/arcs") shouldBeGreaterThanOrEqual MIN_ARCS
                 counts.getValue("$theme/funnel") shouldBeGreaterThanOrEqual MIN_FUNNEL_TILES
@@ -555,7 +556,8 @@ class LookReferencePageBrowserTest {
 
         /** Brief 1070: nine heatmap tiles, 145 cells across the seven rendered tiles. */
         private const val MIN_HEATMAP_TILES = 8
-        private const val MIN_CELLS = 140
+        private const val MIN_CELLS = 241
+        private const val MIN_TREEMAP_TILES = 10
         private const val MIN_TEXTS = 850
         private const val MIN_VALUES = 5500
         private const val MIN_ELEMENTS = 2600
@@ -806,6 +808,7 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const treemap = s.wire === "treemap";
         const gauge = s.wire === "gauge";
         const track = gauge ? prims.find(p => p.k === "path" && p.role === "grid") : null;
         const gaugeRadius = track ? track.d[4] : 0;
@@ -845,7 +848,7 @@ private object LookReferenceChecks {
                 // Heatmap corners use the cell token, capped by half either side.
                 const box = el.getBBox();
                 const half = Math.abs(2 * Number(v) - box.width) < 0.05 || Math.abs(2 * Number(v) - box.height) < 0.05;
-                ok = has([radius], Number(v)) || (heatmap && (has([t.n("--chart-cell-radius")], Number(v)) || half)) || (funnel && Number(v) < radius && half);
+                ok = has([radius], Number(v)) || (treemap && has([t.n("--chart-cell-radius")], Number(v))) || (heatmap && (has([t.n("--chart-cell-radius")], Number(v)) || half)) || (funnel && Number(v) < radius && half);
                 break;
               }
               case "d": {
@@ -894,7 +897,7 @@ private object LookReferenceChecks {
         if (waterfall) counts.waterfallBars += marks.length;
         if (isBox) counts.boxPoints += points.length;
         const slices = pie ? (s.index.marks || []).filter((entry) => entry.shape.kind === "sector") : [];
-        const cells = heatmap ? marks.filter((p) => p.k === "rect") : [];
+        const cells = heatmap || treemap ? marks.filter((p) => p.k === "rect") : [];
         const stages = funnel ? of("mark", "rect") : [];
         counts.stages += stages.length;
         counts.cells += cells.length;
@@ -947,6 +950,7 @@ private object LookReferenceChecks {
         // --- the end dot (contract §2 points): one per drawn line, on its last point
         if (e.dots !== undefined && dots.length !== e.dots) bad(dots.length + " end dots, the expect says " + e.dots);
         // --- scatter: one point per row drawn (brief 1062 D3), each inside the plot (D5, #1066's pad)
+        if (treemap && e.cells !== undefined && cells.length !== e.cells) bad(cells.length + " treemap cells, the expect says " + e.cells);
         if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
         if (gauge && e.arcs !== undefined && gaugeArcs.length !== e.arcs) bad("gauge arc count differs from expect");
         if ((scatter || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);

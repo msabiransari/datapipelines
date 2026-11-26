@@ -127,6 +127,38 @@ export function expectedLineMarks(fx, hiddenIds) {
   return points.filter((p) => !over.has(p.at) && !hiddenIds.includes(p.sid)).length;
 }
 
+/** Treemap I3, from delivered rows alone (1078 D18). Hidden ids never hide key-only legend entries. */
+export function expectedTreemapMarks(fx, hiddenIds) {
+  const { path, size, color } = fx.document.config.encoding, groups = new Map();
+  const n = Math.max(0, ...Object.values(fx.columns).map(c => c.length));
+  for (let row = 0; row < n; row++) {
+    const values = path.map(p => fx.columns[p.field][row]);
+    if (color && color.type !== "quantitative") values.push(fx.columns[color.field][row]);
+    if (values.some(v => v == null)) continue;
+    const key = JSON.stringify(values.map(v => [typeof v, String(v)]));
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(size.aggregate === "count" ? 1 : fx.columns[size.field][row]);
+  }
+  let count = 0;
+  for (const values of groups.values()) {
+    const xs = values.filter(v => v != null);
+    let n;
+    if (size.aggregate === "count") n = values.length;
+    else if (!xs.length) continue;
+    else if (xs.some(v => typeof v === "string")) n = heatmapExact(xs, size.aggregate);
+    else if (size.aggregate === "min") n = Math.min(...xs);
+    else if (size.aggregate === "max") n = Math.max(...xs);
+    else {
+      // Order by magnitude descending, then number ascending, independently of the implementation's helper.
+      xs.sort((a, b) => Math.abs(a) === Math.abs(b) ? (a < b ? -1 : a > b ? 1 : 0) : Math.abs(a) > Math.abs(b) ? -1 : 1);
+      n = xs.reduce((a, b) => a + b, 0) / (size.aggregate === "mean" ? xs.length : 1);
+    }
+    if (Number.isFinite(n) && n < 0) return 0;
+    if (Number.isFinite(n) && n > 0) count++;
+  }
+  return count;
+}
+
 /**
  * I3's expected count for a scatter fixture (brief 1062 D3, D11), computed by this test from the delivered columns,
  * never by the engine: one mark per row, no aggregation. A row is no mark when its series is null; when its x or y is
@@ -363,38 +395,6 @@ export function expectedHeatmapMarks(fx) {
       if (a === "mean") value /= values.length;
     }
     if (Number.isFinite(value)) count++;
-  }
-  return count;
-}
-
-/** Treemap I3, from delivered rows alone (1078 D18). Hidden ids never hide key-only legend entries. */
-export function expectedTreemapMarks(fx, hiddenIds) {
-  const { path, size, color } = fx.document.config.encoding, groups = new Map();
-  const n = Math.max(0, ...Object.values(fx.columns).map(c => c.length));
-  for (let row = 0; row < n; row++) {
-    const values = path.map(p => fx.columns[p.field][row]);
-    if (color && color.type !== "quantitative") values.push(fx.columns[color.field][row]);
-    if (values.some(v => v == null)) continue;
-    const key = JSON.stringify(values.map(v => [typeof v, String(v)]));
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(size.aggregate === "count" ? 1 : fx.columns[size.field][row]);
-  }
-  let count = 0;
-  for (const values of groups.values()) {
-    const xs = values.filter(v => v != null);
-    let n;
-    if (size.aggregate === "count") n = values.length;
-    else if (!xs.length) continue;
-    else if (xs.some(v => typeof v === "string")) n = heatmapExact(xs, size.aggregate);
-    else if (size.aggregate === "min") n = Math.min(...xs);
-    else if (size.aggregate === "max") n = Math.max(...xs);
-    else {
-      // Order by magnitude descending, then number ascending, independently of the implementation's helper.
-      xs.sort((a, b) => Math.abs(a) === Math.abs(b) ? (a < b ? -1 : a > b ? 1 : 0) : Math.abs(a) > Math.abs(b) ? -1 : 1);
-      n = xs.reduce((a, b) => a + b, 0) / (size.aggregate === "mean" ? xs.length : 1);
-    }
-    if (Number.isFinite(n) && n < 0) return 0;
-    if (Number.isFinite(n) && n > 0) count++;
   }
   return count;
 }

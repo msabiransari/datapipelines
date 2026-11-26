@@ -40,7 +40,7 @@
       if (!leaves.has(key)) leaves.set(key, { key: key, keys: keys, values: values, group: group, sizes: [], shades: [] });
       var leaf = leaves.get(key);
       leaf.sizes.push(V ? V[i] : 1);
-      if (S) leaf.shades.push(S[i]);
+      if (S && !D.isNull(S[i])) leaf.shades.push(S[i]);
     }
     // O-15 precedes aggregation: even groups whose measures are all null count towards the series cap.
     if (!shade && groups.size > R.tables.cap("series")) return { rule: { code: "chart.too_many_series", details: { series: groups.size, limit: R.tables.cap("series") } } };
