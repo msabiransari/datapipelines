@@ -85,7 +85,7 @@ test("writeDom uses createElementNS, setAttribute, textContent (and appendChild/
 });
 
 test("the hostile fixture is text in the DOM: every hostile string is a text node, never an element or a name", () => {
-  assert.deepEqual(HOSTILES.map((f) => f.wire), ["area", "bar", "box", "heatmap", "line", "pie", "scatter"]);
+  assert.deepEqual(HOSTILES.map((f) => f.wire), ["area", "bar", "box", "heatmap", "line", "pie", "scatter", "waterfall"]);
   for (const f of HOSTILES) {
     const { svg } = fakeDocument();
     R.writeDom(R.render(inputOf(f.fixture, 960, 540)).primitives, svg);

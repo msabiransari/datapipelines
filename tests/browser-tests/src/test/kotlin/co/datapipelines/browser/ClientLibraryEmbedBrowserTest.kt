@@ -512,6 +512,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
                     body.toString()
                 },
+                "waterfall" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Waterfall")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(WATERFALL_CONFIG))
+                    body.toString()
+                },
                 "pie" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Pie")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -539,6 +545,11 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val BOX_CONFIG =
             """{"mark":{"type":"box"},"encoding":{"x":{"field":"x","type":"nominal","sort":"ascending"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""
+
+        /** Waterfall over the board's category and summed INTEGER measure (#1073). */
+        const val WATERFALL_CONFIG =
+            """{"mark":{"type":"waterfall"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
+                """"y":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
 
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 

@@ -87,7 +87,7 @@ class ChartTypeTest {
             )
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
-        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box")
+        ChartType.WIRE_VALUES shouldBe listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall")
     }
 
     @Test
@@ -170,6 +170,16 @@ class ChartTypeTest {
         shouldThrow<IllegalArgumentException> { ChannelNode.ObjectOf(emptyMap()) }
         ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value"))).wire() shouldBe
             mapOf("node" to "object", "members" to mapOf("y" to mapOf("node" to "shape", "name" to "value")))
+    }
+
+    @Test
+    fun `waterfall has a band and one value under the area policy`() {
+        ChartType.WATERFALL.channels.map { it.wire() } shouldBe
+            listOf(
+                mapOf("key" to "x", "required" to true, "node" to mapOf("node" to "shape", "name" to "band")),
+                mapOf("key" to "y", "required" to true, "node" to mapOf("node" to "shape", "name" to "value")),
+            )
+        ChartType.WATERFALL.policy shouldBe ChartMarkPolicy.AREA
     }
 
     private companion object {

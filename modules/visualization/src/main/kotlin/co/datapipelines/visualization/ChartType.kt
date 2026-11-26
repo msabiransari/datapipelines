@@ -59,6 +59,7 @@ enum class ChartType(
 
     /** Quartiles and whiskers per category, with outside points (§4.5 box; #1072). */
     BOX("box", ChartChannelNodes.box, ChartMarkPolicy.POINT),
+
     /** Running changes over a category band, with an optional closing total (§4.5; #1073). */
     WATERFALL("waterfall", ChartChannelNodes.waterfall, ChartMarkPolicy.AREA),
     ;
