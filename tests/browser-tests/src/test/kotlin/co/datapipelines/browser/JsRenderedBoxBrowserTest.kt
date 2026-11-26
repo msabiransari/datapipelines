@@ -92,6 +92,56 @@ class JsRenderedBoxBrowserTest {
         }
     }
 
+    @Test
+    fun `long labels remain reachable after the last box and plain rows stop`() {
+        val s = PAGE.open(browser, VIEW_W, VIEW_H)
+        s.context.use {
+            for (fixture in listOf("plain", "long-labels")) {
+                for ((w, h) in listOf(80 to 24, 480 to 320, 960 to 540)) {
+                    s.page.evaluate(DRAW, listOf(fixture, w, h, false))
+                    s.page.mouse().move((VIEW_W - 1).toDouble(), (VIEW_H - 1).toDouble())
+                    s.page.locator("#chart").focus()
+                    val plan =
+                        listOf(
+                            "ArrowRight" to 0,
+                            "ArrowLeft" to 0,
+                            "ArrowRight" to 1,
+                            "ArrowRight" to 2,
+                            "Home" to 0,
+                            "End" to 2,
+                        )
+                    for ((key, datum) in plan) {
+                        s.page.keyboard().press(key)
+                        @Suppress("UNCHECKED_CAST")
+                        val got = s.page.evaluate(KEY, datum) as Map<String, Any>
+                        withClue("$fixture $w x $h $key -> $datum: $got") {
+                            got["ok"] shouldBe true
+                            got["kept"] shouldBe "Middle"
+                        }
+                    }
+                    s.page.keyboard().press("ArrowRight")
+                    if (fixture == "long-labels" && h > 24) {
+                        // The full text is the independently pinned fixture label, not its shortened DOM text.
+                        s.page.evaluate(
+                            "() => [...document.querySelectorAll('#chart text.dp-tooltip')].map(e=>e.textContent).join(' ')",
+                        ) shouldBe "A very long category name that keeps going and going"
+                        s.page.keyboard().press("ArrowLeft")
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val last = s.page.evaluate(KEY, 2) as Map<String, Any>
+                    withClue("$fixture $w x $h returns to or stays on last box: $last") {
+                        last["ok"] shouldBe true
+                        last["kept"] shouldBe "Middle"
+                    }
+                    s.page.keyboard().press("Escape")
+                }
+            }
+            s.errors.shouldBeEmpty()
+            s.violations.shouldBeEmpty()
+            s.off.shouldBeEmpty()
+        }
+    }
+
     private fun card(
         overlap: Boolean,
         point: Boolean,

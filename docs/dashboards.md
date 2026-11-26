@@ -238,7 +238,9 @@ each as `{field: [values]}` (§2.1.2).
   `mark_count` counts boxes. One series has no legend. The card heads with the category, then Highest inside,
   Upper quarter, Middle, Lower quarter, Lowest inside and Outside points when nonzero; Middle is kept in a small
   card. The pointer on an outside point leads with This point. Left/Right walk boxes, Home/End their ends;
-  Up/Down stay. Outside points are pointer targets only.
+  Up/Down stay. Left stays at the first box. Right after the last box reaches the first shortened-text
+  target, showing its full label, when one exists; otherwise it stays at the last box.
+  Outside points are pointer targets only.
 
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each

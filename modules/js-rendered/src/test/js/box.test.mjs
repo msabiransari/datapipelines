@@ -193,6 +193,26 @@ test('A.4 circle precedence, box-width hit shape, no near reach, row-zero keyboa
   }
 });
 
+test('A.4 box row ends retain shortened-text keyboard access and otherwise stop',()=>{
+  const fullLabel='A very long category name that keeps going and going';
+  const target=datum=>({kind:'mark',id:'measure',datum});
+  for(const name of ['plain','long-labels'])for(const [w,h] of [[80,24],[480,320],[960,540]]){
+    const {r}=draw(FX[name],w,h),m=I.modelOf(E,r,E.measure.measurer(null).fn);
+    const keys=r.index.marks.filter(e=>e.key);
+    same(keys.map(e=>[e.datum,e.row,e.shape.kind]),[[0,0,'box'],[1,0,'box'],[2,0,'box']]);
+    assert.ok(r.index.marks.filter(e=>e.shape.kind==='point').every(e=>e.key===false));
+    for(const [from,key,want] of [[0,'ArrowLeft',0],[0,'ArrowRight',1],[1,'ArrowRight',2],[2,'ArrowLeft',1],[2,'Home',0],[0,'End',2],[1,'ArrowDown',1],[1,'ArrowUp',1]])same(I.keyTarget(m,target(from),key).target,target(want));
+    const next=I.keyTarget(m,target(2),'ArrowRight').target;
+    if(name==='long-labels'&&h>24){
+      assert.equal(m.cuts.length,2);same(next,{kind:'cut',n:0});
+      assert.equal(m.cuts[next.n].text,fullLabel);
+      same(I.keyTarget(m,next,'ArrowLeft').target,target(2));
+    }else{
+      assert.equal(m.cuts.length,0);same(next,target(2));
+    }
+  }
+});
+
 test('A.5 direct oracle at 1000/1001, exact 20-decimal and 25-digit caps and boxes-first refusal',()=>{
   const groups=groupValues(5,200);groups.last=Array(1000).fill(10).concat([100]);
   const exactEdge=Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.map(n=>'10.'+String(n).padStart(20,'0'))]));
