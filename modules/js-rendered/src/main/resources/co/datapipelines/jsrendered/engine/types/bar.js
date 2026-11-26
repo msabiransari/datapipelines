@@ -214,29 +214,30 @@
       if (allExact) return T.value(D.aggregate(texts, "sum", value.field).exact, look("stackTotalFormat"));
       return T.value(sum, look("stackTotalFormat"));
     };
-    // The texts the layout reserves room for: per visible category the stack total, or the visible grouped cells' texts.
-    // A function of `visible` (like extent and totals) so the reservation follows the same series the label paints.
-    var endLabels = null;
-    if (labelsOn) {
-      endLabels = function (visible) {
-        var out = [];
-        if (stacked) {
-          for (var c3 = 0; c3 < categories.length; c3++) {
-            var text = stackTotalText(visible, c3);
-            if (text !== null) out.push(text);
-          }
-        } else {
-          for (var c3 = 0; c3 < categories.length; c3++) {
-            for (var s4 = 0; s4 < series.length; s4++) {
-              var cv = cells[s4][c3];
-              if (cv.num === null) continue;
-              out.push(cv.text);
-            }
+    // The texts the layout reserves room for at the value axis's data end (look contract §4.3): per category the stack's
+    // total (a stacked bar) or the cells' own texts (grouped), in the short form. It keeps the layout's array contract
+    // (null, or the texts) and is refreshed by extent(visible) — which the layout calls before it reads endLabels in
+    // both orientations — so the reservation follows the same series the label paints, with no change to the shared
+    // layout part.
+    var endLabels = labelsOn ? [] : null;
+    var refreshEndLabels = function (visible) {
+      if (endLabels === null) return;
+      endLabels.length = 0;
+      if (stacked) {
+        for (var c3 = 0; c3 < categories.length; c3++) {
+          var text = stackTotalText(visible, c3);
+          if (text !== null) endLabels.push(text);
+        }
+      } else {
+        for (var c3 = 0; c3 < categories.length; c3++) {
+          for (var s4 = 0; s4 < series.length; s4++) {
+            var cv = cells[s4][c3];
+            if (cv.num === null) continue;
+            endLabels.push(cv.text);
           }
         }
-        return out;
-      };
-    }
+      }
+    };
     var a0 = value.aggregate.charAt(0).toUpperCase() + value.aggregate.slice(1);
     var vt = titleOf(value, value.field ? a0 + " of " + value.field : fields ? a0 : "Count");
     if (vt !== null && !fields && typeof value.unit === "string" && value.unit !== "") vt = vt + " (" + value.unit + ")";
@@ -308,6 +309,7 @@
         domain: value.scale && value.scale.domain ? value.scale.domain : null,
         endLabels: endLabels,
         extent: function (visible) {
+          refreshEndLabels(visible);
           if (log) return logExtent(series, cells, visible);
           var lo = 0, hi = 0;
           for (var c2 = 0; c2 < categories.length; c2++) {
