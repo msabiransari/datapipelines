@@ -186,7 +186,8 @@
    "struck": [],
    "dots": 0,
    "points": 2
-  }
+  },
+  "hidden": []
  },
  {
   "id": "both-sides",
@@ -319,7 +320,8 @@
    "struck": [],
    "dots": 0,
    "points": 4
-  }
+  },
+  "hidden": []
  },
  {
   "id": "no-outliers",
@@ -509,7 +511,8 @@
    "struck": [],
    "dots": 0,
    "points": 0
-  }
+  },
+  "hidden": []
  },
  {
   "id": "flat-iqr",
@@ -610,7 +613,8 @@
    "struck": [],
    "dots": 0,
    "points": 2
-  }
+  },
+  "hidden": []
  },
  {
   "id": "log",
@@ -706,7 +710,8 @@
    "struck": [],
    "dots": 0,
    "points": 1
-  }
+  },
+  "hidden": []
  },
  {
   "id": "title-unit",
@@ -841,7 +846,8 @@
    "struck": [],
    "dots": 0,
    "points": 1
-  }
+  },
+  "hidden": []
  },
  {
   "id": "empty",
@@ -904,7 +910,8 @@
    "struck": [],
    "dots": 0,
    "points": 0
-  }
+  },
+  "hidden": []
  },
  {
   "id": "hostile",
@@ -947,7 +954,7 @@
      }
     },
     "title": {
-     "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title",
+     "text": "<b>bold?</b> & <i>title</i> <img src=x onerror=alert(1)>",
      "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
     }
    }
@@ -1055,7 +1062,8 @@
    "struck": [],
    "dots": 0,
    "points": 1
-  }
+  },
+  "hidden": []
  },
  {
   "id": "refused",
@@ -1627,7 +1635,8 @@
    "dots": 0,
    "points": 0,
    "code": "chart.too_many_marks"
-  }
+  },
+  "hidden": []
  },
  {
   "id": "points-at-ends",
@@ -1706,6 +1715,7 @@
    "struck": [],
    "dots": 0,
    "points": 2
-  }
+  },
+  "hidden": []
  }
 ]

@@ -1,6 +1,6 @@
 {
  "display_name": "Box distribution",
- "description": "Two measures per row, one series.",
+ "description": "Approximate numeric source (REAL/FLOAT/DOUBLE): canonical DECIMAL with omitted scale, one series.",
  "renderer": {
   "kind": "chart",
   "version": "1"

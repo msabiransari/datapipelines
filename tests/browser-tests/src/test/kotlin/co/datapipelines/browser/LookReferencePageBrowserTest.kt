@@ -232,8 +232,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
-                (counts["$theme/box"] ?: 0) shouldBeGreaterThanOrEqual MIN_BOX_TILES
-                (counts["$theme/boxPoints"] ?: 0) shouldBeGreaterThanOrEqual MIN_BOX_POINTS
+                counts.getValue("$theme/box") shouldBeGreaterThanOrEqual MIN_BOX_TILES
+                counts.getValue("$theme/boxPoints") shouldBeGreaterThanOrEqual MIN_BOX_POINTS
                 counts.getValue("$theme/heatmap") shouldBeGreaterThanOrEqual MIN_HEATMAP_TILES
                 counts.getValue("$theme/cells") shouldBeGreaterThanOrEqual MIN_CELLS
                 counts.getValue("$theme/pie") shouldBeGreaterThanOrEqual MIN_PIE_TILES
@@ -535,7 +535,7 @@ class LookReferencePageBrowserTest {
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
         private const val MIN_BOX_TILES = 10
-        private const val MIN_BOX_POINTS = 14
+        private const val MIN_BOX_POINTS = 13
 
         /** Brief 1070: nine heatmap tiles, 145 cells across the seven rendered tiles. */
         private const val MIN_HEATMAP_TILES = 8

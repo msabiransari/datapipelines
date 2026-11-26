@@ -56,6 +56,7 @@ enum class ChartType(
 
     /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
     HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
+
     /** Quartiles and whiskers per category, with outside points (§4.5 box; #1072). */
     BOX("box", ChartChannelNodes.box, ChartMarkPolicy.POINT),
     ;
