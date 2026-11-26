@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.72 (living document — updated as enums evolve)
+**Status:** v1.73 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1427,7 +1427,6 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `box` | One distribution per optional category band `x`; quantitative position `y`, no aggregation; median, interpolated quartiles, whiskers at the last values inside 1.5 × IQR and optional outside points; at most 50 boxes (#1072) |
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
 | `funnel` | Centred stage bars: required `stage` band and one aggregated `value`; value or first/previous shares, one colour, no legend, at most 12 stages (#1074) |
-
 | `gauge` | One aggregate `value` on a required domain; 240° open arc, optional target and up to four tone bands; one mark (#1075) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
