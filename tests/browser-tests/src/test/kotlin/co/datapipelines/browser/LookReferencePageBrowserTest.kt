@@ -140,7 +140,7 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall")) {
+                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel")) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +232,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/funnel") shouldBeGreaterThanOrEqual MIN_FUNNEL_TILES
+                counts.getValue("$theme/stages") shouldBeGreaterThanOrEqual MIN_STAGES
                 counts.getValue("$theme/waterfall") shouldBeGreaterThanOrEqual MIN_WATERFALL_TILES
                 counts.getValue("$theme/waterfallBars") shouldBeGreaterThanOrEqual MIN_WATERFALL_BARS
                 counts.getValue("$theme/box") shouldBeGreaterThanOrEqual MIN_BOX_TILES
@@ -536,6 +538,10 @@ class LookReferencePageBrowserTest {
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
+
+        /** Brief 1074: twelve tiles, 43 stages across the nine rendered tiles under each theme. */
+        private const val MIN_FUNNEL_TILES = 12
+        private const val MIN_STAGES = 43
         private const val MIN_WATERFALL_TILES = 9
         private const val MIN_WATERFALL_BARS = 83
         private const val MIN_BOX_TILES = 10
@@ -725,7 +731,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -794,6 +800,7 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const funnel = s.wire === "funnel";
         const waterfall = s.wire === "waterfall";
         // Box outside points use their own at-rest radius, ring and opacity (brief 1072 D17).
         const isBox = s.wire === "box";
@@ -828,7 +835,7 @@ private object LookReferenceChecks {
                 // Heatmap corners use the cell token, capped by half either side.
                 const box = el.getBBox();
                 const half = Math.abs(2 * Number(v) - box.width) < 0.05 || Math.abs(2 * Number(v) - box.height) < 0.05;
-                ok = has([radius], Number(v)) || (heatmap && (has([t.n("--chart-cell-radius")], Number(v)) || half));
+                ok = has([radius], Number(v)) || (heatmap && (has([t.n("--chart-cell-radius")], Number(v)) || half)) || (funnel && Number(v) < radius && half);
                 break;
               }
               case "d": {
@@ -875,6 +882,8 @@ private object LookReferenceChecks {
         if (isBox) counts.boxPoints += points.length;
         const slices = pie ? (s.index.marks || []).filter((entry) => entry.shape.kind === "sector") : [];
         const cells = heatmap ? marks.filter((p) => p.k === "rect") : [];
+        const stages = funnel ? of("mark", "rect") : [];
+        counts.stages += stages.length;
         counts.cells += cells.length;
         counts.slices += slices.length;
         counts.labels += labels.length;
@@ -927,6 +936,16 @@ private object LookReferenceChecks {
         // --- scatter: one point per row drawn (brief 1062 D3), each inside the plot (D5, #1066's pad)
         if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
         if ((scatter || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
+        if (funnel) {
+          if (stages.length !== s.summary.marks) bad("funnel count differs from summary.marks");
+          if (of("mark", "circle").length) bad("funnel draws a circle");
+          stages.forEach((p, i) => {
+            if (Math.abs(p.x + p.w / 2 - stages[0].x - stages[0].w / 2) > 0.02) bad("funnel centres differ");
+            if (p.x < plot.x - TOL || p.y < plot.y - TOL || p.x + p.w > plot.x + plot.w + TOL || p.y + p.h > plot.y + plot.h + TOL) bad("funnel stage crosses the plot edge");
+            if (p.w < Math.min(6, plot.w) - 0.02) bad("funnel stage below least width");
+            if (i && p.y < stages[i - 1].y + stages[i - 1].h - 0.02) bad("funnel stages overlap");
+          });
+        }
         if (heatmap) {
           if (e.cells !== cells.length) bad(cells.length + " cells, the expect says " + e.cells);
           if (s.summary.marks !== cells.length) bad("heatmap count differs from summary.marks");

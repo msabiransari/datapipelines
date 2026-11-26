@@ -524,6 +524,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(WATERFALL_CONFIG))
                     body.toString()
                 },
+                "funnel" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Funnel")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(FUNNEL_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -550,6 +556,11 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val WATERFALL_CONFIG =
             """{"mark":{"type":"waterfall"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
                 """"y":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+
+        /** Funnel over the board's non-null category and summed INTEGER measure (#1074). */
+        const val FUNNEL_CONFIG =
+            """{"mark":{"type":"funnel"},"encoding":{"stage":{"field":"x","type":"nominal","sort":null},""" +
+                """"value":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
 
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 

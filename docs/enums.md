@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.71 (living document — updated as enums evolve)
+**Status:** v1.72 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1436,6 +1436,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v1.72 | 1074 (#1074) | **§63:** Add funnel: centred bars for up to twelve ordered stages, one aggregate and no legend. |
 | 2026-11-26 | v1.71 | 1073 (#1073) | Add waterfall running changes and total. |
 | 2026-11-25 | v1.70 | 1072 (#1072) | Add box: median, quartiles and whiskers per category. |
 | 2026-11-24 | v1.69 | 1070 (#1070) | Add heatmap: two category axes and a sequential or diverging shade per cell. |

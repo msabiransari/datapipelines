@@ -194,6 +194,7 @@ class ChartTypeTest {
                     ),
             )
     }
+
     @Test
     fun `funnel has a stage band and a single value with area policy`() {
         ChartType.FUNNEL.channels shouldBe
@@ -203,5 +204,4 @@ class ChartTypeTest {
             )
         ChartType.FUNNEL.policy shouldBe ChartMarkPolicy.AREA
     }
-
 }

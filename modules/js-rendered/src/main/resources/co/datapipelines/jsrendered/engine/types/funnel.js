@@ -60,7 +60,7 @@
     if (vtitle !== null && typeof va.unit === "string" && va.unit !== "") vtitle += " (" + va.unit + ")";
     return {
       series: [{ id: "measure", title: vtitle === null ? "" : vtitle, colour: R.theme.SERIES[0] }],
-      stages: stages, shares: shares, markCount: stages.length, warnings: warnings, legend: undefined,
+      stages: stages, shares: shares, markCount: stages.length, warnings: warnings, legend: null,
       labels: doc.config.mark.labels === undefined ? look("funnelLabelsDefault") : doc.config.mark.labels,
       value: va, vtitle: vtitle,
     };

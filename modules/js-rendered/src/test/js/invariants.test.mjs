@@ -19,8 +19,6 @@ const fromPrimitives = (r, v) => v.marks;
 const fromPoints = (r) => r.index.series.reduce((n, s) => n + s.at.length, 0);
 const fromLookup = (r) => r.index.marks.length;
 const ORACLE = {
-  funnel: { expected: expectedFunnelMarks, held: fromLookup, what: "index's marks" },
-  waterfall: { expected: expectedWaterfallMarks, held: fromPrimitives, what: "primitives" },
   bar: { expected: expectedBarMarks, held: fromPrimitives, what: "primitives" },
   line: { expected: expectedLineMarks, held: fromPoints, what: "index" },
   area: { expected: expectedLineMarks, held: fromPoints, what: "index" },
@@ -28,6 +26,8 @@ const ORACLE = {
   pie: { expected: expectedPieMarks, held: fromLookup, what: "index's marks" },
   heatmap: { expected: expectedHeatmapMarks, held: fromLookup, what: "index's marks" },
   box: { expected: expectedBoxMarks, held: (r) => r.index.marks.filter(m => m.shape.kind === "box").length, what: "index boxes" },
+  waterfall: { expected: expectedWaterfallMarks, held: fromPrimitives, what: "primitives" },
+  funnel: { expected: expectedFunnelMarks, held: fromLookup, what: "index's marks" },
 };
 
 test("I3's oracle table holds every wire of the fixtures", () => {

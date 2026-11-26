@@ -148,8 +148,8 @@ test("whole-row lookup includes name, share, tiny bar and gap; keys follow rows 
     for (const k of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]) assert.deepEqual(plain(key(m, null, k)), target(0));
     for (let j = 0; j < n; j++) {
       const e = r.index.marks[j]; assert.equal(e.row, j); assert.equal(e.emphasis, null);
-      assert.equal(R.lookup.at(r.index, e.shape.x + 1, e.shape.y + e.shape.h / 2), j);
-      assert.equal(R.lookup.at(r.index, e.shape.x + e.shape.w - 1, e.shape.y + e.shape.h / 2), j);
+      assert.equal(R.lookup.at(r.index, e.shape.x + 1, e.shape.y + e.shape.h / 2, 0), j);
+      assert.equal(R.lookup.at(r.index, e.shape.x + e.shape.w - 1, e.shape.y + e.shape.h / 2, 0), j);
       for (const k of ["ArrowLeft", "Home", "End", "ArrowRight"]) assert.deepEqual(plain(key(m, target(j), k)), target(j));
       assert.deepEqual(plain(key(m, target(j), "ArrowDown")), target(Math.min(n - 1, j + 1)));
       assert.deepEqual(plain(key(m, target(j), "ArrowUp")), target(Math.max(0, j - 1)));
@@ -157,7 +157,7 @@ test("whole-row lookup includes name, share, tiny bar and gap; keys follow rows 
       assert.equal(card.lines.length, 1); assert.equal(card.lines[0].line.value, R.text.value(1000 - j));
       if (j === 0) console.log(`funnel minimal n=${n} card=${JSON.stringify([card.lines[0].label, card.lines[0].line.value])}`);
     }
-    assert.equal(R.lookup.at(r.index, -1, -1), -1);
+    assert.equal(R.lookup.at(r.index, -1, -1, 0), -1);
     assert.ok(r.index.series.every(s => s.at.length === 0));
   }
   const r = R.render(inputOf(fixtures["long-names"], 360, 240)), m = model(r);
@@ -168,9 +168,9 @@ test("whole-row lookup includes name, share, tiny bar and gap; keys follow rows 
   const titleInput = input([10, 5]); titleInput.document.config.title = { text: "An exceptionally long chart title ".repeat(5) };
   const tm = model(R.render(titleInput)); assert.deepEqual(plain(key(tm, target(1), "ArrowRight")), { kind: "cut", n: 0 });
   const tiny = R.render(input([1000, 1]));
-  for (const p of bars(tiny)) assert.equal(R.lookup.at(tiny.index, p.x + p.w / 2, p.y + p.h / 2), p.datum);
+  for (const p of bars(tiny)) assert.equal(R.lookup.at(tiny.index, p.x + p.w / 2, p.y + p.h / 2, 0), p.datum);
   const a = tiny.index.marks[0].shape, b = tiny.index.marks[1].shape;
-  assert.equal(R.lookup.at(tiny.index, a.x + 1, b.y), 1, "later row wins its shared boundary");
+  assert.equal(R.lookup.at(tiny.index, a.x + 1, b.y, 0), 1, "later row wins its shared boundary");
 });
 
 test("LA17 full, three-line and kept-value cards follow the contract table at both budget edges", () => {
@@ -193,10 +193,11 @@ test("LA17 full, three-line and kept-value cards follow the contract table at bo
 test("value placement follows the fit rule, with in, after and omitted outcomes", () => {
   let pictures = 0, between = 0, smallest = Infinity;
   const counts = { in: 0, after: 0, none: 0 };
-  for (const fixture of ["basic", "steep", "exact", "value-unit", "rising", "hostile", "wide-share"]) {
+  for (const fixture of ["basic", "steep", "exact", "value-unit", "rising", "hostile", "wide-share", "long-names"]) {
     for (const w of [200, 240, 280, 320, 360, 400, 480, 600, 800, 1600]) for (const h of [240, 320, 480]) {
       const r = R.render(inputOf(fixtures[fixture], w, h)), bs = bars(r), plot = r.index.plot;
-      const ns = names(r), ss = r.primitives.filter(p => p.k === "text" && p.fill === "--chart-muted");
+      const ns = names(r), ss = r.primitives.filter(p => p.k === "text" && p.fill === "--chart-muted" && p.anchor === "end");
+      ns.forEach(p => assert.ok(width(p.shown === null ? p.text : p.shown, p.size, p.weight) <= Math.min(144, plot.w / 2) + 0.02, "name column bound"));
       const left = ns.length ? ns[0].x + 6 : plot.x;
       const right = ss.length ? plot.x + plot.w - Math.max(...ss.map(p => width(p.text, p.size, p.weight))) - 6 : plot.x + plot.w;
       smallest = Math.min(smallest, right - left);
@@ -215,4 +216,78 @@ test("value placement follows the fit rule, with in, after and omitted outcomes"
   assert.ok(pictures >= 200); assert.ok(between > 0); assert.ok(Object.values(counts).every(n => n > 0));
   assert.ok(smallest >= 6);
   console.log(`funnel value placement pictures=${pictures} ${JSON.stringify(counts)} between12and24=${between} smallestFull=${smallest}`);
+});
+
+test("on-fill values meet 4.5 contrast in both themes; radius admission stays funnel-only", () => {
+  const luminance = hex => {
+    const rgb = hex.match(/[a-f\d]{2}/gi).map(x => parseInt(x, 16) / 255).map(x => x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  };
+  let checked = 0, radii = 0, capped = 0;
+  // Same gated expression as CHECK_BODY; the real page's browser run remains the authority.
+  const admit = (wire, v, w, h, radius) => Math.abs(v - radius) < 1e-6 || (wire === "funnel" && v < radius && (Math.abs(2 * v - w) < 0.05 || Math.abs(2 * v - h) < 0.05));
+  assert.equal(admit("bar", 3, 6, 20, 4), false);
+  assert.equal(admit("funnel", 3, 20, 20, 4), false);
+  assert.equal(admit("funnel", 3, 6, 20, 4), true);
+  for (const theme of ["light", "dark"]) for (const f of Object.values(fixtures)) {
+    for (const [w, h] of [[480, 320], [240, 140], [80, 24], [360, 240], [200, 140]]) {
+      const r = R.render(inputOf(f, w, h, { theme }));
+      for (const p of bars(r)) {
+        assert.ok(admit("funnel", p.rx, p.w, p.h, 4)); radii++; if (p.rx !== 4) capped++;
+      }
+      for (const p of r.primitives.filter(p => p.k === "text" && p.role === "guide" && p.anchor === "middle")) {
+        const a = luminance(p.color), b = luminance(R.theme.resolve(theme).css("--chart-series-1"));
+        assert.ok((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5); checked++;
+      }
+    }
+  }
+  assert.ok(checked > 50 && capped > 50);
+  console.log(`funnel contrast texts=${checked}; radius admission ${radii}/${radii}, capped=${capped}; non-funnel and wrong-half controls refused`);
+});
+
+test("I7 has rendered coverage at all levels and L8 budgets come from the layer's measures", () => {
+  const counts = { full: 0, compact: 0, minimal: 0 };
+  for (const f of Object.values(fixtures)) for (const [w, h] of [[480, 320], [240, 140], [80, 24]]) {
+    const a = R.render(inputOf(f, w, h)), b = R.render(inputOf(f, w, h, { hidden: ["measure"] }));
+    if (a.state !== "rendered") continue;
+    assert.deepEqual(plain(b), plain(a)); assert.ok(a.summary.series.every(s => !s.hidden)); counts[a.level]++;
+  }
+  assert.ok(Object.values(counts).every(n => n >= 14));
+  const ms = I.measures(R, "light"), r = R.render(inputOf(fixtures.basic, 480, 320));
+  for (const k of [1, 3, 4]) for (const h of [Math.ceil(2 * ms.p + k * ms.h), Math.ceil(2 * ms.p + (k + 1) * ms.h) - 1]) {
+    const c = I.markCard(R, measure, I.markLines(model(r), 2), null, { w: 480, h }, ms);
+    assert.equal(c.k, k); assert.equal(c.lines.length, Math.min(4, k));
+  }
+  console.log(`funnel I7 RENDERED pictures by level ${JSON.stringify(counts)}`);
+});
+
+test("LA19 rendered columns leave the contract widths for each label option", () => {
+  let checked = 0;
+  for (const values of [[10, 20], [0, 10], [10, 0, 5], [0, 0, 0], [1e308, 5e307], [10, 5]]) {
+    for (const labels of ["value", "percent_of_first", "percent_of_previous"]) {
+      const r = R.render(input(values, labels)), plot = r.index.plot, ns = names(r);
+      const ss = r.primitives.filter(p => p.k === "text" && p.fill === "--chart-muted" && p.anchor === "end");
+      const left = ns.length ? ns[0].x + 6 : plot.x;
+      const right = ss.length ? plot.x + plot.w - Math.max(...ss.map(p => width(p.text, 12, 400))) - 6 : plot.x + plot.w;
+      const full = right - left, largest = Math.max(...values);
+      bars(r).forEach((p, j) => {
+        const ratio = largest === 0 ? 0 : values[j] / largest;
+        near(p.w, Math.max(Math.min(6, full), full * ratio), "rendered LA19 width");
+        near(p.x + p.w / 2, (left + right) / 2, "rendered LA19 centre"); checked++;
+      });
+    }
+  }
+  assert.equal(checked, 42); console.log(`funnel rendered LA19: 18 pictures, ${checked} widths and centres`);
+});
+
+test("T14 smallest-card walk has two texts unless the value title is null", () => {
+  for (const [title, expected] of [[undefined, ["Su…", "900"]], [null, ["9"]]]) {
+    const i = input([title === null ? 9 : 900], "value", 80, 24);
+    if (title === null) i.document.config.encoding.value.title = null;
+    const r = R.render(i), m = model(r);
+    const c = I.markCard(R, measure, I.markLines(m, 0), null, i.frame, I.measures(R, "light"));
+    const text = c.lines.flatMap(l => [l.label, l.line.value].filter(Boolean));
+    assert.deepEqual(plain(text), expected);
+    console.log(`funnel T14 title=${title === null ? "null" : "default"} ${JSON.stringify(text)}`);
+  }
 });

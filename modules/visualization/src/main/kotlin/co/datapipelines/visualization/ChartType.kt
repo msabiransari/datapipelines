@@ -62,6 +62,7 @@ enum class ChartType(
 
     /** Running changes over a category band, with an optional closing total (§4.5; #1073). */
     WATERFALL("waterfall", ChartChannelNodes.waterfall, ChartMarkPolicy.AREA),
+
     /** Centred stage bars, one value per stage (§4.5; #1074). */
     FUNNEL("funnel", ChartChannelNodes.funnel, ChartMarkPolicy.AREA),
     ;
