@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/treemap.schema.json",
+  "$comment": "Lane 1078: record §4.5 treemap, brief D3.",
+  "title": "datapipelines chart document, version 1, family treemap",
+  "description": "Nested squarified leaf rectangles sized by a nonnegative aggregate, one to three path levels.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "treemap"
+            },
+            "labels": {
+              "enum": [
+                "none",
+                "names",
+                "names_values"
+              ]
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "skeleton.schema.json#/$defs/level"
+          }
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        }
+      }
+    },
+    "color": {
+      "description": "Series by a column's values (nominal, ordinal), or colour by value (quantitative: the shade, one series). The object's own type selects which, so a refusal names the one it meant.",
+      "if": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "quantitative"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/$defs/shade"
+      },
+      "else": {
+        "$ref": "#/$defs/series"
+      }
+    },
+    "shade": {
+      "description": "A shade aggregated independently over each leaf.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/shade"
+        }
+      ]
+    },
+    "series": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legend"
+        }
+      },
+      "not": {
+        "required": [
+          "title"
+        ]
+      }
+    },
+    "size": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "scale"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

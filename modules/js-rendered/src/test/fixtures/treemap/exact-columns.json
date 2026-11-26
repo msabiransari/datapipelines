@@ -1,0 +1,62 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "an exact column: BIGDECIMAL values keep every digit in the card and the label",
+  "document": {
+    "display_name": "exact-columns",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "BIGDECIMAL",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "K0",
+      "K1",
+      "K2"
+    ],
+    "v": [
+      "12345678901234567890123456789012345678.9",
+      "0.10",
+      "7"
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "BIGDECIMAL"
+  }
+}

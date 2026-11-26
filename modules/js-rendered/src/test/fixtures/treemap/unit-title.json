@@ -1,0 +1,71 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "a unit after every value, a title and a subtitle",
+  "document": {
+    "display_name": "unit-title",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative",
+          "unit": "GB"
+        }
+      },
+      "title": {
+        "text": "Storage by region",
+        "subtitle": "Used capacity, all sites"
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "North",
+      "South",
+      "East",
+      "West",
+      "Centre"
+    ],
+    "v": [
+      120,
+      80,
+      45,
+      12,
+      8
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "INTEGER"
+  }
+}

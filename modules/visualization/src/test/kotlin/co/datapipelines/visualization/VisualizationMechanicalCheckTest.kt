@@ -104,7 +104,7 @@ class VisualizationMechanicalCheckTest {
 
     @Test
     fun `a mark the bar family does not define fails the schema step under config`() {
-        val report = check.run(WORKSPACE, body { it.obj("config.mark").put("type", "treemap") })
+        val report = check.run(WORKSPACE, body { it.obj("config.mark").put("type", "not_a_type") })
         report.failures.map { it.step to it.code }.toSet() shouldBe setOf("schema" to VisualizationErrorCodes.CONFIG_SCHEMA_INVALID)
         report.failures.all { it.path.startsWith("config") } shouldBe true
     }

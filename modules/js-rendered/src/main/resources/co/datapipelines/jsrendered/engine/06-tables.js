@@ -125,6 +125,14 @@
     gaugeWordNow: f("Now", "render", "brief 1075 D14: gaugeWordNow"),
     gaugeWordTarget: f("Target", "render", "brief 1075 D14: gaugeWordTarget"),
     gaugeWordTo: f("to", "render", "brief 1075 D14: gaugeWordTo"),
+    treemapLabelsDefault: f("names_values", "render", "look contract §4.7; brief 1078 D14: treemapLabelsDefault"),
+    treemapLabelRoomX: f(12, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomX"),
+    treemapLabelRoomY: f(10, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomY"),
+    treemapValueRoomY: f(16, "render", "look contract §4.7; brief 1078 D14: treemapValueRoomY"),
+    treemapMinCell: f(1, "render", "look contract §4.7; brief 1078 D14: treemapMinCell"),
+    treemapShareText: f("Share of all", "render", "look contract §4.7; brief 1078 D14: treemapShareText"),
+    treemapPathJoin: f(" / ", "render", "look contract §4.7; brief 1078 D14: treemapPathJoin"),
+    treemapTinyText: f("<1%", "render", "look contract §4.7; brief 1078 D14: treemapTinyText"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -177,6 +185,7 @@
     "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
     "funnel.marks": { kind: "semantic", limit: 12, basis: "fixed", unit: "stages", note: "record §4.5 and §4.9: at most 12 stages; the thirteenth refuses with chart.too_many_marks. A semantic limit, not measured (R19)." },
     "gauge.marks": { kind: "semantic", limit: 1, basis: "fixed", unit: "marks", note: "record §4.5 gauge and §4.9 semantic limits: one aggregate, one arc; not a measured cap (#1075)" },
+    "treemap.marks": { kind: "mark", limit: 500, basis: "inherited", unit: "leaf cells", note: "record §4.5 treemap and §4.9: 500 leaves, derived from bar; inherited, not measured for treemap (R19)" },
   };
 
   function look(name) {

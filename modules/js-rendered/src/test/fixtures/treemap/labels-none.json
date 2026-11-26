@@ -1,0 +1,98 @@
+{
+  "source": [
+    "Design record §4.5 treemap; brief 1078 D15"
+  ],
+  "note": "mark.labels none: no label at any size",
+  "document": {
+    "display_name": "labels-none",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "b",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "treemap",
+        "labels": "none"
+      },
+      "encoding": {
+        "path": [
+          {
+            "field": "a"
+          },
+          {
+            "field": "b"
+          }
+        ],
+        "size": {
+          "field": "v",
+          "aggregate": "sum",
+          "type": "quantitative"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Group 0",
+      "Group 1",
+      "Group 0",
+      "Group 1",
+      "Group 0",
+      "Group 1",
+      "Group 0",
+      "Group 1",
+      "Group 0",
+      "Group 1"
+    ],
+    "b": [
+      "Leaf 0",
+      "Leaf 1",
+      "Leaf 2",
+      "Leaf 3",
+      "Leaf 4",
+      "Leaf 5",
+      "Leaf 6",
+      "Leaf 7",
+      "Leaf 8",
+      "Leaf 9"
+    ],
+    "v": [
+      9,
+      20,
+      31,
+      11,
+      22,
+      33,
+      13,
+      24,
+      35,
+      15
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "b": "STRING",
+    "v": "INTEGER"
+  }
+}
