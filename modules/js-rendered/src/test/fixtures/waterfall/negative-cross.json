@@ -1,0 +1,66 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "an opening below zero, a run that crosses zero",
+  "document": {
+    "display_name": "negative-cross",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Open",
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "v": [
+      -50,
+      30,
+      40,
+      -90,
+      20
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

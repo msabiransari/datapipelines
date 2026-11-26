@@ -1,0 +1,66 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "one huge step and small ones: thin bars",
+  "document": {
+    "display_name": "wide-range",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Open",
+      "Huge",
+      "s1",
+      "s2",
+      "s3"
+    ],
+    "v": [
+      10,
+      1000000,
+      3,
+      -2,
+      1
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

@@ -81,6 +81,16 @@
     boxOutsideOpacity: f(0.75, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutsideOpacity"),
     boxOutsideRing: f(0.75, "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutsideRing"),
     boxOutliersDefault: f("points", "render", "look contract §2.1, §3.8 box; brief 1072 D7, D14: boxOutliersDefault"),
+    // Waterfall defaults and labels (look contract §4.3 and §4.7; brief 1073 D10).
+    waterfallTotalDefault: f("end", "render", "brief 1073 D10: waterfallTotalDefault"),
+    waterfallLabelSlack: f(6, "render", "brief 1073 D10: waterfallLabelSlack"),
+    waterfallHitMin: f(8, "render", "brief 1073 D10: waterfallHitMin"),
+    waterfallRiseText: f("Increase", "render", "brief 1073 D10: waterfallRiseText"),
+    waterfallFallText: f("Decrease", "render", "brief 1073 D10: waterfallFallText"),
+    waterfallOpeningText: f("Opening", "render", "brief 1073 D10: waterfallOpeningText"),
+    waterfallTotalText: f("Total", "render", "brief 1073 D10: waterfallTotalText"),
+    waterfallKeyTotalText: f("Opening and total", "render", "brief 1073 D10: waterfallKeyTotalText"),
+    waterfallRunningText: f("Running total", "render", "brief 1073 D10: waterfallRunningText"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -117,6 +127,7 @@
   };
 
   var CAPS = {
+    "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
     rows: { kind: "row", limit: 20000, basis: "measured", unit: "rows", note: "record §4.9, every type: lane 985 D12 measured bar by S-CAP (re-taken in round 2 on the corrected engine); 20,000 passes aggregating to 60 marks and on the refusal path (every row its own group), which fails at 50,000 (longest drag frame 83.4 ms over 3.5 × D = 58.45 ms); F5 measures the line" },
     series: { kind: "semantic", limit: 8, basis: "fixed", unit: "series", note: "O-15: 8 series on any type with a legend" },
     "bar.marks": { kind: "mark", limit: 1000, basis: "measured", unit: "non-null aggregated cells", note: "lane 977 S-CAP: bar 200 × 5 passed, 1,000 × 5 failed" },

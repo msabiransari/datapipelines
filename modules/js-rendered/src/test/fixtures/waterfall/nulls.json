@@ -1,0 +1,66 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "a null category and a null value are not bars",
+  "document": {
+    "display_name": "nulls",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "A",
+      null,
+      "C",
+      "D",
+      "E"
+    ],
+    "v": [
+      10,
+      5,
+      null,
+      -3,
+      8
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

@@ -140,7 +140,7 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box")) {
+                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall")) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +232,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/waterfall") shouldBeGreaterThanOrEqual MIN_WATERFALL_TILES
+                counts.getValue("$theme/waterfallBars") shouldBeGreaterThanOrEqual MIN_WATERFALL_BARS
                 counts.getValue("$theme/box") shouldBeGreaterThanOrEqual MIN_BOX_TILES
                 counts.getValue("$theme/boxPoints") shouldBeGreaterThanOrEqual MIN_BOX_POINTS
                 counts.getValue("$theme/heatmap") shouldBeGreaterThanOrEqual MIN_HEATMAP_TILES
@@ -534,6 +536,8 @@ class LookReferencePageBrowserTest {
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
+        private const val MIN_WATERFALL_TILES = 9
+        private const val MIN_WATERFALL_BARS = 83
         private const val MIN_BOX_TILES = 10
         private const val MIN_BOX_POINTS = 13
 
@@ -721,7 +725,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, points: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -790,6 +794,7 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const waterfall = s.wire === "waterfall";
         // Box outside points use their own at-rest radius, ring and opacity (brief 1072 D17).
         const isBox = s.wire === "box";
         const heatmap = s.wire === "heatmap";
@@ -833,7 +838,8 @@ private object LookReferenceChecks {
                 while ((m = re.exec(v)) !== null) {
                   // §3.8: the data end's radius is --chart-bar-radius, never more than half the bar's width (its band side)
                   const r = Number(m[1]);
-                  const half = Math.abs(2 * r - box.width) < 0.05 || Math.abs(2 * r - box.height) < 0.05;
+                  const half = Math.abs(2 * r - box.width) < 0.05 || Math.abs(2 * r - box.height) < 0.05
+                    || (waterfall && Math.abs(r - box.height) < 0.05);
                   const sectorRadius = pie && (s.index.marks || []).some((entry) => entry.shape.kind === "sector" && Math.abs(entry.shape.r1 - r) < 0.05);
                   if (!(sectorRadius || (r <= radius + 1e-6 && (has([radius], r) || half)))) ok = false;
                   counts.values++;
@@ -865,6 +871,7 @@ private object LookReferenceChecks {
         const points = scatter || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
         counts.points += points.length;
+        if (waterfall) counts.waterfallBars += marks.length;
         if (isBox) counts.boxPoints += points.length;
         const slices = pie ? (s.index.marks || []).filter((entry) => entry.shape.kind === "sector") : [];
         const cells = heatmap ? marks.filter((p) => p.k === "rect") : [];

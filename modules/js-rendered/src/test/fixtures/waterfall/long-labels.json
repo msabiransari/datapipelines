@@ -1,0 +1,69 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "long category names (the axis rotates or drops them)",
+  "document": {
+    "display_name": "long-labels",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "unit": "USD"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Quarterly recurring revenue brought forward",
+      "New enterprise contracts signed in the quarter",
+      "Contract downgrades and early cancellations",
+      "Refunds and chargebacks paid out",
+      "Partner commissions and referral fees",
+      "Closing recurring revenue carried forward"
+    ],
+    "v": [
+      1200,
+      340,
+      -120,
+      -45,
+      -60,
+      90
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

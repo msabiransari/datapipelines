@@ -1,0 +1,70 @@
+{
+  "source": [
+    "lane 1073; design record §4.5 waterfall and approved brief D12"
+  ],
+  "note": "markup in names and the title",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "waterfall"
+      },
+      "encoding": {
+        "x": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      },
+      "title": {
+        "text": "TTTTT a very long title that keeps on going a very long title that keeps on going",
+        "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "onload=alert(1)",
+      "\" onmouseover=\"x"
+    ],
+    "v": [
+      5,
+      3,
+      -2,
+      4,
+      6
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}
