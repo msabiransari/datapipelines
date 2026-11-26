@@ -263,6 +263,34 @@ export function expectedPieMarks(fixture, hiddenIds) {
   const total = shown.reduce((a, s) => a + s.n, 0);
   return shown.filter(s => s.n / total * 360 >= 0.02).length;
 }
+
+/** Funnel I3: independently group rows, aggregate each stage and apply the twelve-stage semantic limit. No legend. */
+export function expectedFunnelMarks(fx, hiddenIds) {
+  const { stage, value } = fx.document.config.encoding, groups = new Map();
+  const bands = fx.columns[stage.field] || [], values = fx.columns[value.field] || [];
+  for (let i = 0; i < bands.length; i++) {
+    if (bands[i] === null || bands[i] === undefined) continue;
+    const key = typeof bands[i] + ":" + String(bands[i]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(value.aggregate === "count" ? 1 : values[i]);
+  }
+  const parts = [];
+  for (const row of groups.values()) {
+    const ns = row.filter(x => x !== null && x !== undefined).map(Number);
+    if (ns.length === 0) continue;
+    let n;
+    switch (value.aggregate) {
+      case "count": n = ns.length; break;
+      case "min": n = Math.min(...ns); break;
+      case "max": n = Math.max(...ns); break;
+      case "mean": n = ns.reduce((a, b) => a + b, 0) / ns.length; break;
+      default: n = ns.reduce((a, b) => a + b, 0);
+    }
+    if (Number.isFinite(n)) parts.push(n);
+  }
+  return parts.some(n => n < 0) || parts.length > 12 ? 0 : parts.length;
+}
+
 /** Exact-decimal arithmetic for heatmap I3: only the final aggregate crosses to float64. Independent of the engine. */
 function heatmapExact(values, aggregate) {
   const parts = values.map((v) => {
@@ -315,31 +343,4 @@ export function expectedHeatmapMarks(fx) {
     if (Number.isFinite(value)) count++;
   }
   return count;
-}
-
-/** Funnel I3: independently group rows, aggregate each stage and apply the twelve-stage semantic limit. No legend. */
-export function expectedFunnelMarks(fx, hiddenIds) {
-  const { stage, value } = fx.document.config.encoding, groups = new Map();
-  const bands = fx.columns[stage.field] || [], values = fx.columns[value.field] || [];
-  for (let i = 0; i < bands.length; i++) {
-    if (bands[i] === null || bands[i] === undefined) continue;
-    const key = typeof bands[i] + ":" + String(bands[i]);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(value.aggregate === "count" ? 1 : values[i]);
-  }
-  const parts = [];
-  for (const row of groups.values()) {
-    const ns = row.filter(x => x !== null && x !== undefined).map(Number);
-    if (ns.length === 0) continue;
-    let n;
-    switch (value.aggregate) {
-      case "count": n = ns.length; break;
-      case "min": n = Math.min(...ns); break;
-      case "max": n = Math.max(...ns); break;
-      case "mean": n = ns.reduce((a, b) => a + b, 0) / ns.length; break;
-      default: n = ns.reduce((a, b) => a + b, 0);
-    }
-    if (Number.isFinite(n)) parts.push(n);
-  }
-  return parts.some(n => n < 0) || parts.length > 12 ? 0 : parts.length;
 }
