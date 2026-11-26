@@ -240,7 +240,7 @@ test("A.6: test_web's fixtures, the probe draws the same pictures, and the four 
   assert.ok(FX.length >= FLOOR.fixtures, "fixtures: " + FX.length);
   for (const f of FX) for (const [w, h] of [[960, 540], [300, 180], [120, 40]]) assert.equal(JSON.stringify(draw(R, f.fixture, w, h).r), JSON.stringify(CLEAN.render(typeInputOf(f.fixture, w, h))), f.name);
   draw(R, fx("five-spokes-two-series"), 960, 540);
-  assert.deepEqual(Object.keys(R.seen).sort(), ["angles", "centre", "level", "plot", "r", "radius", "visible"]);
+  assert.deepEqual(Object.keys(R.seen).sort(), ["angles", "centre", "level", "plot", "r", "radius", "reach", "visible"]);
   assert.deepEqual(Object.keys(R.seen.r).sort(), ["hi", "lo", "scale", "ticks"]);
   assert.equal(typeof R.seen.r.scale, "function");
   assert.deepEqual(plain(R.seen.angles), [0, 72, 144, 216, 288]);

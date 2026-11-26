@@ -364,7 +364,7 @@
   /**
    * The marks of the visible series: per series one group (role mark) holding, for an area, its faded fill under its
    * line; the line (a stroke of --chart-line, round joins and ends); and its dots (the end dot by default: --chart-point
-   * with a --chart-gap ring in the canvas colour). Over the drawing cap a series is thinned (§4.9) before its curve is
+   * with a --chart-gap ring in the canvas colour, drawn smaller where the frame kept less than its reach). Over the drawing cap a series is thinned (§4.9) before its curve is
    * fitted; a stack keeps one set of x positions for all its series. Returns {primitives, points, ends}.
    */
   function marks(m, plot, hp) {
@@ -495,8 +495,16 @@
         }
       }
       if (m.points === "end" && lastPt !== null) dots.push(lastPt);
+      // A dot the frame cannot hold is drawn smaller, with its ring, by the share the frame kept (L10, #1128); where
+      // the frame holds the whole reach the two tokens are written as they are.
+      var keep = plot.reach, share = keep && keep.asked > 0 ? keep.kept / keep.asked : 1;
+      var dotR = theme.n("--chart-point"), ring = theme.n("--chart-gap");
+      if (share < 1) {
+        dotR = S.r2(dotR * share);
+        ring = S.r2(ring * share);
+      }
       for (var dd = 0; dd < dots.length; dd++) {
-        kids.push(P.circle({ role: "mark", cx: dots[dd].x, cy: dots[dd].y, r: theme.n("--chart-point"), fill: colour.token, color: colour.css, stroke: "--chart-canvas", strokeColor: theme.css("--chart-canvas"), strokeWidth: theme.n("--chart-gap"), series: ser.id }));
+        kids.push(P.circle({ role: "mark", cx: dots[dd].x, cy: dots[dd].y, r: dotR, fill: colour.token, color: colour.css, stroke: "--chart-canvas", strokeColor: theme.css("--chart-canvas"), strokeWidth: ring, series: ser.id }));
       }
       if (lastPt !== null) ends.push({ id: ser.id, y: lastPt.y });
       P.group(out, { role: "mark", series: ser.id, label: ser.title }, kids);
