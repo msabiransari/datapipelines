@@ -193,6 +193,27 @@ export function expectedWaterfallMarks(f) {
   return drawn + (total === "end" && drawn > 0 && !cut ? 1 : 0);
 }
 
+/** The marks a gauge draws, from the ROWS (brief 1075 D4): one when the domain's span is a finite positive number and the aggregate is a finite number, else none. `count` counts the rows and reads no field. */
+export function expectedGaugeMarks(fx) {
+  const v = fx.document.config.encoding.value, d = v.scale.domain, span = d[1] - d[0];
+  if (!(Number.isFinite(span) && span > 0)) return 0;
+
+  if (v.aggregate === "count") {
+    let rows = 0;
+    for (const name of Object.keys(fx.columns)) if (Array.isArray(fx.columns[name]) && fx.columns[name].length > rows) rows = fx.columns[name].length;
+    return rows > 0 ? 1 : 0;
+  }
+  const col = Object.prototype.hasOwnProperty.call(fx.columns, v.field) ? fx.columns[v.field] : [];
+  const nums = col.filter((x) => x !== null && x !== undefined).map(Number);
+  if (nums.length === 0) return 0;
+  let total = v.aggregate === "min" || v.aggregate === "max" ? nums[0] : 0;
+  for (const x of nums) {
+    if (v.aggregate === "min") { if (x < total) total = x; } else if (v.aggregate === "max") { if (x > total) total = x; } else total += x;
+  }
+  if (v.aggregate === "mean") total = total / nums.length;
+  return Number.isFinite(total) ? 1 : 0;
+}
+
 /**
  * D7's widths and heights: every level is met. The record's three heights (100, 200, 480) and, since #985 R1, the
  * compact and full level heights themselves (140, 240), where the refusal found texts meeting and leaving the frame.

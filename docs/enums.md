@@ -1428,6 +1428,8 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
 | `funnel` | Centred stage bars: required `stage` band and one aggregated `value`; value or first/previous shares, one colour, no legend, at most 12 stages (#1074) |
 
+| `gauge` | One aggregate `value` on a required domain; 240° open arc, optional target and up to four tone bands; one mark (#1075) |
+
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
 
 ---
@@ -1436,6 +1438,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v1.73 | 1075 (#1075) | **§63:** Add gauge: one aggregate on a required domain, optional target and tone bands. |
 | 2026-11-26 | v1.72 | 1074 (#1074) | **§63:** Add funnel: centred bars for up to twelve ordered stages, one aggregate and no legend. |
 | 2026-11-26 | v1.71 | 1073 (#1073) | Add waterfall running changes and total. |
 | 2026-11-25 | v1.70 | 1072 (#1072) | Add box: median, quartiles and whiskers per category. |

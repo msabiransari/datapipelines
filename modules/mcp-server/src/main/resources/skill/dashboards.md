@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall` or `funnel` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel` or `gauge` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -232,6 +232,15 @@ No legend or authored tooltip. A box's value axis includes zero only with `zero:
 
 **`funnel`:** choose for the ordered steps something passes through, at most twelve; choose a bar to compare unrelated categories. `stage` is a nominal/ordinal band, `value` one aggregate. Zero remains a thin bar; negatives refuse. No legend, `color`, `tooltip`, temporal stage, value `fields`, `stack`, `scale` or `axis`. `labels` is `percent_of_first` (default), `percent_of_previous` or `value`; options and share edge cases: `docs/dashboards.md`. Example: `{"mark":{"type":"funnel"},"encoding":{"stage":{"field":"step","type":"nominal","sort":null},"value":{"field":"n","type":"quantitative","aggregate":"sum"}}}`.
 
+**Gauge?** Choose `gauge` for one number against a known range, with optional zones or a target. For a trend
+choose a line; for several values choose a bar. `value` aggregates all rows; its `scale.domain` is required.
+No `fields`, `stack`, channel title, axis, `color` or authored tooltip. The true number stays in the card
+when the arc clamps to an end. Bands and Target have keys, never switches. Options: `docs/dashboards.md`.
+```json
+{"mark":{"type":"gauge","target":70,"bands":[{"to":100,"tone":"good"}]},"encoding":{"value":{"field":"uptime","type":"quantitative","aggregate":"mean","scale":{"domain":[0,100]},"unit":"%"}}}
+```
+
+
 **On every type, except where an item names its types:**
 - **`fields` instead of `color`** (bar, line and area only; a scatter's and a box's `y` take one `field` and no `aggregate`):
   `"y": {"fields": [{"field": "plan"}, {"field": "actual", "title": "Actual"}], "type": "quantitative",
@@ -239,8 +248,8 @@ No legend or authored tooltip. A box's value axis includes zero only with `zero:
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
   scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail.
-- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel).
-- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value). A bar's, an area's and a waterfall's value
+- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge).
+- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 

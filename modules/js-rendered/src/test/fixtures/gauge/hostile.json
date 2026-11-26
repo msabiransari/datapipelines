@@ -1,0 +1,70 @@
+{
+  "source": [
+    "Issue #1075; design record \u00a74.5 gauge"
+  ],
+  "note": "hostile",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "gauge",
+        "target": 70,
+        "bands": [
+          {
+            "to": 50,
+            "tone": "bad"
+          },
+          {
+            "to": 80,
+            "tone": "warn"
+          },
+          {
+            "to": 100,
+            "tone": "good"
+          }
+        ]
+      },
+      "encoding": {
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "scale": {
+            "domain": [
+              0,
+              100
+            ]
+          },
+          "unit": "<script>"
+        }
+      },
+      "title": {
+        "text": "__proto__",
+        "subtitle": "<script> & \" onload=alert(1)"
+      }
+    }
+  },
+  "columns": {
+    "v": [
+      62
+    ]
+  },
+  "types": {
+    "v": "INTEGER"
+  }
+}

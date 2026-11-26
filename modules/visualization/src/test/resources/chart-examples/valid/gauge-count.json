@@ -1,0 +1,35 @@
+{
+  "display_name": "plain",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "gauge"
+    },
+    "encoding": {
+      "value": {
+        "type": "quantitative",
+        "aggregate": "count",
+        "scale": {
+          "domain": [
+            0,
+            100
+          ]
+        }
+      }
+    }
+  }
+}

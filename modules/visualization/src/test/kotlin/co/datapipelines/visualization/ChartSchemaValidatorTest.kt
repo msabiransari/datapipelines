@@ -51,6 +51,7 @@ class ChartSchemaValidatorTest {
             "valid/pie-plain.json",
             "valid/heatmap-plain.json",
             "valid/funnel-plain.json",
+            "valid/gauge-plain.json",
         )) {
             val body = example(file)
             withClue("$file conforms") { ChartSchemaValidator().validate(body).shouldBeEmpty() }

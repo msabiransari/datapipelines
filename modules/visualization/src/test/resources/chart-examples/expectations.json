@@ -999,6 +999,151 @@
    "valid": false,
    "layer": "save",
    "code": "chart.category.nullable"
+  },
+  "valid/gauge-plain.json": {
+   "valid": true
+  },
+  "valid/gauge-target.json": {
+   "valid": true
+  },
+  "valid/gauge-bands.json": {
+   "valid": true
+  },
+  "valid/gauge-unit-format.json": {
+   "valid": true
+  },
+  "valid/gauge-count.json": {
+   "valid": true
+  },
+  "invalid/gauge-five-bands.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/mark/bands"
+  },
+  "invalid/gauge-empty-bands.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/mark/bands"
+  },
+  "invalid/gauge-tone.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/bands/0/tone"
+  },
+  "invalid/gauge-missing-to.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/mark/bands/0"
+  },
+  "invalid/gauge-text-to.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/bands/0/to"
+  },
+  "invalid/gauge-band-extra.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark/bands/0"
+  },
+  "invalid/gauge-text-target.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/target"
+  },
+  "invalid/gauge-extra-mark.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/gauge-no-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-no-domain.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/value/scale"
+  },
+  "invalid/gauge-scale-type.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/value/scale"
+  },
+  "invalid/gauge-reversed-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/gauge-one-domain-end.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/value/scale/domain"
+  },
+  "invalid/gauge-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-no-value.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-text-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
   }
  }
 }

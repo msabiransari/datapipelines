@@ -100,6 +100,31 @@
     funnelFirstText: f("Of the first step", "render", "brief 1074 D13: funnelFirstText"),
     funnelPreviousText: f("Of the step before", "render", "brief 1074 D13: funnelPreviousText"),
     funnelTinyText: f("<1%", "render", "brief 1074 D13: funnelTinyText"),
+    // Gauge structure and words (look contract §3.8, §4.7; #1075 D14).
+    gaugeSweep: f(240, "render", "brief 1075 D14: gaugeSweep"),
+    gaugeThickShare: f(0.17, "render", "brief 1075 D14: gaugeThickShare"),
+    gaugeThickMin: f(10, "render", "brief 1075 D14: gaugeThickMin"),
+    gaugeThickMax: f(16, "render", "brief 1075 D14: gaugeThickMax"),
+    gaugeThickCap: f(0.5, "render", "brief 1075 D14: gaugeThickCap"),
+    gaugeDecorMin: f(16, "render", "brief 1075 D14: gaugeDecorMin"),
+    gaugeRingWidth: f(4, "render", "brief 1075 D14: gaugeRingWidth"),
+    gaugeRingOffset: f(5, "render", "brief 1075 D14: gaugeRingOffset"),
+    gaugeRingBreak: f(1.2, "render", "brief 1075 D14: gaugeRingBreak"),
+    gaugeTargetReach: f(3, "render", "brief 1075 D14: gaugeTargetReach"),
+    gaugeTargetBack: f(5, "render", "brief 1075 D14: gaugeTargetBack"),
+    gaugeNumberShare: f(0.36, "render", "brief 1075 D14: gaugeNumberShare"),
+    gaugeNumberMin: f(1.5, "render", "brief 1075 D14: gaugeNumberMin"),
+    gaugeNumberMax: f(2.5, "render", "brief 1075 D14: gaugeNumberMax"),
+    gaugeMinSweep: f(1.5, "render", "brief 1075 D14: gaugeMinSweep"),
+    gaugeEndGap: f(4, "render", "brief 1075 D14: gaugeEndGap"),
+    gaugeWordGap: f(4, "render", "brief 1075 D14: gaugeWordGap"),
+    gaugePad: f(2, "render", "brief 1075 D14: gaugePad"),
+    gaugeWordGood: f("Good", "render", "brief 1075 D14: gaugeWordGood"),
+    gaugeWordWarn: f("Watch", "render", "brief 1075 D14: gaugeWordWarn"),
+    gaugeWordBad: f("Bad", "render", "brief 1075 D14: gaugeWordBad"),
+    gaugeWordNow: f("Now", "render", "brief 1075 D14: gaugeWordNow"),
+    gaugeWordTarget: f("Target", "render", "brief 1075 D14: gaugeWordTarget"),
+    gaugeWordTo: f("to", "render", "brief 1075 D14: gaugeWordTo"),
     // words
     // the line family (brief 989 D6, D7, D10a; look contract §2 line, weight, points, area, legend; §4.2; §4.3; §4.5)
     curveDefault: f("smooth", "render", "§2 line and the record's §4.5: a line's curve is a monotone cubic unless the author wrote another"),
@@ -151,6 +176,7 @@
     "box.outliers_each": { kind: "semantic", limit: 200, basis: "fixed", unit: "outside points drawn per box", note: "record §4.9 semantic limits box row: 200 outlier points per box; fixed, not measured for box (R19)" },
     "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
     "funnel.marks": { kind: "semantic", limit: 12, basis: "fixed", unit: "stages", note: "record §4.5 and §4.9: at most 12 stages; the thirteenth refuses with chart.too_many_marks. A semantic limit, not measured (R19)." },
+    "gauge.marks": { kind: "semantic", limit: 1, basis: "fixed", unit: "marks", note: "record §4.5 gauge and §4.9 semantic limits: one aggregate, one arc; not a measured cap (#1075)" },
   };
 
   function look(name) {

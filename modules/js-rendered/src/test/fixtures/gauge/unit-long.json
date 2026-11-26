@@ -1,0 +1,66 @@
+{
+  "source": [
+    "Issue #1075; design record §4.5 gauge"
+  ],
+  "note": "unit-long",
+  "document": {
+    "display_name": "unit-long",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "gauge",
+        "bands": [
+          {
+            "to": 50,
+            "tone": "bad"
+          },
+          {
+            "to": 80,
+            "tone": "warn"
+          },
+          {
+            "to": 100,
+            "tone": "good"
+          }
+        ]
+      },
+      "encoding": {
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "scale": {
+            "domain": [
+              0,
+              2000000
+            ]
+          },
+          "unit": "requests",
+          "format": "compact"
+        }
+      }
+    }
+  },
+  "columns": {
+    "v": [
+      1234567
+    ]
+  },
+  "types": {
+    "v": "INTEGER"
+  }
+}

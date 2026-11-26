@@ -2086,7 +2086,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall or funnel), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall, funnel or gauge), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2098,7 +2098,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2166,7 +2166,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall or funnel), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, heatmap, box, waterfall, funnel or gauge), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2178,7 +2178,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a heatmap's cells, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3173,6 +3173,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v1.96 | 1075 (#1075) | Chart mark type gauge and its one-arc mark count. |
 | 2026-11-26 | v1.95 | 1073 (#1073) | Chart configuration and mark counts include waterfall. |
 | 2026-11-25 | v1.94 | 1072 (#1072) | Chart configuration and mark counts include box. |
 | 2026-11-24 | v1.93 | 1068 (#1068) | Add the pie family: parts of a whole, one value split by series, a ring or disc, at most eight slices. |
