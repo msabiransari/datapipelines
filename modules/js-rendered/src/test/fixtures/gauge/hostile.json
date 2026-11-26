@@ -22,7 +22,22 @@
     },
     "config": {
       "mark": {
-        "type": "gauge"
+        "type": "gauge",
+        "target": 70,
+        "bands": [
+          {
+            "to": 50,
+            "tone": "bad"
+          },
+          {
+            "to": 80,
+            "tone": "warn"
+          },
+          {
+            "to": 100,
+            "tone": "good"
+          }
+        ]
       },
       "encoding": {
         "value": {
