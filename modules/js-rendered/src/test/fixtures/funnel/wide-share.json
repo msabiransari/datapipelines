@@ -1,0 +1,62 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "one share too wide to write (wider than 6 em), the card has it",
+  "document": {
+    "display_name": "wide-share",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Pilot",
+      "Rollout",
+      "Steady"
+    ],
+    "v": [
+      1,
+      1234560,
+      5
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

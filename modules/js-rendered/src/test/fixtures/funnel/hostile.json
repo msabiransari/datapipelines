@@ -1,0 +1,70 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "markup in names, a title and a subtitle",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      },
+      "title": {
+        "text": "TTTTTTTTTT a very long title that keeps on going a very long title that keeps on going a very long title that keeps on going",
+        "subtitle": "<img src=x onerror=alert(1)> & \"quoted\""
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "onload=alert(1)",
+      "\" onmouseover=\"x"
+    ],
+    "v": [
+      30,
+      25,
+      20,
+      10,
+      5
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

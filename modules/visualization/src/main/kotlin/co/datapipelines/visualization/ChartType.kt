@@ -62,6 +62,8 @@ enum class ChartType(
 
     /** Running changes over a category band, with an optional closing total (§4.5; #1073). */
     WATERFALL("waterfall", ChartChannelNodes.waterfall, ChartMarkPolicy.AREA),
+    /** Centred stage bars, one value per stage (§4.5; #1074). */
+    FUNNEL("funnel", ChartChannelNodes.funnel, ChartMarkPolicy.AREA),
     ;
 
     /** The schema file under [ChartSchemas.RESOURCE_DIR]. */
@@ -170,6 +172,12 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val funnel: List<ChartChannel> =
+        listOf(
+            ChartChannel("stage", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("value", required = true, node = ChannelNode.Shape("value")),
+        )
+
     val waterfall: List<ChartChannel> =
         listOf(
             ChartChannel("x", required = true, node = ChannelNode.Shape("band")),

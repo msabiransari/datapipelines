@@ -1,0 +1,70 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "five stages, the default labels",
+  "document": {
+    "display_name": "basic",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      },
+      "title": {
+        "text": "Sign-up funnel",
+        "subtitle": "Last 30 days"
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "Visited",
+      "Signed up",
+      "Activated",
+      "Subscribed",
+      "Renewed"
+    ],
+    "v": [
+      12400,
+      5300,
+      3100,
+      1240,
+      890
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

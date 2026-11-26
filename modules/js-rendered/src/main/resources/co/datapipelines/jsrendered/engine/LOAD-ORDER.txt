@@ -32,3 +32,4 @@ types/pie.js
 types/heatmap.js
 types/box.js
 types/waterfall.js
+types/funnel.js

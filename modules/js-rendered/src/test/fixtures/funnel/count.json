@@ -1,0 +1,67 @@
+{
+  "source": [
+    "Design record \u00a74.5; brief 1074 D14"
+  ],
+  "note": "count: no value field",
+  "document": {
+    "display_name": "count",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "funnel"
+      },
+      "encoding": {
+        "stage": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        },
+        "value": {
+          "type": "quantitative",
+          "aggregate": "count"
+        }
+      }
+    }
+  },
+  "columns": {
+    "s": [
+      "A",
+      "A",
+      "A",
+      "B",
+      "B",
+      "C"
+    ],
+    "v": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "types": {
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}
