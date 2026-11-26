@@ -92,7 +92,14 @@
       }
       var last = pts[pts.length - 1];
       if (m.lastOpt !== "none") {
-        out.push(P.circle({ role: "mark", cx: last.x, cy: last.y, r: h.theme.n("--chart-point") - 0.5, fill: token, color: h.theme.css(token), stroke: "--chart-canvas", strokeColor: h.theme.css("--chart-canvas"), strokeWidth: h.theme.n("--chart-gap"), series: ser.id }));
+        // The frame's kept reach (#1128): the dot and its ring by kept / asked.
+        var share = hand.reach.asked > 0 ? hand.reach.kept / hand.reach.asked : 1;
+        var dotR = h.theme.n("--chart-point") - 0.5, ring = h.theme.n("--chart-gap");
+        if (share < 1) {
+          dotR = R.scales.r2(dotR * share);
+          ring = R.scales.r2(ring * share);
+        }
+        out.push(P.circle({ role: "mark", cx: last.x, cy: last.y, r: dotR, fill: token, color: h.theme.css(token), stroke: "--chart-canvas", strokeColor: h.theme.css("--chart-canvas"), strokeWidth: ring, series: ser.id }));
         count++;
       }
       ends.push({ id: ser.id, y: last.y });

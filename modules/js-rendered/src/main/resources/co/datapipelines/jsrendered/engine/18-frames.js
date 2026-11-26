@@ -92,23 +92,29 @@
    */
   function plain(h, W, H, lvl, top, m, lg) {
     var e = h.em("edge"), legendOut = [];
+    // The reach the frame can hold at the minimal level (L10, #1128); above it the reach is the template's own matter.
+    var asked = R.cartesian.reach(m.layout || {}, h), keep = lvl === "minimal" ? R.cartesian.keep(asked, W, H) : { asked: asked, kept: asked };
+    if (lvl === "minimal") {
+      e = Math.max(e, keep.kept);
+      top = Math.max(top, e);
+    }
     var box = legend(h, { left: e, right: W - e, top: top, bottom: H - e }, lg, function (place, boxH) {
       return roomWithoutAxes(h, lvl, m, place, boxH);
     }, legendOut);
     var plot = { x: r2(box.left), y: r2(box.top), w: r2(Math.max(1, box.right - box.left)), h: r2(Math.max(1, box.bottom - box.top)) };
     var under = [];
     if (lvl !== "minimal") under.push(P.rect({ role: "grid", x: plot.x, y: plot.y, w: plot.w, h: plot.h, fill: "--chart-plot", color: h.theme.css("--chart-plot") }));
-    return { plot: plot, under: under, axes: legendOut };
+    return { plot: plot, under: under, axes: legendOut, reach: keep };
   }
 
-  /** `none`: the template receives the plot only. */
+  /** `none`: the template receives the plot, and the reach the frame kept (#1128). */
   var NONE = {
     titles: true,
     legend: true,
     room: roomWithoutAxes,
     lay: function (h, W, H, lvl, top, m, series, visible, lg) {
       var f = plain(h, W, H, lvl, top, m, lg);
-      return { plot: f.plot, hand: { plot: f.plot }, under: f.under, axes: f.axes, over: [] };
+      return { plot: f.plot, hand: { plot: f.plot, reach: f.reach }, under: f.under, axes: f.axes, over: [] };
     },
   };
 
@@ -123,7 +129,7 @@
     lay: function (h, W, H, lvl, top, m, series, visible, lg) {
       var f = plain(h, W, H, lvl, top, m, lg), p = f.plot;
       var centre = { x: r2(p.x + p.w / 2), y: r2(p.y + p.h / 2) };
-      return { plot: p, hand: { plot: p, centre: centre, radius: r2(Math.min(p.w, p.h) / 2) }, under: f.under, axes: f.axes, over: [] };
+      return { plot: p, hand: { plot: p, centre: centre, radius: r2(Math.min(p.w, p.h) / 2), reach: f.reach }, under: f.under, axes: f.axes, over: [] };
     },
   };
 
