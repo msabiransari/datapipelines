@@ -530,6 +530,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(FUNNEL_CONFIG))
                     body.toString()
                 },
+                "gauge" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Gauge")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(GAUGE_CONFIG))
+                    body.toString()
+                },
             )
 
         /** [body] with its mark's type replaced (the bar body's one `"type":"bar"`). */
@@ -540,6 +546,11 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             check(body.split(BAR_MARK).size == 2) { "the bar body holds its mark type once" }
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
+
+        /** Gauge on the board's INTEGER y: 10 + 20 + 30 + 40 = 100 of 200 (#1075). */
+        const val GAUGE_CONFIG =
+            """{"mark":{"type":"gauge"},"encoding":{"value":{"field":"y","type":"quantitative",""" +
+                """"aggregate":"sum","scale":{"domain":[0,200]}}}}"""
 
         /** Heatmap: x and y bands, summed y as a shade on the same INTEGER delivery. */
         const val HEATMAP_CONFIG =

@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall` and `funnel` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel` and `gauge` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box, waterfall and funnel families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box, waterfall, funnel and gauge families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -275,6 +275,23 @@ each as `{field: [values]}` (§2.1.2).
   its value (named by the value title), Of the first step, and Of the step before where defined; the value is kept
   when the card shrinks. There is one pointer target across each whole row, including its name and share.
 
+  **Gauge (#1075).** One aggregate against a required range: `{title?, mark: {type: "gauge", target?,
+  bands?: [{to, tone}]}, encoding: {value}}`. `value` is quantitative, with required `aggregate` (`sum`,
+  `mean`, `min`, `max`, `count`) and `scale: {domain: [lo, hi]}`; `field` is required except for `count`.
+  Optional `format` and `unit`; no `fields`, `stack`, channel title, axis, `color` or authored tooltip.
+  The 240° arc is open at the bottom, in series 1, over a faint track. An out-of-range value is drawn at
+  the end, with its true number in the centre and card. Null aggregates and empty data draw no arc.
+  Non-finite aggregates or an overflowing domain span draw no data and warn once (`chart.rule.non-finite`).
+  Up to four bands use `good`, `warn` or `bad`, reading Good, Watch or Bad. Their ring follows the document's
+  order, from the greatest previous `to` to this `to`, clipped to the domain; empty intervals are skipped.
+  Bands may stop short of the end. The first band whose `to` is at least the clamped value supplies the
+  word below the number: a border belongs to the lower band. A target draws a line at its clamped value.
+  Band order/range and a target outside the domain are admitted at save (#1103); the renderer follows these
+  rules. The legend is keys only, including Target even without bands: no switches or keyboard stops.
+  At small frames the ring and target drop if their fitted radius would be below 16 px; minimal has no text.
+  The card heads with the chart title and rows Now, optional Target, then every band's word and `to` value,
+  units once per value; a reduced card keeps Now. One semantic mark, not a measured cap.
+
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
     field a series in the list's order; it replaces `field`, and `color` is then refused (the fields are the series).
@@ -283,8 +300,8 @@ each as `{field: [values]}` (§2.1.2).
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
     quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
   - `encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
-    show (not on a funnel).
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value). `zero: true`
+    show (not on a funnel or gauge).
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
     on a line, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
@@ -912,7 +929,7 @@ drawn by the datapipelines client library"; the message never echoes the host's 
 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
-with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out),
+with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out; a gauge also uses it for an overflowing domain span),
 `chart.rule.negative-part` (a pie or funnel with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
 a finite number were left out), `chart.rule.log-nonpositive` (on a log axis of any chart type a value at or below
 zero was not drawn), `chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per
@@ -1474,6 +1491,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v0.90 | 1075 (#1075) | **§2.1.2:** Add gauge: one aggregate on a 240° arc, tone bands, target and key-only legend. |
 | 2026-11-26 | v0.89 | 1074 (#1074) | **§2.1.2, §6.1, §6.3:** Add funnel stages, labels, width and share rules, fixed twelve-stage cap, cards and keyboard navigation. |
 | 2026-11-26 | v0.88 | 1073 (#1073) | Add waterfall running changes, total, fitted labels and key-only legend. |
 | 2026-11-25 | v0.87 | 1072 (#1072) | Add box distributions and their fixed cards. |

@@ -1438,6 +1438,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-26 | v1.73 | 1075 (#1075) | **§63:** Add gauge: one aggregate on a required domain, optional target and tone bands. |
 | 2026-11-26 | v1.72 | 1074 (#1074) | **§63:** Add funnel: centred bars for up to twelve ordered stages, one aggregate and no legend. |
 | 2026-11-26 | v1.71 | 1073 (#1073) | Add waterfall running changes and total. |
 | 2026-11-25 | v1.70 | 1072 (#1072) | Add box: median, quartiles and whiskers per category. |

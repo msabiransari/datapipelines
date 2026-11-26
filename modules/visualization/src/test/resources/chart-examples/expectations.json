@@ -1,1149 +1,1149 @@
 {
-  "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and §4.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
-  "examples": {
-    "valid/bar-vertical.json": {
-      "valid": true
-    },
-    "valid/bar-horizontal.json": {
-      "valid": true
-    },
-    "valid/bar-grouped.json": {
-      "valid": true
-    },
-    "valid/bar-stacked.json": {
-      "valid": true
-    },
-    "valid/bar-normalized.json": {
-      "valid": true
-    },
-    "invalid/unknown-property.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config"
-    },
-    "valid/markup-title.json": {
-      "valid": true,
-      "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
-    },
-    "invalid/measure-on-string.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/unknown-column.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.field.unknown"
-    },
-    "invalid/binary-column.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.field.binary"
-    },
-    "invalid/nullable-category.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.nullable"
-    },
-    "invalid/temporal-on-string.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.type_mismatch"
-    },
-    "invalid/sort-missing.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/x"
-    },
-    "invalid/stack-without-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y"
-    },
-    "invalid/domain-without-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid"
-    },
-    "invalid/bindings-mismatch.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.bindings.mismatch"
-    },
-    "invalid/presentation-theme.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": ""
-    },
-    "invalid/two-inputs.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxProperties",
-      "path": "/inputs"
-    },
-    "invalid/library-format-string.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "pattern",
-      "path": "/config/encoding/y/format"
-    },
-    "valid/script-in-display-name.json": {
-      "valid": true,
-      "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
-    },
-    "invalid/control-char-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "pattern",
-      "path": "/config/title/text"
-    },
-    "invalid/display-name-121.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxLength",
-      "path": "/display_name"
-    },
-    "valid/display-name-120.json": {
-      "valid": true,
-      "note": "the product bound exactly (design record §4.2)"
-    },
-    "invalid/display-name-61-astral.json": {
-      "valid": false,
-      "layer": "product",
-      "code": "visualization.validation.body_invalid",
-      "reason": "too_long",
-      "path": "display_name",
-      "note": "61 code points pass the schema maxLength 120; 122 UTF-16 units exceed the product bound (DocumentRules.texts, layer 2)"
-    },
-    "invalid/display-name-blank.json": {
-      "valid": false,
-      "layer": "product",
-      "code": "visualization.validation.body_invalid",
-      "reason": "blank",
-      "path": "display_name",
-      "note": "passes the schema minLength 1; the product refuses a blank name (DocumentRules.texts, layer 2)"
-    },
-    "valid/line-temporal.json": {
-      "valid": true
-    },
-    "valid/line-nominal-direct.json": {
-      "valid": true
-    },
-    "valid/line-log.json": {
-      "valid": true
-    },
-    "valid/line-fields-unit-tooltip.json": {
-      "valid": true
-    },
-    "valid/line-zero-false-domain.json": {
-      "valid": true
-    },
-    "valid/line-quantitative-x.json": {
-      "valid": true
-    },
-    "valid/area-stacked.json": {
-      "valid": true
-    },
-    "valid/area-normalized-fields.json": {
-      "valid": true
-    },
-    "valid/area-unit-tooltip.json": {
-      "valid": true
-    },
-    "valid/bar-fields.json": {
-      "valid": true
-    },
-    "valid/bar-log.json": {
-      "valid": true
-    },
-    "valid/bar-unit-tooltip.json": {
-      "valid": true
-    },
-    "invalid/line-fields-with-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding",
-      "note": "G1: the fields are the series, so color is refused"
-    },
-    "invalid/bar-fields-one.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "minItems",
-      "path": "/config/encoding/y/fields",
-      "note": "G1: 2 to 8 fields"
-    },
-    "invalid/area-fields-nine.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxItems",
-      "path": "/config/encoding/y/fields",
-      "note": "G1: 2 to 8 fields"
-    },
-    "invalid/area-log.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported",
-      "pointer": "/config/encoding/y/scale/type",
-      "note": "G4: refused on area"
-    },
-    "invalid/bar-log-stacked.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported",
-      "pointer": "/config/encoding/y/scale/type",
-      "note": "G4: refused on a stacked value"
-    },
-    "invalid/line-log-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported",
-      "pointer": "/config/encoding/y/scale/type",
-      "note": "G4: refused beside scale.zero"
-    },
-    "invalid/line-log-domain.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_log",
-      "pointer": "/config/encoding/y/scale/domain",
-      "note": "G4: domain[0] must be greater than 0"
-    },
-    "invalid/line-log-domain-huge.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_log",
-      "pointer": "/config/encoding/y/scale/domain",
-      "note": "G4: a number past a double's range (1e400 reads as Infinity) is not an increasing finite range"
-    },
-    "invalid/line-unit-long.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxLength",
-      "path": "/config/encoding/y/unit",
-      "note": "G6: 17 characters"
-    },
-    "invalid/area-tooltip-seven.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxItems",
-      "path": "/config/encoding/tooltip",
-      "note": "G7: 6 entries at most"
-    },
-    "invalid/bar-tooltip-unknown.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.field.unknown",
-      "pointer": "/config/encoding/tooltip/0/field",
-      "note": "G7: the detail's field is not a column"
-    },
-    "invalid/area-zero-false.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "const",
-      "path": "/config/encoding/y/scale/zero",
-      "note": "G8: false refused on area"
-    },
-    "invalid/bar-zero-false.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding",
-      "note": "G8: false refused on bar (the bar's encoding is a oneOf of its two orientations)"
-    },
-    "invalid/line-domain-reversed.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid",
-      "pointer": "/config/encoding/y/scale/domain",
-      "note": "min < max"
-    },
-    "invalid/line-domain-huge.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid",
-      "pointer": "/config/encoding/y/scale/domain",
-      "note": "both ends finite: -1e400 reads as -Infinity"
-    },
-    "invalid/area-domain-without-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid",
-      "pointer": "/config/encoding/y/scale/domain",
-      "note": "an area's range holds zero"
-    },
-    "invalid/line-temporal-band.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding/x",
-      "note": "record §4.2: a temporal x has ONE form on the line family"
-    },
-    "invalid/line-band-sort-by-total.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding/x",
-      "note": "a line's band x sorts by orderSort only: no by-total order"
-    },
-    "invalid/area-band-sort-object.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding/x",
-      "note": "an area's band x sort is orderSort: an object is refused"
-    },
-    "invalid/line-stacked.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y",
-      "note": "line: no stack"
-    },
-    "invalid/area-stack-without-series.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y",
-      "note": "area: stack only with series"
-    },
-    "invalid/bar-legend-direct.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding",
-      "note": "direct is admitted on line and area only"
-    },
-    "invalid/line-x-number-on-string.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric",
-      "pointer": "/config/encoding/x/field",
-      "note": "a quantitative position on a STRING column"
-    },
-    "invalid/area-x-time-on-string.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.type_mismatch",
-      "pointer": "/config/encoding/x/type",
-      "note": "a temporal position on a STRING column"
-    },
-    "valid/bar-shade.json": {
-      "valid": true
-    },
-    "valid/bar-shade-horizontal-count.json": {
-      "valid": true
-    },
-    "invalid/bar-shade-stack.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y"
-    },
-    "invalid/bar-shade-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding"
-    },
-    "valid/bar-shade-diverging.json": {
-      "valid": true,
-      "note": "lane 1053 D9: turned round; refused at the schema (const at /config/encoding/color/scale) under lane 1050, drawn since the two-sided scale"
-    },
-    "valid/bar-shade-diverging-mid.json": {
-      "valid": true,
-      "note": "lane 1053 D9: a diverging shade with mid 100"
-    },
-    "invalid/bar-shade-sequential-mid.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/color",
-      "note": "lane 1053 D9: mid is admitted with diverging only (the skeleton)"
-    },
-    "invalid/bar-shade-mid-infinite.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.shade.mid_invalid",
-      "pointer": "/config/encoding/color/mid",
-      "note": "lane 1053 D9: a mid past a double's range"
-    },
-    "invalid/bar-shade-no-field.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/color"
-    },
-    "invalid/bar-shade-text-sum.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric",
-      "pointer": "/config/encoding/color/field"
-    },
-    "invalid/bar-shade-text-count.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric",
-      "pointer": "/config/encoding/color/field"
-    },
-    "valid/scatter-plain.json": {
-      "valid": true
-    },
-    "valid/scatter-series.json": {
-      "valid": true
-    },
-    "valid/scatter-shade.json": {
-      "valid": true
-    },
-    "valid/scatter-size.json": {
-      "valid": true
-    },
-    "valid/scatter-log.json": {
-      "valid": true
-    },
-    "valid/scatter-time-x.json": {
-      "valid": true
-    },
-    "invalid/scatter-y-temporal.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "const",
-      "path": "/config/encoding/y/type",
-      "note": "brief 1062 D2: y is a number axis (#1067: no time form on the value side)"
-    },
-    "invalid/scatter-x-nominal.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/encoding/x/type",
-      "note": "a position is quantitative or temporal"
-    },
-    "invalid/scatter-size-range-reversed.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.size.range_invalid",
-      "pointer": "/config/encoding/size/range",
-      "note": "a size range is increasing"
-    },
-    "invalid/scatter-log-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported",
-      "pointer": "/config/encoding/y/scale/type",
-      "note": "G4: log refused beside scale.zero"
-    },
-    "invalid/scatter-log-domain-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_log",
-      "pointer": "/config/encoding/x/scale/domain",
-      "note": "G4: a log range is greater than 0"
-    },
-    "invalid/scatter-shade-text.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric",
-      "pointer": "/config/encoding/color/field",
-      "note": "a shade on a text column"
-    },
-    "invalid/scatter-tooltip-seven.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxItems",
-      "path": "/config/encoding/tooltip",
-      "note": "G7: 6 entries at most"
-    },
-    "invalid/scatter-unknown-field.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.field.unknown",
-      "pointer": "/config/encoding/size/field",
-      "note": "a size field is a column of the input"
-    },
-    "valid/pie-plain.json": {
-      "valid": true
-    },
-    "valid/pie-inner.json": {
-      "valid": true
-    },
-    "valid/pie-max_slices.json": {
-      "valid": true
-    },
-    "valid/pie-labels.json": {
-      "valid": true
-    },
-    "valid/pie-unit.json": {
-      "valid": true
-    },
-    "invalid/pie-inner-0.9.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maximum",
-      "path": "/config/mark/inner"
-    },
-    "invalid/pie-inner-negative.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "minimum",
-      "path": "/config/mark/inner"
-    },
-    "invalid/pie-max-1.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "minimum",
-      "path": "/config/mark/max_slices"
-    },
-    "invalid/pie-max-9.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maximum",
-      "path": "/config/mark/max_slices"
-    },
-    "invalid/pie-max-fraction.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "type",
-      "path": "/config/mark/max_slices"
-    },
-    "invalid/pie-labels-values.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/labels"
-    },
-    "invalid/pie-theta-scale.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/theta"
-    },
-    "invalid/pie-theta-stack.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/theta"
-    },
-    "invalid/pie-theta-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/theta"
-    },
-    "invalid/pie-theta-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/theta"
-    },
-    "invalid/pie-theta-axis.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/theta"
-    },
-    "invalid/pie-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/pie-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/pie-missing-theta.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/pie-missing-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/pie-color-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/color"
-    },
-    "invalid/pie-theta-text.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/pie-color-nullable.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.color.nullable"
-    },
-    "valid/heatmap-plain.json": {
-      "valid": true
-    },
-    "valid/heatmap-title.json": {
-      "valid": true
-    },
-    "valid/heatmap-diverging.json": {
-      "valid": true
-    },
-    "valid/heatmap-labels.json": {
-      "valid": true
-    },
-    "valid/heatmap-temporal.json": {
-      "valid": true
-    },
-    "valid/heatmap-legend-bottom.json": {
-      "valid": true
-    },
-    "valid/heatmap-legend-none.json": {
-      "valid": true
-    },
-    "invalid/heatmap-quantitative-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/encoding/x/type"
-    },
-    "invalid/heatmap-nominal-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "const",
-      "path": "/config/encoding/color/type"
-    },
-    "invalid/heatmap-sequential-mid.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/color"
-    },
-    "invalid/heatmap-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/heatmap-axis.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "false",
-      "path": "/config/encoding/x/axis"
-    },
-    "invalid/heatmap-sort-y.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "oneOf",
-      "path": "/config/encoding/x/sort"
-    },
-    "invalid/heatmap-labels.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/labels"
-    },
-    "invalid/heatmap-sort-missing.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/x"
-    },
-    "invalid/heatmap-encoding-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/heatmap-color-unit.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding/color"
-    },
-    "invalid/heatmap-shade-on-text.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/heatmap-nullable-band.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.nullable"
-    },
-    "invalid/heatmap-unknown-field.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.field.unknown"
-    },
-    "invalid/heatmap-shade-mid-infinite.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.shade.mid_invalid",
-      "pointer": "/config/encoding/color/mid"
-    },
-    "valid/box-plain.json": {
-      "valid": true
-    },
-    "valid/box-one.json": {
-      "valid": true
-    },
-    "valid/box-no-outliers.json": {
-      "valid": true
-    },
-    "valid/box-log-unit.json": {
-      "valid": true
-    },
-    "valid/box-temporal.json": {
-      "valid": true
-    },
-    "valid/box-title.json": {
-      "valid": true
-    },
-    "invalid/box-outliers-all.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/outliers"
-    },
-    "invalid/box-outliers-boolean.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/outliers"
-    },
-    "invalid/box-mark-unknown.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/mark"
-    },
-    "invalid/box-y-temporal.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "const",
-      "path": "/config/encoding/y/type"
-    },
-    "invalid/box-y-aggregate.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding/y"
-    },
-    "invalid/box-y-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding/y"
-    },
-    "invalid/box-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/box-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/box-no-y.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/box-no-sort.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/x"
-    },
-    "invalid/box-y-text.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/box-nullable-x.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.nullable"
-    },
-    "invalid/box-log-zero.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported"
-    },
-    "invalid/box-log-domain.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_log"
-    },
-    "invalid/box-reversed-domain.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid"
-    },
-    "valid/waterfall-plain.json": {
-      "valid": true
-    },
-    "valid/waterfall-total-none.json": {
-      "valid": true
-    },
-    "valid/waterfall-labels-none.json": {
-      "valid": true
-    },
-    "valid/waterfall-unit.json": {
-      "valid": true
-    },
-    "valid/waterfall-temporal.json": {
-      "valid": true
-    },
-    "valid/waterfall-domain.json": {
-      "valid": true
-    },
-    "invalid/waterfall-total.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/total"
-    },
-    "invalid/waterfall-labels.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/labels"
-    },
-    "invalid/waterfall-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/waterfall-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/waterfall-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y"
-    },
-    "invalid/waterfall-stack.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/y"
-    },
-    "invalid/waterfall-sort-y.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/encoding/x/sort"
-    },
-    "invalid/waterfall-log.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.log_unsupported"
-    },
-    "invalid/waterfall-zero.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "const",
-      "path": "/config/encoding/y/scale/zero"
-    },
-    "invalid/waterfall-domain.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid"
-    },
-    "invalid/waterfall-quantitative-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/encoding/x/type"
-    },
-    "invalid/waterfall-text-y.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/waterfall-no-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/waterfall-no-y.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "valid/funnel-plain.json": {
-      "valid": true
-    },
-    "valid/funnel-labels-value.json": {
-      "valid": true
-    },
-    "valid/funnel-labels-first.json": {
-      "valid": true
-    },
-    "valid/funnel-labels-previous.json": {
-      "valid": true
-    },
-    "valid/funnel-unit-title.json": {
-      "valid": true
-    },
-    "valid/funnel-descending.json": {
-      "valid": true
-    },
-    "invalid/funnel-labels.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/labels"
-    },
-    "invalid/funnel-value-scale.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/funnel-value-stack.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/funnel-value-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/funnel-value-axis.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/funnel-stage-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/stage"
-    },
-    "invalid/funnel-stage-axis.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/stage"
-    },
-    "invalid/funnel-stage-temporal.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/encoding/stage/type"
-    },
-    "invalid/funnel-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/funnel-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/funnel-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/funnel-mark-unknown.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/mark"
-    },
-    "invalid/funnel-missing-stage.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/funnel-missing-value.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/funnel-text-value.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    },
-    "invalid/funnel-nullable-stage.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.category.nullable"
-    },
-    "valid/gauge-plain.json": {
-      "valid": true
-    },
-    "valid/gauge-target.json": {
-      "valid": true
-    },
-    "valid/gauge-bands.json": {
-      "valid": true
-    },
-    "valid/gauge-unit-format.json": {
-      "valid": true
-    },
-    "valid/gauge-count.json": {
-      "valid": true
-    },
-    "invalid/gauge-five-bands.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "maxItems",
-      "path": "/config/mark/bands"
-    },
-    "invalid/gauge-empty-bands.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "minItems",
-      "path": "/config/mark/bands"
-    },
-    "invalid/gauge-tone.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "enum",
-      "path": "/config/mark/bands/0/tone"
-    },
-    "invalid/gauge-missing-to.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/mark/bands/0"
-    },
-    "invalid/gauge-text-to.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "type",
-      "path": "/config/mark/bands/0/to"
-    },
-    "invalid/gauge-band-extra.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/mark/bands/0"
-    },
-    "invalid/gauge-text-target.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "type",
-      "path": "/config/mark/target"
-    },
-    "invalid/gauge-extra-mark.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/mark"
-    },
-    "invalid/gauge-no-scale.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/value"
-    },
-    "invalid/gauge-no-domain.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding/value/scale"
-    },
-    "invalid/gauge-scale-type.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding/value/scale"
-    },
-    "invalid/gauge-reversed-domain.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.scale.domain_invalid"
-    },
-    "invalid/gauge-one-domain-end.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "minItems",
-      "path": "/config/encoding/value/scale/domain"
-    },
-    "invalid/gauge-fields.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/gauge-stack.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/gauge-title.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/gauge-axis.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "not",
-      "path": "/config/encoding/value"
-    },
-    "invalid/gauge-x.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/gauge-color.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/gauge-tooltip.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "additionalProperties",
-      "path": "/config/encoding"
-    },
-    "invalid/gauge-no-value.json": {
-      "valid": false,
-      "layer": "schema",
-      "keyword": "required",
-      "path": "/config/encoding"
-    },
-    "invalid/gauge-text-column.json": {
-      "valid": false,
-      "layer": "save",
-      "code": "chart.measure.not_numeric"
-    }
+ "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and \u00a74.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
+ "examples": {
+  "valid/bar-vertical.json": {
+   "valid": true
+  },
+  "valid/bar-horizontal.json": {
+   "valid": true
+  },
+  "valid/bar-grouped.json": {
+   "valid": true
+  },
+  "valid/bar-stacked.json": {
+   "valid": true
+  },
+  "valid/bar-normalized.json": {
+   "valid": true
+  },
+  "invalid/unknown-property.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config"
+  },
+  "valid/markup-title.json": {
+   "valid": true,
+   "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
+  },
+  "invalid/measure-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/unknown-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown"
+  },
+  "invalid/binary-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.binary"
+  },
+  "invalid/nullable-category.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/temporal-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.type_mismatch"
+  },
+  "invalid/sort-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/stack-without-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/domain-without-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/bindings-mismatch.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bindings.mismatch"
+  },
+  "invalid/presentation-theme.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": ""
+  },
+  "invalid/two-inputs.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxProperties",
+   "path": "/inputs"
+  },
+  "invalid/library-format-string.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "pattern",
+   "path": "/config/encoding/y/format"
+  },
+  "valid/script-in-display-name.json": {
+   "valid": true,
+   "note": "refused at the schema pattern under the 854 lane D8; valid under design record R11 (< and > allowed, escaped at render)"
+  },
+  "invalid/control-char-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "pattern",
+   "path": "/config/title/text"
+  },
+  "invalid/display-name-121.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxLength",
+   "path": "/display_name"
+  },
+  "valid/display-name-120.json": {
+   "valid": true,
+   "note": "the product bound exactly (design record \u00a74.2)"
+  },
+  "invalid/display-name-61-astral.json": {
+   "valid": false,
+   "layer": "product",
+   "code": "visualization.validation.body_invalid",
+   "reason": "too_long",
+   "path": "display_name",
+   "note": "61 code points pass the schema maxLength 120; 122 UTF-16 units exceed the product bound (DocumentRules.texts, layer 2)"
+  },
+  "invalid/display-name-blank.json": {
+   "valid": false,
+   "layer": "product",
+   "code": "visualization.validation.body_invalid",
+   "reason": "blank",
+   "path": "display_name",
+   "note": "passes the schema minLength 1; the product refuses a blank name (DocumentRules.texts, layer 2)"
+  },
+  "valid/line-temporal.json": {
+   "valid": true
+  },
+  "valid/line-nominal-direct.json": {
+   "valid": true
+  },
+  "valid/line-log.json": {
+   "valid": true
+  },
+  "valid/line-fields-unit-tooltip.json": {
+   "valid": true
+  },
+  "valid/line-zero-false-domain.json": {
+   "valid": true
+  },
+  "valid/line-quantitative-x.json": {
+   "valid": true
+  },
+  "valid/area-stacked.json": {
+   "valid": true
+  },
+  "valid/area-normalized-fields.json": {
+   "valid": true
+  },
+  "valid/area-unit-tooltip.json": {
+   "valid": true
+  },
+  "valid/bar-fields.json": {
+   "valid": true
+  },
+  "valid/bar-log.json": {
+   "valid": true
+  },
+  "valid/bar-unit-tooltip.json": {
+   "valid": true
+  },
+  "invalid/line-fields-with-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding",
+   "note": "G1: the fields are the series, so color is refused"
+  },
+  "invalid/bar-fields-one.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/y/fields",
+   "note": "G1: 2 to 8 fields"
+  },
+  "invalid/area-fields-nine.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/y/fields",
+   "note": "G1: 2 to 8 fields"
+  },
+  "invalid/area-log.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused on area"
+  },
+  "invalid/bar-log-stacked.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused on a stacked value"
+  },
+  "invalid/line-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: refused beside scale.zero"
+  },
+  "invalid/line-log-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "G4: domain[0] must be greater than 0"
+  },
+  "invalid/line-log-domain-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "G4: a number past a double's range (1e400 reads as Infinity) is not an increasing finite range"
+  },
+  "invalid/line-unit-long.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxLength",
+   "path": "/config/encoding/y/unit",
+   "note": "G6: 17 characters"
+  },
+  "invalid/area-tooltip-seven.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/tooltip",
+   "note": "G7: 6 entries at most"
+  },
+  "invalid/bar-tooltip-unknown.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown",
+   "pointer": "/config/encoding/tooltip/0/field",
+   "note": "G7: the detail's field is not a column"
+  },
+  "invalid/area-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/scale/zero",
+   "note": "G8: false refused on area"
+  },
+  "invalid/bar-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding",
+   "note": "G8: false refused on bar (the bar's encoding is a oneOf of its two orientations)"
+  },
+  "invalid/line-domain-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "min < max"
+  },
+  "invalid/line-domain-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "both ends finite: -1e400 reads as -Infinity"
+  },
+  "invalid/area-domain-without-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid",
+   "pointer": "/config/encoding/y/scale/domain",
+   "note": "an area's range holds zero"
+  },
+  "invalid/line-temporal-band.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "record \u00a74.2: a temporal x has ONE form on the line family"
+  },
+  "invalid/line-band-sort-by-total.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "a line's band x sorts by orderSort only: no by-total order"
+  },
+  "invalid/area-band-sort-object.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x",
+   "note": "an area's band x sort is orderSort: an object is refused"
+  },
+  "invalid/line-stacked.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y",
+   "note": "line: no stack"
+  },
+  "invalid/area-stack-without-series.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y",
+   "note": "area: stack only with series"
+  },
+  "invalid/bar-legend-direct.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding",
+   "note": "direct is admitted on line and area only"
+  },
+  "invalid/line-x-number-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/x/field",
+   "note": "a quantitative position on a STRING column"
+  },
+  "invalid/area-x-time-on-string.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.type_mismatch",
+   "pointer": "/config/encoding/x/type",
+   "note": "a temporal position on a STRING column"
+  },
+  "valid/bar-shade.json": {
+   "valid": true
+  },
+  "valid/bar-shade-horizontal-count.json": {
+   "valid": true
+  },
+  "invalid/bar-shade-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/bar-shade-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding"
+  },
+  "valid/bar-shade-diverging.json": {
+   "valid": true,
+   "note": "lane 1053 D9: turned round; refused at the schema (const at /config/encoding/color/scale) under lane 1050, drawn since the two-sided scale"
+  },
+  "valid/bar-shade-diverging-mid.json": {
+   "valid": true,
+   "note": "lane 1053 D9: a diverging shade with mid 100"
+  },
+  "invalid/bar-shade-sequential-mid.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color",
+   "note": "lane 1053 D9: mid is admitted with diverging only (the skeleton)"
+  },
+  "invalid/bar-shade-mid-infinite.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.shade.mid_invalid",
+   "pointer": "/config/encoding/color/mid",
+   "note": "lane 1053 D9: a mid past a double's range"
+  },
+  "invalid/bar-shade-no-field.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/color"
+  },
+  "invalid/bar-shade-text-sum.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
+  },
+  "invalid/bar-shade-text-count.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field"
+  },
+  "valid/scatter-plain.json": {
+   "valid": true
+  },
+  "valid/scatter-series.json": {
+   "valid": true
+  },
+  "valid/scatter-shade.json": {
+   "valid": true
+  },
+  "valid/scatter-size.json": {
+   "valid": true
+  },
+  "valid/scatter-log.json": {
+   "valid": true
+  },
+  "valid/scatter-time-x.json": {
+   "valid": true
+  },
+  "invalid/scatter-y-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/type",
+   "note": "brief 1062 D2: y is a number axis (#1067: no time form on the value side)"
+  },
+  "invalid/scatter-x-nominal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type",
+   "note": "a position is quantitative or temporal"
+  },
+  "invalid/scatter-size-range-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.size.range_invalid",
+   "pointer": "/config/encoding/size/range",
+   "note": "a size range is increasing"
+  },
+  "invalid/scatter-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported",
+   "pointer": "/config/encoding/y/scale/type",
+   "note": "G4: log refused beside scale.zero"
+  },
+  "invalid/scatter-log-domain-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log",
+   "pointer": "/config/encoding/x/scale/domain",
+   "note": "G4: a log range is greater than 0"
+  },
+  "invalid/scatter-shade-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/color/field",
+   "note": "a shade on a text column"
+  },
+  "invalid/scatter-tooltip-seven.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/tooltip",
+   "note": "G7: 6 entries at most"
+  },
+  "invalid/scatter-unknown-field.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown",
+   "pointer": "/config/encoding/size/field",
+   "note": "a size field is a column of the input"
+  },
+  "valid/pie-plain.json": {
+   "valid": true
+  },
+  "valid/pie-inner.json": {
+   "valid": true
+  },
+  "valid/pie-max_slices.json": {
+   "valid": true
+  },
+  "valid/pie-labels.json": {
+   "valid": true
+  },
+  "valid/pie-unit.json": {
+   "valid": true
+  },
+  "invalid/pie-inner-0.9.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maximum",
+   "path": "/config/mark/inner"
+  },
+  "invalid/pie-inner-negative.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minimum",
+   "path": "/config/mark/inner"
+  },
+  "invalid/pie-max-1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minimum",
+   "path": "/config/mark/max_slices"
+  },
+  "invalid/pie-max-9.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maximum",
+   "path": "/config/mark/max_slices"
+  },
+  "invalid/pie-max-fraction.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/max_slices"
+  },
+  "invalid/pie-labels-values.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/pie-theta-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/pie-theta-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/pie-theta-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/pie-theta-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/pie-theta-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/pie-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/pie-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/pie-missing-theta.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/pie-missing-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/pie-color-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/pie-theta-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/pie-color-nullable.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.color.nullable"
+  },
+  "valid/heatmap-plain.json": {
+   "valid": true
+  },
+  "valid/heatmap-title.json": {
+   "valid": true
+  },
+  "valid/heatmap-diverging.json": {
+   "valid": true
+  },
+  "valid/heatmap-labels.json": {
+   "valid": true
+  },
+  "valid/heatmap-temporal.json": {
+   "valid": true
+  },
+  "valid/heatmap-legend-bottom.json": {
+   "valid": true
+  },
+  "valid/heatmap-legend-none.json": {
+   "valid": true
+  },
+  "invalid/heatmap-quantitative-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/heatmap-nominal-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/color/type"
+  },
+  "invalid/heatmap-sequential-mid.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/heatmap-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/heatmap-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/x/axis"
+  },
+  "invalid/heatmap-sort-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/x/sort"
+  },
+  "invalid/heatmap-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/heatmap-sort-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/heatmap-encoding-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/heatmap-color-unit.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/color"
+  },
+  "invalid/heatmap-shade-on-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/heatmap-nullable-band.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/heatmap-unknown-field.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown"
+  },
+  "invalid/heatmap-shade-mid-infinite.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.shade.mid_invalid",
+   "pointer": "/config/encoding/color/mid"
+  },
+  "valid/box-plain.json": {
+   "valid": true
+  },
+  "valid/box-one.json": {
+   "valid": true
+  },
+  "valid/box-no-outliers.json": {
+   "valid": true
+  },
+  "valid/box-log-unit.json": {
+   "valid": true
+  },
+  "valid/box-temporal.json": {
+   "valid": true
+  },
+  "valid/box-title.json": {
+   "valid": true
+  },
+  "invalid/box-outliers-all.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/outliers"
+  },
+  "invalid/box-outliers-boolean.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/outliers"
+  },
+  "invalid/box-mark-unknown.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/box-y-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/type"
+  },
+  "invalid/box-y-aggregate.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/y"
+  },
+  "invalid/box-y-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/y"
+  },
+  "invalid/box-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/box-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/box-no-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/box-no-sort.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/box-y-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/box-nullable-x.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "invalid/box-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/box-log-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_log"
+  },
+  "invalid/box-reversed-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "valid/waterfall-plain.json": {
+   "valid": true
+  },
+  "valid/waterfall-total-none.json": {
+   "valid": true
+  },
+  "valid/waterfall-labels-none.json": {
+   "valid": true
+  },
+  "valid/waterfall-unit.json": {
+   "valid": true
+  },
+  "valid/waterfall-temporal.json": {
+   "valid": true
+  },
+  "valid/waterfall-domain.json": {
+   "valid": true
+  },
+  "invalid/waterfall-total.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/total"
+  },
+  "invalid/waterfall-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/waterfall-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/waterfall-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/waterfall-sort-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/sort"
+  },
+  "invalid/waterfall-log.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/waterfall-zero.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/y/scale/zero"
+  },
+  "invalid/waterfall-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/waterfall-quantitative-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/waterfall-text-y.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/waterfall-no-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/waterfall-no-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "valid/funnel-plain.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-value.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-first.json": {
+   "valid": true
+  },
+  "valid/funnel-labels-previous.json": {
+   "valid": true
+  },
+  "valid/funnel-unit-title.json": {
+   "valid": true
+  },
+  "valid/funnel-descending.json": {
+   "valid": true
+  },
+  "invalid/funnel-labels.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/labels"
+  },
+  "invalid/funnel-value-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-value-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/funnel-stage-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/stage"
+  },
+  "invalid/funnel-stage-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/stage"
+  },
+  "invalid/funnel-stage-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/stage/type"
+  },
+  "invalid/funnel-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-mark-unknown.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/funnel-missing-stage.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-missing-value.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/funnel-text-value.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/funnel-nullable-stage.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.category.nullable"
+  },
+  "valid/gauge-plain.json": {
+   "valid": true
+  },
+  "valid/gauge-target.json": {
+   "valid": true
+  },
+  "valid/gauge-bands.json": {
+   "valid": true
+  },
+  "valid/gauge-unit-format.json": {
+   "valid": true
+  },
+  "valid/gauge-count.json": {
+   "valid": true
+  },
+  "invalid/gauge-five-bands.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/mark/bands"
+  },
+  "invalid/gauge-empty-bands.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/mark/bands"
+  },
+  "invalid/gauge-tone.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/bands/0/tone"
+  },
+  "invalid/gauge-missing-to.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/mark/bands/0"
+  },
+  "invalid/gauge-text-to.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/bands/0/to"
+  },
+  "invalid/gauge-band-extra.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark/bands/0"
+  },
+  "invalid/gauge-text-target.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/target"
+  },
+  "invalid/gauge-extra-mark.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/gauge-no-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-no-domain.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/value/scale"
+  },
+  "invalid/gauge-scale-type.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/value/scale"
+  },
+  "invalid/gauge-reversed-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "invalid/gauge-one-domain-end.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/value/scale/domain"
+  },
+  "invalid/gauge-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/value"
+  },
+  "invalid/gauge-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-no-value.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/gauge-text-column.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
   }
+ }
 }

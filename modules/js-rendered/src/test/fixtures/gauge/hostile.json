@@ -1,6 +1,6 @@
 {
   "source": [
-    "Issue #1075; design record §4.5 gauge"
+    "Issue #1075; design record \u00a74.5 gauge"
   ],
   "note": "hostile",
   "document": {
@@ -35,7 +35,7 @@
               100
             ]
           },
-          "unit": "<script> & \" onload="
+          "unit": "<script>"
         }
       },
       "title": {
