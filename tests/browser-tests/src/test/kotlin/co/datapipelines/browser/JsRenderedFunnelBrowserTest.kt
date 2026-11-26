@@ -145,14 +145,14 @@ class JsRenderedFunnelBrowserTest {
                 : o.primitives.filter(p=>p.k==='rect' && p.role==='mark')[1];
               const q=svg.createSVGPoint();
               q.x=name ? p.x-10 : p.x+p.w/2; q.y=name ? p.y-4 : p.y+p.h/2;
-              const s=q.matrixTransform(svg.getScreenCTM()); return [s.x,s.y];
+              const m=svg.getScreenCTM(); return [m.a*q.x+m.c*q.y+m.e,m.b*q.x+m.d*q.y+m.f];
             }
             """.trimIndent()
         private val OUTSIDE =
             """
             () => {
               const s=document.getElementById('chart'),p=s.createSVGPoint(); p.x=1;p.y=1;
-              const q=p.matrixTransform(s.getScreenCTM());return [q.x,q.y];
+              const m=s.getScreenCTM();return [m.a*p.x+m.c*p.y+m.e,m.b*p.x+m.d*p.y+m.f];
             }
             """.trimIndent()
         private val DOM =
