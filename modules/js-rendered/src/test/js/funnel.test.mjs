@@ -71,10 +71,10 @@ test("LA19 largest-stage ratios, least width, all zero, and a full span of four"
     });
     for (const values of [[10, 20], [0, 10], [10, 0, 5], [0, 0, 0], [1000, 1], [100, 7], [100, 6], [100, 5]]) {
       for (const label of ["value", "percent_of_first", "percent_of_previous"]) {
-        const r = C.render(input(values, label, 80, 24));
+        const i = input(values, label, Math.max(80, full + 12), 24), r = C.render(i);
         const mx = Math.max(...values);
         bars(r).forEach((p, j) => near(p.w, mx === 0 ? Math.min(6, full) : Math.max(Math.min(6, full), full * values[j] / mx), "LA19 width"));
-        assert.equal(violations(r.primitives, 80 + full, 24).violations.filter(v => v.inv === "I1").length, 0);
+        assert.equal(violations(r.primitives, i.frame.w, i.frame.h).violations.length, 0);
       }
     }
   }
