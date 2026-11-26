@@ -1426,6 +1426,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `heatmap` | One shaded cell per pair of category bands; channels `x`, `y` (bands) and required `color` (shade); missing cells are empty, labels optional, at most 1,000 cells (#1070) |
 | `box` | One distribution per optional category band `x`; quantitative position `y`, no aggregation; median, interpolated quartiles, whiskers at the last values inside 1.5 × IQR and optional outside points; at most 50 boxes (#1072) |
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
+| `funnel` | Centred stage bars: required `stage` band and one aggregated `value`; value or first/previous shares, one colour, no legend, at most 12 stages (#1074) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
 

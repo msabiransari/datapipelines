@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box` and `waterfall` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall` and `funnel` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box and waterfall families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box, waterfall and funnel families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -256,6 +256,25 @@ each as `{field: [values]}` (§2.1.2).
   before an overflow cut. The three legend keys explain colours and never hide bars. A rise/fall card heads
   with the category, then Increase/Decrease and Running total; opening/total cards have one row.
 
+  **Funnel (#1074).** `mark.type: "funnel"` draws up to twelve stages top to bottom as centred rounded bars
+  in series 1, with no legend. Required channels: `stage: {field, type: "nominal" | "ordinal", sort}` and
+  `value: {field?, type: "quantitative", aggregate, title?, format?, unit?}`. `count` needs no field.
+  Stage sort is ascending, descending, null (input order), or an explicit list. Temporal stages, stage title/axis,
+  value fields/stack/scale/axis, x/y/color/tooltip and unknown mark keys are refused by the schema.
+  Rows sharing a stage aggregate; null stage names are omitted with one `chart.rule.null-category`, all-null
+  aggregates silently omitted, non-finite aggregates omitted with one `chart.rule.non-finite`. A negative
+  aggregate refuses the whole chart; zero remains a stage. Thirteen stages refuse with `chart.too_many_marks`.
+  Every width is `max(min(6, full), full × (value / largest))`, where full is the span between names and shares;
+  when all stages are zero they all take the least width. Names are cut to the smaller of 12 em and half the plot.
+  `mark.labels` chooses `"percent_of_first"` (default), `"percent_of_previous"`, or `"value"` (no share).
+  Shares round to a whole percent; a nonzero share rounded to zero reads `<1%`. A zero denominator has no
+  share text or card row. A quotient beyond the number range has neither and warns `chart.rule.non-finite`;
+  a positive quotient too small to be a number reads `<1%` on the picture and card. Wide shares remain in the card.
+  Values sit inside bars with 12 px spare width, otherwise after them if room holds them, otherwise in the card.
+  At minimal size only bars remain; short rows suppress text. The card heads with the uncut stage name, then
+  its value (named by the value title), Of the first step, and Of the step before where defined; the value is kept
+  when the card shrinks. There is one pointer target across each whole row, including its name and share.
+
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
     field a series in the list's order; it replaces `field`, and `color` is then refused (the fields are the series).
@@ -264,8 +283,8 @@ each as `{field: [values]}` (§2.1.2).
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
     quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
   - `encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
-    show.
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position. `zero: true`
+    show (not on a funnel).
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
     on a line, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
@@ -894,7 +913,7 @@ drawn by the datapipelines client library"; the message never echoes the host's 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
 with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out),
-`chart.rule.negative-part` (a pie with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
+`chart.rule.negative-part` (a pie or funnel with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
 a finite number were left out), `chart.rule.log-nonpositive` (on a log axis of any chart type a value at or below
 zero was not drawn), `chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per
 refused token, naming it — when the page's value of a `--chart-*` token is not one that token may hold and its
@@ -1080,7 +1099,8 @@ renderer shows the resolved value" for this case only).
     it is still drawn. On a scatter each point is a row of its own, in the data's order (#1062): Up and Down walk the
     points (two at one place are each reached), Left, Home and End stay on the point, and Right goes on as past a
     series' last mark. On a pie Left and Right walk the slices, Home and End reach the first and last,
-    and Up and Down stay on the slice.
+    and Up and Down stay on the slice. On a funnel each stage is a row of its own: Up and Down walk the stages, Left, Home and End stay, and Right goes on as past a series' last mark.
+
   - **Motion.** The dimming fades over `--chart-ease`; under `prefers-reduced-motion` it does not fade.
 - **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
   `page_size` capping the rows. Every cell is `textContent`.
