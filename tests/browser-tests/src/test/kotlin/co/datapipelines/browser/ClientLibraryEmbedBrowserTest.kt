@@ -554,7 +554,8 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         }
 
         private const val TREEMAP_CONFIG =
-            """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],"size":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+            """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],""" +
+                """"size":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
 
         /** Gauge on the board's INTEGER y: 10 + 20 + 30 + 40 = 100 of 200 (#1075). */
         const val GAUGE_CONFIG =
