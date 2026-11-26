@@ -155,6 +155,44 @@ export function expectedScatterMarks(fx, hiddenIds) {
   return n;
 }
 
+// Waterfall I3, derived independently from the document and rows: order categories before the overflow cut.
+// Lists keep unlisted categories in first-appearance order; numbers, plain dates and code points have their own
+// order below. An exact-number or non-plain-date band is refused when this oracle cannot order it independently.
+const waterfallCodePoints = (s) => Array.from(String(s), (c) => c.codePointAt(0));
+const waterfallByCodePoint = (a, b) => { const x = waterfallCodePoints(a), y = waterfallCodePoints(b); for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i]; return x.length - y.length; };
+const WATERFALL_PLAIN_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+function waterfallOrdered(items, enc, type) {
+  const sort = enc.sort;
+  if (sort === null || sort === undefined) return items;
+  if (Array.isArray(sort)) {
+    const pos = new Map(sort.map((v, i) => [String(v), i]));
+    const listed = items.filter((it) => pos.has(String(it.raw))).sort((a, b) => pos.get(String(a.raw)) - pos.get(String(b.raw)));
+    return listed.concat(items.filter((it) => !pos.has(String(it.raw))));
+  }
+  if (sort !== "ascending" && sort !== "descending") throw new Error("expectedWaterfallMarks: a waterfall's x.sort is null, ascending, descending or a list, not " + JSON.stringify(sort));
+  if (type === "BIGINTEGER" || type === "BIGDECIMAL") throw new Error("expectedWaterfallMarks: no own order for an exact-number band");
+  if (enc.type === "temporal") for (const it of items) if (!WATERFALL_PLAIN_DATE.test(String(it.raw))) throw new Error("expectedWaterfallMarks: no own order for the temporal value " + String(it.raw));
+  const up = items.slice().sort((a, b) => (typeof a.raw === "number" && typeof b.raw === "number" ? (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0) : waterfallByCodePoint(a.raw, b.raw)));
+  return sort === "descending" ? up.reverse() : up;
+}
+export function expectedWaterfallMarks(f) {
+  const e = f.document.config.encoding, mark = f.document.config.mark;
+  const B = f.columns[e.x.field] || [], V = e.y.field && f.columns[e.y.field] ? f.columns[e.y.field] : null;
+  const cells = new Map();
+  for (let i = 0; i < B.length; i++) { if (B[i] === null || B[i] === undefined) continue; const k = typeof B[i] + ":" + String(B[i]); if (!cells.has(k)) cells.set(k, { raw: B[i], vals: [] }); cells.get(k).vals.push(V ? V[i] : 1); }
+  const steps = [];
+  for (const { vals } of waterfallOrdered(Array.from(cells.values()), e.x, (f.types || {})[e.x.field])) {
+    let r;
+    if (e.y.aggregate === "count") r = vals.length;
+    else { const xs = vals.filter((v) => v !== null && v !== undefined).map(Number); if (xs.length === 0) continue; r = e.y.aggregate === "min" || e.y.aggregate === "max" ? xs[0] : 0; for (const x of xs) r = e.y.aggregate === "min" ? Math.min(r, x) : e.y.aggregate === "max" ? Math.max(r, x) : r + x; if (e.y.aggregate === "mean") r /= xs.length; }
+    if (Number.isFinite(r)) steps.push(r);
+  }
+  let level = 0, drawn = 0, cut = false;
+  for (const x of steps) { level += x; if (!Number.isFinite(level)) { cut = true; break; } drawn++; }
+  const total = mark.total === undefined ? "end" : mark.total;
+  return drawn + (total === "end" && drawn > 0 && !cut ? 1 : 0);
+}
+
 /**
  * D7's widths and heights: every level is met. The record's three heights (100, 200, 480) and, since #985 R1, the
  * compact and full level heights themselves (140, 240), where the refusal found texts meeting and leaving the frame.
@@ -277,46 +315,4 @@ export function expectedHeatmapMarks(fx) {
     if (Number.isFinite(value)) count++;
   }
   return count;
-}
-
-// The I3 oracle for a waterfall, review round 1 (R1-1): computed from the ROWS and the DOCUMENT, never from the engine. The first
-// form (../oracle-expectedWaterfall.mjs) walked the categories in input order whatever x.sort said; the order decides where the
-// running level first passes float64, so it decides the count. That form is kept as the plant.
-// The order is derived here, with no call into the engine: null or absent = first appearance; a list = the listed values first,
-// in the list's order (matched by their text), then the rest by first appearance; ascending / descending = numbers by value,
-// plain dates (YYYY-MM-DD) by their text, other texts by CODE POINT (never UTF-16 units), descending the reverse of ascending.
-// A band it cannot order on its own (a temporal value that is not a plain date, an exact-number column as the band) THROWS.
-const waterfallCodePoints = (s) => Array.from(String(s), (c) => c.codePointAt(0));
-const waterfallByCodePoint = (a, b) => { const x = waterfallCodePoints(a), y = waterfallCodePoints(b); for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i]; return x.length - y.length; };
-const WATERFALL_PLAIN_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
-function waterfallOrdered(items, enc, type) {
-  const sort = enc.sort;
-  if (sort === null || sort === undefined) return items;
-  if (Array.isArray(sort)) {
-    const pos = new Map(sort.map((v, i) => [String(v), i]));
-    const listed = items.filter((it) => pos.has(String(it.raw))).sort((a, b) => pos.get(String(a.raw)) - pos.get(String(b.raw)));
-    return listed.concat(items.filter((it) => !pos.has(String(it.raw))));
-  }
-  if (sort !== "ascending" && sort !== "descending") throw new Error("expectedWaterfallMarks: a waterfall's x.sort is null, ascending, descending or a list, not " + JSON.stringify(sort));
-  if (type === "BIGINTEGER" || type === "BIGDECIMAL") throw new Error("expectedWaterfallMarks: no own order for an exact-number band");
-  if (enc.type === "temporal") for (const it of items) if (!WATERFALL_PLAIN_DATE.test(String(it.raw))) throw new Error("expectedWaterfallMarks: no own order for the temporal value " + String(it.raw));
-  const up = items.slice().sort((a, b) => (typeof a.raw === "number" && typeof b.raw === "number" ? (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0) : waterfallByCodePoint(a.raw, b.raw)));
-  return sort === "descending" ? up.reverse() : up;
-}
-export function expectedWaterfallMarks(f) {
-  const e = f.document.config.encoding, mark = f.document.config.mark;
-  const B = f.columns[e.x.field] || [], V = e.y.field && f.columns[e.y.field] ? f.columns[e.y.field] : null;
-  const cells = new Map();
-  for (let i = 0; i < B.length; i++) { if (B[i] === null || B[i] === undefined) continue; const k = typeof B[i] + ":" + String(B[i]); if (!cells.has(k)) cells.set(k, { raw: B[i], vals: [] }); cells.get(k).vals.push(V ? V[i] : 1); }
-  const steps = [];
-  for (const { vals } of waterfallOrdered(Array.from(cells.values()), e.x, (f.types || {})[e.x.field])) {
-    let r;
-    if (e.y.aggregate === "count") r = vals.length;
-    else { const xs = vals.filter((v) => v !== null && v !== undefined).map(Number); if (xs.length === 0) continue; r = e.y.aggregate === "min" || e.y.aggregate === "max" ? xs[0] : 0; for (const x of xs) r = e.y.aggregate === "min" ? Math.min(r, x) : e.y.aggregate === "max" ? Math.max(r, x) : r + x; if (e.y.aggregate === "mean") r /= xs.length; }
-    if (Number.isFinite(r)) steps.push(r);
-  }
-  let level = 0, drawn = 0, cut = false;
-  for (const x of steps) { level += x; if (!Number.isFinite(level)) { cut = true; break; } drawn++; }
-  const total = mark.total === undefined ? "end" : mark.total;
-  return drawn + (total === "end" && drawn > 0 && !cut ? 1 : 0);
 }
