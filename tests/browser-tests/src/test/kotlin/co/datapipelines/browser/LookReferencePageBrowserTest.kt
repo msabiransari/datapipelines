@@ -541,9 +541,11 @@ class LookReferencePageBrowserTest {
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
 
-        /** Brief 1074: twelve tiles, 43 stages across the nine rendered tiles under each theme. */
+        /** Brief 1075: eight gauge tiles, seven rendered arcs under each theme. */
         private const val MIN_GAUGE_TILES = 8
         private const val MIN_ARCS = 7
+
+        /** Brief 1074: twelve tiles, 43 stages across the nine rendered tiles under each theme. */
         private const val MIN_FUNNEL_TILES = 12
         private const val MIN_STAGES = 43
         private const val MIN_WATERFALL_TILES = 9
