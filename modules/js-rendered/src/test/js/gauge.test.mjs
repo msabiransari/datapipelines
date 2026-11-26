@@ -290,3 +290,5 @@ test("G7 and A.4: words are live look fields; compact and percent keep their uni
     assert.equal(draw(f).index.marks[0].card.rows[0].value,want);
   }
 });
+
+test("G6: a box cannot request move emphasis",()=>{ const e=mutate('emphasis: null,','emphasis: "move",');assert.throws(()=>rd(e),/emphasis|sector/);assert.equal(rd(R).index.marks[0].emphasis,null); });
