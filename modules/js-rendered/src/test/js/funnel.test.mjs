@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { engine, chartFixtures, inputOf, MODULE } from "./engine.mjs";
-import { violations, width } from "./geometry.mjs";
+import { violations, width, expectedFunnelMarks } from "./geometry.mjs";
 
 const R = engine();
 const fixtures = Object.fromEntries(chartFixtures().filter(f => f.wire === "funnel").map(f => [f.name, f.fixture]));
@@ -57,6 +57,10 @@ test("group, aggregate, omit null and non-finite values, retain zeros, refuse ne
   assert.match(R.render(q).index.marks[0].card.rows[0].value, /9,007,199,254,740,993/);
   q.columns.v = ["1.23456789"]; q.types.v = "BIGDECIMAL";
   assert.equal(R.render(q).index.marks[0].card.rows[0].value, "1.23 orders");
+  for (const [vs, agg, count] of [[["-9007199254740993", "9007199254740992"], "sum", 0], [["9007199254740993", "-9007199254740992"], "sum", 1], [Array(2).fill("1" + "0".repeat(308)), "mean", 1]]) {
+    const x = input(vs); x.columns.s = ["A", "A"]; x.types.v = "BIGDECIMAL"; x.document.config.encoding.value.aggregate = agg;
+    assert.equal(expectedFunnelMarks(x, []), count); assert.equal(bars(R.render(x)).length, count);
+  }
 });
 
 test("LA19 largest-stage ratios, least width, all zero, and a full span of four", () => {

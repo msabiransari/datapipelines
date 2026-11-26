@@ -276,10 +276,11 @@ export function expectedFunnelMarks(fx, hiddenIds) {
   }
   const parts = [];
   for (const row of groups.values()) {
-    const ns = row.filter(x => x !== null && x !== undefined).map(Number);
+    const values = row.filter(x => x !== null && x !== undefined), ns = values.map(Number);
     if (ns.length === 0) continue;
     let n;
-    switch (value.aggregate) {
+    if (value.aggregate !== "count" && values.some(v => typeof v === "string")) n = heatmapExact(values, value.aggregate);
+    else switch (value.aggregate) {
       case "count": n = ns.length; break;
       case "min": n = Math.min(...ns); break;
       case "max": n = Math.max(...ns); break;
