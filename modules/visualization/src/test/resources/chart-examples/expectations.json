@@ -242,6 +242,34 @@
    "path": "/config/encoding/y/unit",
    "note": "G6: 17 characters"
   },
+  "invalid/line-x-temporal-unit.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x",
+   "note": "a temporal position takes no unit (record §4.4 position)"
+  },
+  "invalid/line-x-nominal-unit.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/x",
+   "note": "a band takes no unit (the band is closed)"
+  },
+  "invalid/line-x-unit-empty.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minLength",
+   "path": "/config/encoding/x/unit",
+   "note": "G6: a unit is at least one character"
+  },
+  "invalid/line-x-unit-long.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxLength",
+   "path": "/config/encoding/x/unit",
+   "note": "G6: a unit is at most 16 characters"
+  },
   "invalid/area-tooltip-seven.json": {
    "valid": false,
    "layer": "schema",

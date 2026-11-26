@@ -1,0 +1,79 @@
+{
+ "display_name": "A nominal x with a unit",
+ "description": "A category band takes no unit.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "line",
+   "labels": "last",
+   "curve": "step"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region",
+    "unit": "pcs"
+   },
+   "y": {
+    "field": "amount",
+    "type": "quantitative",
+    "aggregate": "sum",
+    "format": "compact"
+   },
+   "color": {
+    "field": "channel",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Channel",
+    "legend": {
+     "orient": "direct"
+    }
+   }
+  },
+  "title": {
+   "text": "Example"
+  }
+ }
+}
