@@ -88,7 +88,7 @@
             "aggregate": "sum",
             "scale": {
               "domain": [
-                -50,
+                50,
                 400
               ]
             }

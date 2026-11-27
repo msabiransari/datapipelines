@@ -7,7 +7,7 @@ import { engine, chartFixtures, inputOf, MODULE } from './engine.mjs';
 import { plant } from './forms.mjs';
 
 const FILE = 'types/combo.js';
-const E = engine(s => plant(s, FILE, 'marks: marks, axes:', 'marks: function (m, hand, h) { R.seen = {m: m, hand: hand}; return marks(m, hand, h); }, axes:'));
+const E = engine(s => plant(s, FILE, 'marks: marks, axes:', 'marks: function (m, hand, h) { R.seen = {m: m, hand: hand, h: h}; return marks(m, hand, h); }, axes:'));
 const FX = Object.fromEntries(chartFixtures().filter(f => f.wire === 'combo').map(f => [f.name, f.fixture]));
 const I = createRequire(import.meta.url)(join(MODULE, '../web/src/main/resources/static/js/datapipelines-chart-interactions.js'))._internal;
 const WIDTH = E.measure.measurer(null).fn;
@@ -46,12 +46,15 @@ test('A.2: layer ids, authored titles, palette and legend keys; one warning per 
 test('A.2: all layers retain the same sorted categories over 200 seeded null datasets', () => {
   let seed=1069;
   const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0; return seed/2**32;};
+  let checked=0;
   for(let n=0;n<200;n++) {
     const f=variant('four-layers',()=>{});
     for(const key of ['rev','cost','rate','n']) f.columns[key]=f.columns[key].map(x=>rand()<.45?null:x);
     const d=draw(f); if(!d.m) continue;
     for(const s of d.m.subs) same(s.m.xs.map(x=>x.raw), d.m.subs[0].m.xs.map(x=>x.raw));
+    checked++;
   }
+  assert.equal(checked,200);
 });
 
 test('A.2: hidden axes retain their range, empty layers do not add zero, and inherited log applies before counting',()=>{
@@ -191,4 +194,99 @@ test('A.5 D20: entry, arrows, Home, End follow layer order; last mark takes its 
       same(next,w===80?last:{kind:'entry',id:'layer:1'});
     }
   }
+});
+
+test('A.2: each aggregate, null category warning and temporal category ordering',()=>{
+  for(const [aggregate,expected] of [['sum',8],['mean',4],['min',2],['max',6],['count',2]]) {
+    const f=variant('bar-line',(f,e)=>{
+      f.columns={m:['B','A','A',null],rev:[4,2,6,99],rate:[.2,.1,.3,.9]};
+      e.layers[0].y={type:'quantitative',aggregate,...(aggregate==='count'?{}:{field:'rev'})};
+    });
+    const {m}=draw(f);assert.equal(m.subs[0].m.cells[0][m.subs[0].m.xs.findIndex(x=>x.raw==='A')].num,expected);
+    same(m.warnings.map(w=>w.code),['chart.rule.null-category']);
+  }
+  const f=variant('temporal-months',(f,e)=>{e.x.sort='ascending';for(const key of Object.keys(f.columns))f.columns[key].reverse();});
+  same(draw(f).m.subs[0].m.xs.map(x=>x.raw),[...FX['temporal-months'].columns.m]);
+});
+
+test('A.3: a single combo bar is the bar type geometry, defensive domain and log feet stay finite',()=>{
+  const {r,hand,h}=draw();
+  const f=structuredClone(FX['bar-line']);
+  f.document.config.mark={type:'bar'};
+  f.document.config.encoding={x:f.document.config.encoding.x,y:f.document.config.encoding.layers[0].y};
+  const B=engine(src=>plant(src,'types/bar.js','  R.type("bar",','  R.testBar = {model:model,marks:marks}; R.type("bar",'));
+  const bm=B.testBar.model(f.document,f.columns,f.types);
+  const br=B.testBar.marks(bm,{...hand,visible:{[bm.series[0].id]:true}},h);
+  const expected=marks({primitives:br}).map(box), actual=marks(r).filter(p=>p.series==='layer:0').map(box);
+  assert.equal(actual.length,expected.length);
+  actual.forEach((b,j)=>{for(const k of ['x','y','w','h'])near(b[k],expected[j][k]);});
+  for(const scale of [{domain:[50,400]},{type:'log'}]) {
+    const v=variant('bar-line',(_,e)=>{e.layers[0].y.scale=scale;});
+    const d=draw(v);
+    const expected=d.hand.value.scale(d.hand.value.lo);
+    for(const b of d.r.index.series[0].spans) {near(b.foot,expected);assert.ok(Object.values(b).every(Number.isFinite));}
+  }
+});
+
+test('A.5: card rows and guide dots follow visible non-null layers, preserve units and tooltip details',()=>{
+  for(const hidden of [[],['layer:0'],['layer:1']]) {
+    const f=variant('bar-line',(f,e)=>{e.layers[0].y.unit='USD';e.tooltip=[{field:'cost',title:'Cost'}];});
+    const {r}=draw(f,640,360,{hidden}),model=interaction(r),ms=I.measures(E,'light');
+    const id=hidden.includes('layer:0')?'layer:1':'layer:0';
+    const card=I.cardLines(model,id,2);
+    const text=JSON.stringify(card);
+    assert.equal(text.includes('120 USD'),!hidden.includes('layer:0'));
+    assert.equal(text.includes('12%'),!hidden.includes('layer:1'));
+    assert.ok(text.includes('Cost'));
+    const target={kind:'mark',id,datum:2};
+    const scene=I.scene(E,model,{frame:{w:640,h:360}},ms,WIDTH,{last:'key',target,hit:null,pointer:null});
+    assert.equal(scene.active,id);
+    assert.equal(scene.prims.filter(p=>p.k==='circle'&&p.role==='guide').length,hidden.includes('layer:1')?0:1);
+  }
+  const f=variant('bar-line',f=>f.columns.rate[2]=null),model=interaction(draw(f).r);
+  assert.equal(JSON.stringify(I.cardLines(model,'layer:0',2)).includes('Rate'),false);
+});
+
+
+test('A.3: right tick texts are right of the plot, on every left grid line',()=>{
+  const {r}=draw(FX['two-lines-two-axes']);
+  const plot=r.index.plot, ticks=r.primitives.filter(p=>p.k==='text'&&p.role==='tick');
+  const left=ticks.filter(p=>p.anchor==='end'),right=ticks.filter(p=>p.anchor==='start'&&p.x>plot.x+plot.w);
+  assert.ok(right.length>=2);assert.equal(right.length,left.length);
+  right.forEach(p=>assert.ok(left.some(q=>Math.abs(p.y-q.y)<.011)));
+});
+
+test('A.5: two-line card keeps the hovered layer row; focused entry activation toggles its own layer',()=>{
+  const r=draw(FX['bar-line'],640,40).r,model=interaction(r),ms=I.measures(E,'light');
+  for(const [id,name,value] of [['layer:0','Revenue','120'],['layer:1','Rate','12%']]) {
+    const scene=I.scene(E,model,{frame:{w:640,h:40}},ms,WIDTH,{last:'key',target:{kind:'mark',id,datum:2},hit:null,pointer:null});
+    same(scene.prims.filter(p=>p.k==='text').map(p=>p.text),['Mar',name,value]);
+    for(const key of ['Enter',' '])assert.equal(I.keyTarget(interaction(draw().r),{kind:'entry',id},key).toggle,id);
+  }
+});
+
+test('A.5: bar-bar, bar-point and bar-area interiors follow drawn boxes and circle reach',()=>{
+  let checked=0;
+  for(const second of ['bar','point','area']) {
+    const f=variant('bar-line',(_,e)=>{e.layers[1].mark=second;});
+    const {r}=draw(f),model=interaction(r),ms=I.measures(E,'light');
+    for(const ser of r.index.series.filter(s=>s.spans))for(let k=0;k<ser.spans.length;k++) {
+      const sp=ser.spans[k],b={x:sp.x,y:Math.min(sp.foot,sp.end),w:sp.w,h:Math.abs(sp.foot-sp.end)};
+      for(let x=0;x<20;x++)for(let y=0;y<20;y++) {
+        const pos={x:b.x+b.w*(x+.5)/20,y:b.y+b.h*(y+.5)/20};
+        // A crosshair gives an area a guide dot at every indexed path point, including before its drawn end dot.
+        const points=dots(r).map(d=>({cx:d.cx,cy:d.cy,series:d.series}));
+        for(const path of marks(r).filter(p=>p.k==='path'&&p.stroke&&p.fill===null)) for(let j=0;j<path.d.length;) {
+          const n=E.prim.ARITY[path.d[j]];
+          if(n>=2)points.push({cx:path.d[j+n-1],cy:path.d[j+n],series:path.series});
+          j+=n+1;
+        }
+        const circles=points.filter(d=>Math.abs(d.cx-ser.at[k])<.005).map(d=>({d,distance:Math.hypot(d.cx-pos.x,d.cy-pos.y)})).filter(d=>d.distance<=ms.theme.n('--chart-point')+E.tables.look('crosshairDot')+.0001).sort((a,b)=>a.distance-b.distance);
+        const expected=circles.length?circles[0].d.series:ser.id;
+        assert.equal(I.lookup(E,model,pos).mark.id,expected,second+' inside '+ser.id);
+        checked++;
+      }
+    }
+  }
+  assert.equal(checked,9600);console.log('A.5 mixed interiors',checked);
 });

@@ -506,6 +506,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(PIE_CONFIG))
                     body.toString()
                 },
+                "combo" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Combo")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(COMBO_CONFIG))
+                    body.toString()
+                },
                 "heatmap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Heatmap")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -586,6 +592,16 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 
         /** Scatter's config over the same two INTEGER columns: a point per row, no aggregate (brief 1062 A.8). */
+        private const val COMBO_CONFIG = """
+          {"mark":{"type":"combo"},"encoding":{
+            "x":{"field":"x","type":"ordinal","sort":null},
+            "layers":[
+              {"mark":"bar","y":{"field":"y","type":"quantitative","aggregate":"sum"}},
+              {"mark":"line","y":{"field":"y","type":"quantitative","aggregate":"mean"}}
+            ]
+          }}
+        """
+
         const val SCATTER_CONFIG =
             """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""

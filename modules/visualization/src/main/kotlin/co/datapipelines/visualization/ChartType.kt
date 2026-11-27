@@ -188,11 +188,12 @@ private object ChartChannelNodes {
             ChartChannel(
                 "layers",
                 required = true,
-                node = ChannelNode.ListOf(
-                    min = 2,
-                    max = 4,
-                    of = ChannelNode.ObjectOf(members = mapOf("y" to ChannelNode.Shape("value")), layer = "mark"),
-                ),
+                node =
+                    ChannelNode.ListOf(
+                        min = 2,
+                        max = 4,
+                        of = ChannelNode.ObjectOf(members = mapOf("y" to ChannelNode.Shape("value")), layer = "mark"),
+                    ),
             ),
             ChartChannel("tooltip", required = false, node = ChannelNode.ListOf(0, 6, ChannelNode.Shape("detail"))),
         )

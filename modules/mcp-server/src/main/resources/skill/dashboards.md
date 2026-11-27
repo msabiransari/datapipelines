@@ -208,6 +208,16 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
 }}
 ```
 
+**Combo?** Choose `combo` for an amount beside a rate on one category band, two to four layers; for one measure use
+bar or line. Each layer is `{mark: "bar"|"line"|"area"|"point", y, axis?: "left"|"right", title?}`, with one
+aggregated value, no fields/stack/colour. At least one layer is left (default). One scale and format per axis,
+inherited even from hidden layers; any bar/area makes that axis linear with zero in its domain, never zero:false.
+The category heads the card; visible layer rows retain layer order; pointing inside a bar selects it and keeps its row.
+
+```json
+{"mark":{"type":"combo"},"encoding":{"x":{"field":"month","type":"nominal","sort":null},"layers":[{"mark":"bar","y":{"field":"amount","type":"quantitative","aggregate":"sum"}},{"mark":"line","axis":"right","y":{"field":"rate","type":"quantitative","aggregate":"mean","format":"percent"}}]}}
+```
+
 **Heatmap?** Use `heatmap` for a measure over two categories, such as weekday by hour: a few dozen to 1,000 cells. Aggregate in the query above 1,000; use a line for an ordered time series. Missing or all-null cells are empty, not zero. Labels default to none; choose `values` for a few cells.
 ```json
 "config": {"mark": {"type": "heatmap", "labels": "values"}, "encoding": {
@@ -240,16 +250,6 @@ when the arc clamps to an end. Bands and Target have keys, never switches. Optio
 {"mark":{"type":"gauge","target":70,"bands":[{"to":100,"tone":"good"}]},"encoding":{"value":{"field":"uptime","type":"quantitative","aggregate":"mean","scale":{"domain":[0,100]},"unit":"%"}}}
 ```
 
-
-**Combo?** Choose `combo` for an amount beside a rate on one category band, two to four layers; for one measure use
-bar or line. Each layer is `{mark: "bar"|"line"|"area"|"point", y, axis?: "left"|"right", title?}`, with one
-aggregated value, no fields/stack/colour. At least one layer is left (default). One scale and format per axis,
-inherited even from hidden layers; any bar/area makes that axis linear with zero in its domain, never zero:false.
-The category heads the card; visible layer rows retain layer order; pointing inside a bar selects it and keeps its row.
-
-```json
-{"mark":{"type":"combo"},"encoding":{"x":{"field":"month","type":"nominal","sort":null},"layers":[{"mark":"bar","y":{"field":"amount","type":"quantitative","aggregate":"sum"}},{"mark":"line","axis":"right","y":{"field":"rate","type":"quantitative","aggregate":"mean","format":"percent"}}]}}
-```
 
 **Treemap?** Choose `treemap` for a whole split into nested parts by size: one to three levels, at most
 500 positive leaves. Use a bar for exact comparisons; negative aggregates refuse the chart.

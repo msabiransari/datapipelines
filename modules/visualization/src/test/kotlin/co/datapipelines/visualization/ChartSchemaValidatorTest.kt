@@ -46,6 +46,7 @@ class ChartSchemaValidatorTest {
             "valid/line-log.json",
             "valid/area-stacked.json",
             "valid/scatter-plain.json",
+            "valid/combo-bar-line-right.json",
             "valid/waterfall-plain.json",
             "valid/box-plain.json",
             "valid/pie-plain.json",

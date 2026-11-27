@@ -1303,49 +1303,49 @@
   "valid/combo-area-scale-zero-true.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-bar-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-omitted-bar-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-bar-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-bar-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-omitted-bar-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-bar-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-bar-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-omitted-bar-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-bar-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-bar-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-omitted-bar-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-bar-reverse-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-area-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-omitted-area-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-area-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-area-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-omitted-area-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-area-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-area-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-omitted-area-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-area-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-area-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-omitted-area-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-area-reverse-declaring-1-domain-0-400.json": {
@@ -1354,7 +1354,7 @@
   "valid/combo-axis-omitted-point-forward-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-point-forward-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-forward-declaring-0-zero-false.json": {
@@ -1363,13 +1363,16 @@
   "valid/combo-axis-omitted-point-forward-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-omitted-point-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-forward-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-point-forward-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-forward-declaring-1-zero-false.json": {
@@ -1378,13 +1381,16 @@
   "valid/combo-axis-omitted-point-forward-declaring-1-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-omitted-point-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-reverse-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-reverse-declaring-0-zero-false.json": {
@@ -1393,13 +1399,16 @@
   "valid/combo-axis-omitted-point-reverse-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-omitted-point-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-reverse-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-omitted-point-reverse-declaring-1-zero-false.json": {
@@ -1408,52 +1417,55 @@
   "valid/combo-axis-omitted-point-reverse-declaring-1-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-omitted-point-reverse-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-bar-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-left-bar-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-bar-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-bar-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-left-bar-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-bar-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-bar-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-left-bar-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-bar-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-bar-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-left-bar-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-bar-reverse-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-area-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-left-area-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-area-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-area-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-left-area-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-area-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-area-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-left-area-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-area-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-area-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-left-area-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-area-reverse-declaring-1-domain-0-400.json": {
@@ -1462,7 +1474,7 @@
   "valid/combo-axis-left-point-forward-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-point-forward-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-left-point-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-forward-declaring-0-zero-false.json": {
@@ -1471,13 +1483,16 @@
   "valid/combo-axis-left-point-forward-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-left-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-left-point-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-forward-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-point-forward-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-left-point-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-forward-declaring-1-zero-false.json": {
@@ -1486,13 +1501,16 @@
   "valid/combo-axis-left-point-forward-declaring-1-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-left-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-left-point-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-reverse-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-point-reverse-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-reverse-declaring-0-zero-false.json": {
@@ -1501,13 +1519,16 @@
   "valid/combo-axis-left-point-reverse-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-left-point-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-reverse-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-left-point-reverse-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-left-point-reverse-declaring-1-zero-false.json": {
@@ -1516,52 +1537,55 @@
   "valid/combo-axis-left-point-reverse-declaring-1-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-left-point-reverse-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-bar-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-right-bar-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-bar-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-bar-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-right-bar-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-bar-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-bar-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-right-bar-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-bar-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-bar-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-right-bar-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-bar-reverse-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-area-forward-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-right-area-forward-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-area-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-area-forward-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-right-area-forward-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-area-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-area-reverse-declaring-0-domain-50-400.json": {
+  "valid/combo-axis-right-area-reverse-declaring-0-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-area-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-area-reverse-declaring-1-domain-50-400.json": {
+  "valid/combo-axis-right-area-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-area-reverse-declaring-1-domain-0-400.json": {
@@ -1570,7 +1594,7 @@
   "valid/combo-axis-right-point-forward-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-point-forward-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-right-point-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-forward-declaring-0-zero-false.json": {
@@ -1579,13 +1603,16 @@
   "valid/combo-axis-right-point-forward-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-right-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-right-point-forward-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-forward-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-point-forward-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-right-point-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-forward-declaring-1-zero-false.json": {
@@ -1594,13 +1621,16 @@
   "valid/combo-axis-right-point-forward-declaring-1-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-right-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-right-point-forward-declaring-1-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-0-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-point-reverse-declaring-0-domain-5-1.json": {
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-0-zero-false.json": {
@@ -1609,19 +1639,25 @@
   "valid/combo-axis-right-point-reverse-declaring-0-type-log.json": {
    "valid": true
   },
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
   "valid/combo-axis-right-point-reverse-declaring-0-domain-0-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-1-domain-50-400.json": {
    "valid": true
   },
-  "valid/combo-axis-right-point-reverse-declaring-1-domain-5-1.json": {
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-1-zero-false.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-minus50-400.json": {
    "valid": true
   },
   "valid/combo-axis-right-point-reverse-declaring-1-domain-0-400.json": {
@@ -1783,7 +1819,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-bar-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-omitted-bar-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1807,7 +1843,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-bar-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-omitted-bar-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1831,7 +1867,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-bar-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-omitted-bar-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1855,7 +1891,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-bar-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-omitted-bar-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1879,7 +1915,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-area-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-omitted-area-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1903,7 +1939,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-area-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-omitted-area-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1927,7 +1963,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-area-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-omitted-area-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1951,7 +1987,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-omitted-area-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-omitted-area-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1975,7 +2011,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-bar-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-left-bar-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -1999,7 +2035,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-bar-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-left-bar-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2023,7 +2059,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-bar-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-left-bar-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2047,7 +2083,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-bar-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-left-bar-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2071,7 +2107,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-area-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-left-area-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2095,7 +2131,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-area-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-left-area-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2119,7 +2155,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-area-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-left-area-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2143,7 +2179,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-left-area-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-left-area-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2167,7 +2203,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-bar-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-right-bar-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2191,7 +2227,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-bar-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-right-bar-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2215,7 +2251,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-bar-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-right-bar-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2239,7 +2275,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-bar-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-right-bar-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2263,7 +2299,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-area-forward-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-right-area-forward-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2287,7 +2323,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-area-forward-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-right-area-forward-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2311,7 +2347,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-area-reverse-declaring-0-domain-5-1.json": {
+  "invalid/combo-axis-right-area-reverse-declaring-0-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
@@ -2335,7 +2371,7 @@
    "keyword": "not",
    "path": "/config/encoding/layers"
   },
-  "invalid/combo-axis-right-area-reverse-declaring-1-domain-5-1.json": {
+  "invalid/combo-axis-right-area-reverse-declaring-1-domain-minus5-minus1.json": {
    "valid": false,
    "layer": "schema",
    "keyword": "not",
