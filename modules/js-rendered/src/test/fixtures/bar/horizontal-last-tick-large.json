@@ -1,0 +1,67 @@
+{
+ "source": [
+  "lane 1105 mkfix1105.mjs"
+ ],
+ "note": "a sum axis, horizontal bars, sums of tens of thousands: the labels are written in thousands (50K, 100K), and the last one is drawn whole, not cut to an ellipsis (before #1105 it was cut at 140 of the 175 sizes)",
+ "document": {
+  "display_name": "horizontal-last-tick-large",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "INTEGER",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "type": "quantitative",
+     "aggregate": "sum",
+     "field": "v",
+     "title": "Amount"
+    }
+   },
+   "title": {
+    "text": "horizontal-last-tick-large"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   123450,
+   61200,
+   777
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "INTEGER"
+ }
+}

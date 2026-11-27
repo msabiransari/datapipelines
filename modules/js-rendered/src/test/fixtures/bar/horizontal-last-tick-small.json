@@ -1,0 +1,67 @@
+{
+ "source": [
+  "lane 1105 mkfix1105.mjs"
+ ],
+ "note": "a sum axis, horizontal bars, sums of thousandths (0.013, 0.007, 0.001): decimal tick labels, the last one drawn whole (before #1105 it was cut or left out at 4 of the 175 sizes)",
+ "document": {
+  "display_name": "horizontal-last-tick-small",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "type": "quantitative",
+     "aggregate": "sum",
+     "field": "v",
+     "title": "Share of load"
+    }
+   },
+   "title": {
+    "text": "horizontal-last-tick-small"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   0.013,
+   0.007,
+   0.001
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DECIMAL"
+ }
+}
