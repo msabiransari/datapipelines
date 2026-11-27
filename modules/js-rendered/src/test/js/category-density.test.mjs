@@ -410,3 +410,13 @@ test("G4: the heatmap row case is skipped when only x is checked", () => {
   assert.equal(R.render(f).state, "refused", "the y cells are under a pixel");
   assert.equal(skipY.render(f).state, "rendered", "skipping y hides the row failure");
 });
+
+test("G5: counting hidden bar layers as groups keeps the group count wrong (the visibility gate)", () => {
+  // The real combo counts only the visible bar layers; a copy that counts every bar layer would still report three
+  // groups after a layer is hidden, so the hidden-transition pair (groups 3 → 2) goes red.
+  const allBars = engine((s) => plant(s, "types/combo.js", 'var bars = m.subs.filter(function (s) { return s.mark === "bar" && hand.visible[s.m.series[0].id] === true; });', 'var bars = m.subs.filter(function (s) { return s.mark === "bar" });'));
+  const mk = (hidden, E) => E.render(comboInput(125, 3, 640, 360, { hidden }));
+  assertRefusal(mk([], R), "x", 125, 3);
+  assertRefusal(mk(["layer:0"], R), "x", 125, 2);
+  assert.equal(allBars.render(comboInput(125, 3, 640, 360, { hidden: ["layer:0"] })).summary.refusal.details.groups, 3, "the copy still reports three groups after hiding");
+});
