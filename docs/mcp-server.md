@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.98 (frozen contract — additive-only changes after this point)
+**Status:** v1.99 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-27
@@ -3173,6 +3173,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v1.99 | 1077 (#1077) | Chart configuration and mark counts include radar points. |
 | 2026-11-27 | v1.98 | 1076 (#1076) | Chart configuration includes sparkline without a title; mark counts include its non-null data points. |
 | 2026-11-27 | v1.97 | 1069 (#1069) | Chart configuration and mark counts include combo cells with a value. |
 | 2026-11-26 | v1.96 | 1075 (#1075) | Chart mark type gauge and its one-arc mark count. |

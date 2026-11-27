@@ -160,6 +160,8 @@ test("D8: one unique lookup per dot, series index row, point reach, bold and kep
   assert.equal(draw(FX.months).r.index.marks[0].datum, "string:2024-01-01");
   const hidden = draw(FX["two-series"], 480, 360, { hidden: ["string:Last quarter"] }).r;
   assert.equal(hidden.index.marks[0].card.rows.length, 1);
+  const missing = draw(variant("two-series", f => f.columns.v[0] = null)).r.index.marks.find(e => e.datum === "string:Speed");
+  assert.equal(missing.card.keep, 0); same(missing.card.rows.map(r => [r.name, r.value, r.bold]), [["Last quarter", "70", true]]);
 });
 const modelOf = r => { const m = I.modelOf(E, r, E.measure.measurer(null).fn); m.theme = E.theme.resolve("light"); return m; };
 const target = e => ({ kind: "mark", id: e.series, datum: e.datum });
@@ -200,7 +202,7 @@ function checkBudgets(eng = E) {
 }
 test("LA17: full, k=3/4/5/6 with +n more, and kept row alone at k=1", () => checkBudgets());
 test("D8: compact missing entries go to the first drawn entry; cut names follow the last entry", () => {
-  for (const [name, w, h] of [["six-series-twelve-axes", 240, 160], ["long-names", 480, 360], ["one-series", 480, 360], ["one-series", 120, 90], ["legend-none", 480, 360]]) {
+  for (const [name, w, h] of [["six-series-twelve-axes", 240, 160], ["long-names", 480, 360], ["one-series", 480, 360], ["one-series", 120, 90], ["legend-none", 480, 360], ["long-names", 120, 90]]) {
     const r = draw(FX[name], w, h).r, m = modelOf(r);
     for (const sid of new Set(r.index.marks.map(e => e.series))) {
       let t = target(r.index.marks.filter(e => e.series === sid).at(-1));
@@ -208,7 +210,7 @@ test("D8: compact missing entries go to the first drawn entry; cut names follow 
       if (to.kind === "entry") { const ids = r.primitives.filter(p => p.k === "group" && p.role === "legend").map(p => p.legend); assert.equal(to.id, ids.includes(sid) ? sid : ids[0]); }
       const visited = new Set();
       for (let i = 0; i < 40; i++) { const q = next(m, t, "ArrowRight"); if (JSON.stringify(q) === JSON.stringify(t)) break; assert.ok(!visited.has(JSON.stringify(q))); visited.add(JSON.stringify(q)); t = q; }
-      if (name === "long-names") assert.equal(t.kind, "cut");
+      if (name === "long-names") assert.equal(t.kind, h < 140 ? "mark" : "cut");
       if (name === "one-series") same(t, target(r.index.marks.at(-1)));
     }
   }
@@ -219,6 +221,7 @@ function changed(from, to) {
 for (const [name, from, to, check] of [
   ["G2 negative drawn as zero", "if (negative) return", "if (false) return", checkRefusals],
   ["G2 missing as zero", 'if (a.num === null) return { num: null, text: "" };', 'if (a.num === null) { markCount++; return { num: 0, text: "0" }; }', e => assert.equal(draw(variant("two-series", f => f.columns.v[0] = null), 960, 540, {}, e).r.summary.marks, 11)],
+  ["G3 axes before series", "if (sers.size > MAX_SERIES)", "if (sers.size > MAX_SERIES && cats.size <= MAX_AXES)", checkRefusals],
   ["G3 seventh series", "MAX_SERIES = 6", "MAX_SERIES = 8", checkRefusals],
   ["G3 axes", "MIN_AXES = 3, MAX_AXES = 12", "MIN_AXES = 2, MAX_AXES = 13", checkRefusals],
   ["G4 vertex moved", 'q.p.x, q.p.y);', 'q.p.x + 1, q.p.y);', checkGeometry],
@@ -277,4 +280,19 @@ test("G2 warnings once and G4 extent follows only visible series: plants fail th
     assert.equal(warnings(draw(f, 960, 540, {}, eng).r).filter(c => c === "chart.rule.null-category").length, 1);
   };
   assert.throws(() => checkWarning(probe(changed('if (dropped) warnings.push({ code: "chart.rule.null-category" });', 'if (dropped) for (var w = 0; w < 2; w++) warnings.push({ code: "chart.rule.null-category" });')))); checkWarning(E);
+});
+test("D8: long one-series and legend-null names are key targets; every series enters its own entry", () => {
+  for (const mode of ["one", "null", "three"]) {
+    const f = variant("long-names", (f, e) => {
+      if (mode === "null") e.color.legend = null;
+      if (mode === "one") { delete e.color; f.columns.a = f.columns.a.slice(0, 6); f.columns.v = f.columns.v.slice(0, 6); delete f.columns.s; }
+      if (mode === "three") { f.columns.a.push(...f.columns.a.slice(0, 6)); f.columns.v.push(40, 35, 25, 30, 20, 15); f.columns.s.push(...Array(6).fill("S3")); }
+    });
+    const r = draw(f, 480, 360).r, m = modelOf(r);
+    for (const sid of new Set(r.index.marks.map(e => e.series))) {
+      let t = target(r.index.marks.filter(e => e.series === sid).at(-1)); t = next(m, t, "ArrowRight");
+      assert.equal(t.kind, mode === "three" ? "entry" : "cut");
+      if (mode === "three") { assert.equal(t.id, sid); while (t.kind === "entry") { const q = next(m, t, "ArrowRight"); assert.notDeepEqual(q, t); t = q; } assert.equal(t.kind, "cut"); }
+    }
+  }
 });

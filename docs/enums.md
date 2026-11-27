@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.77 (living document — updated as enums evolve)
+**Status:** v1.78 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
