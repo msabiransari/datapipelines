@@ -318,6 +318,7 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `chart.scale.log_unsupported` | use a linear scale — a log scale is refused on an area, on a stacked or normalized value and beside `scale.zero` |
 | `chart.scale.domain_log` | a log `domain` must be greater than 0 and increasing |
 | `chart.shade.mid_invalid` / `chart.size.range_invalid` | a shade's `mid` must be a finite number; a scatter's `size.range` must increase |
+| `chart.bands.outside_domain` / `chart.bands.not_ascending` / `chart.target.outside_domain` | on a gauge, give each band a `to` above the scale's low end and at most its high end, each greater than the one before, and a `target` inside the domain; bands may stop short of the end |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
 

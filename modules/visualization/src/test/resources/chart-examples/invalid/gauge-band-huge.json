@@ -1,0 +1,47 @@
+{
+  "display_name": "gauge-band-huge",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "gauge",
+      "bands": [
+        {
+          "to": 50,
+          "tone": "bad"
+        },
+        {
+          "to": 1e400,
+          "tone": "good"
+        }
+      ]
+    },
+    "encoding": {
+      "value": {
+        "field": "v",
+        "type": "quantitative",
+        "aggregate": "sum",
+        "scale": {
+          "domain": [
+            0,
+            100
+          ]
+        }
+      }
+    }
+  },
+  "description": "gauge band huge"
+}
