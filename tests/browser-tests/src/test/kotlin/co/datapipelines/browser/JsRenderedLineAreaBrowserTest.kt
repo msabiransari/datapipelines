@@ -290,6 +290,10 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
         withClue("$mode: the resolver named a --chart-grid for the page's theme: $resolved") {
             (chartGrid != null) shouldBe true
         }
+        withClue("$mode: the resolved --chart-grid is the page theme's colour") {
+            val expected = if (theme == "light") LIGHT_GRID else DARK_GRID
+            (chartGrid as List<*>).map { (it as Number).toInt() } shouldBe expected
+        }
         withClue("$mode: the picture is the 80 x 24 frame: ${r["viewBox"]}") { r["viewBox"] shouldBe "0 0 80 24" }
         requireInside("$mode dot", cx, cy, radius, stroke)
         withClue("$mode: the dot stays centered on the first datum's point (${first["fx"]}, ${first["fy"]})") {
@@ -414,6 +418,10 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
 
         /** Nulls are written: a chart's `sort: null` is a value. */
         val GSON = GsonBuilder().serializeNulls().create()
+
+        /** Resolved RGB channels of app.css's light-dark chart-grid token. */
+        val LIGHT_GRID = listOf(230, 233, 238)
+        val DARK_GRID = listOf(38, 44, 53)
 
         /** The next animation frame twice, so the adapter's scheduled redraw and the layer's paint have run. */
         const val FRAME = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"

@@ -866,13 +866,19 @@ function layerWith(edit) {
   return mod.exports;
 }
 
+/** Refuse a stale or ambiguous plant anchor before constructing the mutation's copy. */
+function replaceOnce(source, from, to) {
+  assert.equal(source.split(from).length - 1, 1, `plant anchor must occur exactly once: ${from}`);
+  return source.replace(from, to);
+}
+
 /** The crosshair before issue 1132: the dot's radius and ring exactly as the theme gives them, never fitted. */
 const UNFITTED = ['var fit = dotFit(R, frame, x, y, m.dot, t.n("--chart-gap"));', 'var fit = { r: m.dot, ring: t.n("--chart-gap") };'];
 
 /** The layer with the fit taken back out (the post-issue-1128 behaviour): the same-file control the plants and the
  * default no-op check compare against. It is not an acceptance base — the acceptance comparison is the store's
  * two-export harness, which loads the pinned base from its own export. */
-const UNFITTED_LAYER = layerWith((s) => s.replace(UNFITTED[0], UNFITTED[1]))._internal;
+const UNFITTED_LAYER = layerWith((s) => replaceOnce(s, UNFITTED[0], UNFITTED[1]))._internal;
 
 /** Every chart fixture (wire, name, fixture), the engine module's own list, read the same way. */
 function allFixtures() {
@@ -980,6 +986,8 @@ function geometry(LAYER, base = "light") {
 }
 
 test("1132: the fit at its witness and its borders", () => {
+  assert.throws(() => replaceOnce("", "needle", "plant"), /exactly once/, "a missing plant anchor is refused");
+  assert.throws(() => replaceOnce("needle needle", "needle", "plant"), /exactly once/, "duplicate plant anchors are refused");
   assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 16.5, 2), { r: 5.65, ring: 0.6857142857142857 }, "the 80x24 point 16 gap 2 witness");
   assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 4.5, 2), { r: 4.5, ring: 2 }, "the default theme's dot fits and is kept exactly");
   assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 0, 10, 16.5, 2), { r: 0, ring: 0 }, "zero room leaves both zero");
@@ -1032,22 +1040,26 @@ test("1132: at the default light and dark tokens the fit is a no-op, so every ho
 });
 
 test("1132 plant 1: without the downward rounding the witness dot's ink leaks past the frame", () => {
-  const rounded = layerWith((s) => s.replace("Math.floor(100 *", "Math.round(100 *"))._internal;
+  const rounded = layerWith((s) => replaceOnce(s, "Math.floor(100 *", "Math.round(100 *"))._internal;
   const fit = rounded.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 16.5, 2);
   assert.equal(fit.r, 5.66, "the radius rounds up to 5.66 instead of down to 5.65");
   assert.ok(6 - (fit.r + fit.ring / 2) < 0, `the left ink is ${6 - (fit.r + fit.ring / 2)}`);
-  const { problems } = geometry(rounded);
-  assert.ok(problems.some((p) => /leaves the frame/.test(p)), problems[0] || "no bounds problem");
+  for (const base of ["light", "dark"]) {
+    const { problems } = geometry(rounded, base);
+    assert.ok(problems.some((p) => /leaves the frame/.test(p)), `${base}: ${problems[0] || "no bounds problem"}`);
+  }
 });
 
 test("1132 plant 2: the theme-only radius lets the crosshair dot leave the frame at --chart-point 16", () => {
-  const { seen, problems } = geometry(UNFITTED_LAYER);
-  assert.ok(problems.some((p) => /leaves the frame/.test(p)), problems[0] || "no bounds problem");
-  assert.equal(seen.shrunk, 0, "nothing is fitted, so nothing differs from the unfitted control");
+  for (const base of ["light", "dark"]) {
+    const { seen, problems } = geometry(UNFITTED_LAYER, base);
+    assert.ok(problems.some((p) => /leaves the frame/.test(p)), `${base}: ${problems[0] || "no bounds problem"}`);
+    assert.equal(seen.shrunk, 0, "nothing is fitted, so nothing differs from the unfitted control");
+  }
 });
 
 test("1132 plant 3: without the half ring in the fit's reach a nonzero-ring dot near the edge is kept and leaks", () => {
-  const noHalfRing = layerWith((s) => s.replace("rr + ring / 2 <= available", "rr <= available"))._internal;
+  const noHalfRing = layerWith((s) => replaceOnce(s, "rr + ring / 2 <= available", "rr <= available"))._internal;
   // A dot whose radius fits the 17 px of room but whose ring does not: the correct fit scales it, the plant keeps it.
   const kept = noHalfRing.dotFit(R, { w: 40, h: 40 }, 17, 17, 16.5, 8);
   assert.deepEqual(kept, { r: 16.5, ring: 8 }, "the reach without the half ring keeps the dot exactly");
