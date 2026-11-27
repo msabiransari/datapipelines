@@ -316,6 +316,25 @@ test("waterfall: the 50-bar cap and the minimal floor keep every allocation abov
   assert.equal(r.summary.marks, 50);
 });
 
+test("each family's refusing input renders in a larger frame", () => {
+  const cases = [
+    ["grouped bar", barInput(75, 1, 75, 112, 24), barInput(75, 1, 75, 960, 540)],
+    ["stacked bar", barInput(71, 3, 213, 112, 24, { stack: true }), barInput(71, 3, 213, 960, 540, { stack: true })],
+    ["line", lineInput(69, false, false, 80, 24), lineInput(69, false, false, 960, 540)],
+    ["area", lineInput(69, true, false, 80, 24), lineInput(69, true, false, 960, 540)],
+    ["combo bar layer", comboInput(75, 1, 112, 24), comboInput(75, 1, 960, 540)],
+    ["combo non-bar slot", comboInput(69, 0, 80, 24, { line: true }), comboInput(69, 0, 960, 540, { line: true })],
+    ["heatmap", heatmapInput(69, 1, 80, 200, { "--chart-gap": 0 }), heatmapInput(69, 1, 960, 540, { "--chart-gap": 0 })],
+    ["box", boxInput(35, 80, 24), boxInput(35, 960, 540)],
+  ];
+  for (const [name, refused, roomy] of cases) {
+    assert.equal(R.render(refused).state, "refused", name + " refuses at the small frame");
+    assert.equal(R.render(roomy).state, "rendered", name + " recovers in a larger frame");
+  }
+  // Waterfall never refuses: its 50-bar cap and the minimal floor keep every allocation above one pixel.
+  assert.equal(R.render(waterfallInput(49, "end", 80, 24)).state, "rendered");
+});
+
 test("the boundary is rendered, not fabricated: the exact-one controls go red when < becomes <=", () => {
   const le = densityLe();
   // exactly one pixel: renders on the real engine, refuses on a copy that treats one pixel as too small.
