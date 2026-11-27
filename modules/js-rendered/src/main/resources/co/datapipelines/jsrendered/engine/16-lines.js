@@ -296,6 +296,7 @@
         valueGrid: y.axis ? y.axis.grid : undefined,
         format: format,
         domain: scaleY.domain || null,
+        whole: agg === "count" && !normalize,
         endLabels: null,
         reach: function (h) {
           return pointsOpt === "none" ? h.theme.n("--chart-line") / 2 : h.theme.n("--chart-point") + h.theme.n("--chart-gap") / 2;

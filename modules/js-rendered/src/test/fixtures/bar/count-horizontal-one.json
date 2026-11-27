@@ -1,0 +1,54 @@
+{
+ "source": [
+  "lane 1102 mkfix1102.mjs"
+ ],
+ "note": "a count value axis, horizontal bars, every count 1: the axis reads whole numbers only",
+ "document": {
+  "display_name": "count-horizontal-one",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "type": "quantitative",
+     "aggregate": "count",
+     "title": "Rows"
+    }
+   },
+   "title": {
+    "text": "count-horizontal-one"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b"
+  ]
+ },
+ "types": {
+  "k": "STRING"
+ }
+}
