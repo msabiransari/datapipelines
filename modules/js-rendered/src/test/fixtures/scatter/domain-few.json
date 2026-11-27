@@ -1,0 +1,73 @@
+{
+ "source": [
+  "lane 1104 mkfix1104.mjs"
+ ],
+ "note": "an author's domain [0, 3] on y of a scatter: the two ends 0 and 3 where the plot is under one tick spacing",
+ "document": {
+  "display_name": "domain-few",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "y",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "scatter"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "X"
+    },
+    "y": {
+     "field": "y",
+     "type": "quantitative",
+     "title": "Y",
+     "scale": {
+      "domain": [
+       0,
+       3
+      ]
+     }
+    }
+   },
+   "title": {
+    "text": "domain-few"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   1,
+   2,
+   3,
+   4
+  ],
+  "y": [
+   0.5,
+   1,
+   2,
+   3
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "y": "DECIMAL"
+ }
+}

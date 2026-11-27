@@ -1,0 +1,73 @@
+{
+ "source": [
+  "lane 1104 mkfix1104.mjs"
+ ],
+ "note": "an author's domain [0, 3], vertical bars: a frame whose plot is under one tick spacing draws the two ends 0 and 3 (one tick, 0, before #1104)",
+ "document": {
+  "display_name": "domain-compact",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "scale": {
+      "domain": [
+       0,
+       3
+      ]
+     }
+    }
+   },
+   "title": {
+    "text": "domain-compact"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   3,
+   1,
+   2
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DECIMAL"
+ }
+}
