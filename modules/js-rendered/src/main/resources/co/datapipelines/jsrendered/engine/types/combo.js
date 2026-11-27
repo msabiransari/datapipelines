@@ -175,6 +175,16 @@
       count += ix.at.length;
     }
     for (var k = 0; k < perLayer.length; k++) if (perLayer[k]) index.push(perLayer[k]);
+    // The final occupied band allocations (owner 2026-11-24, #1117): a visible bar layer's split width first (groups =
+    // the visible bar layers), then a non-bar layer's whole slot (groups = 1).
+    var barGroup = band.step * look("barShare"), barWidth = Math.max(0, (barGroup - gap * (bars.length - 1)) / Math.max(1, bars.length));
+    var occupiedBar = bars.some(function (s) { return s.cells > 0; });
+    var occupiedOther = m.subs.some(function (s) { return s.mark !== "bar" && hand.visible[s.m.series[0].id] === true && s.cells > 0; });
+    if (occupiedBar || occupiedOther) {
+      hand.density = [];
+      if (occupiedBar) hand.density.push({ axis: "x", categories: band.n, groups: bars.length, width: barWidth });
+      if (occupiedOther) hand.density.push({ axis: "x", categories: band.n, groups: 1, width: band.step });
+    }
     return { primitives: out, index: index, count: count };
   }
 

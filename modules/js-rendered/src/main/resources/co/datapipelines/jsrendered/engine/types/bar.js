@@ -450,6 +450,9 @@
       if (stacked) stackTotals(m, plot, hp, rects, groupW, labels);
       else barLabels(m, plot, hp, rects, barW, groupW, labels);
     }
+    // The final occupied band allocation (owner 2026-11-24, #1117): a grouped bar's actual width, a stack's full
+    // group width; groups = the visible series that split the band (1 for an undivided stack).
+    if (rects.length > 0) plot.density = [{ axis: m.vertical ? "x" : "y", categories: m.categories.length, groups: stacked ? 1 : k, width: stacked ? groupW : barW }];
     return out.concat(labels);
   }
 

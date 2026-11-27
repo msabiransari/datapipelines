@@ -572,6 +572,19 @@
   }
 
   /**
+   * The category-axis density decision (owner 2026-11-24, #1117): the first occupied allocation strictly below one
+   * CSS pixel, x before y as the type wrote them, or null. A type's marks writes `hand.density` — a list of
+   * {axis, categories, groups, width} in the displayed coordinates — from its own final layout, so no allocation is
+   * re-derived here.
+   */
+  function density(hand) {
+    var a = hand.density;
+    if (!Array.isArray(a)) return null;
+    for (var i = 0; i < a.length; i++) if (typeof a[i].width === "number" && a[i].width < 1) return a[i];
+    return null;
+  }
+
+  /**
    * The cartesian frame as the frame registry takes it (18-frames.js adds it as `cartesian`; brief 1049 D2). Its room is
    * legendRoom over the model's layout part. Its lay keeps the end labels' room right of the plot (brief 989 D6, D7:
    * the names on the lines and the values of `labels: last`) before the frame is laid out, and hands the template
@@ -601,5 +614,5 @@
     },
   };
 
-  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, keep: keepOf, insets: insetsOf, hand: handOf };
+  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, keep: keepOf, insets: insetsOf, hand: handOf, density: density };
 })(JsRendered);

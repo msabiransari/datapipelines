@@ -286,24 +286,45 @@ const requestedGapOnly = engine((srcs) => {
   srcs["types/bar.js"] = srcs["types/bar.js"].replace(anchor, "sep = gap;");
 });
 
-test("gap 8 at 80 x 24: 24 painted bars of the compressed width, zero frame violations; requested-gap placement alone overflows", () => {
+/** The engine with the category-axis density decision disabled (owner 2026-11-24, #1117): the subpixel #1130
+ * allocation refuses on density first, so the compressed width is verified on this copy. */
+const DENSITY_ANCHOR = "var dens = R.cartesian.density(hand);";
+const densityOff = engine((srcs) => {
+  if (!srcs["20-render.js"].includes(DENSITY_ANCHOR)) throw new Error("density decision anchor missing from 20-render.js");
+  srcs["20-render.js"] = srcs["20-render.js"].replace(DENSITY_ANCHOR, "var dens = null;");
+});
+
+/** Both plants together: the base's overfull-group behaviour (no compression) with density off (the #1130 oracle). */
+const requestedGapDensityOff = engine((srcs) => {
+  const anchor = "sep = groupW > 0 ? gap * groupW / (groupW + gap * (k - 1)) : 0;";
+  srcs["types/bar.js"] = srcs["types/bar.js"].replace(anchor, "sep = gap;");
+  srcs["20-render.js"] = srcs["20-render.js"].replace(DENSITY_ANCHOR, "var dens = null;");
+});
+
+test("gap 8 at 80 x 24: 24 bars of 0.48 px refuse on density; the compressed width is verified with density off", () => {
   for (const name of ["fit-crowded-eight-series", "look-eight-series"]) {
     const f = fx(name), tokens = { "--chart-gap": 8 };
+    // The real engine refuses: each of the 24 grouped bars gets 0.48 px, under one pixel (owner 2026-11-24, #1117).
     const r = R.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
-    const boxes = barMarks(r).map(markBox);
-    const g = groupedGeometry(f, r, 8);
+    assert.equal(r.state, "refused", name + ": refuses");
+    assert.deepEqual(JSON.parse(JSON.stringify(r.summary.refusal)), { code: "chart.rule.category-density", details: { axis: "x", categories: 3, groups: 8 } }, name);
+    // The #1130 compressed width, on the same layout with density off.
+    const r0 = densityOff.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
+    const boxes = barMarks(r0).map(markBox);
+    const g = groupedGeometry(f, r0, 8);
     assert.equal(boxes.length, 24, name + ": 24 painted bars");
     assert.ok(g.w >= 0.48 && g.w <= 0.49, name + ": compressed width " + g.w + " is the measured 0.48–0.49");
     for (const b of boxes) assert.ok(Math.abs(catExtent(b, g.vertical) - g.w) <= 0.011, name + ": each bar is the compressed width");
     const xs = boxes.map((b) => catStart(b, g.vertical)).sort((a, b) => a - b);
     for (let j = 1; j < 24; j++) if (j % 8) assert.ok(Math.abs(xs[j] - xs[j - 1] - (g.w + g.e)) <= 0.011, name + ": starts are spaced width+separation");
-    assert.deepEqual([...violations(r.primitives, 80, 24).violations].map((v) => v.inv + " " + v.what), []);
-    const r0 = requestedGapOnly.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
-    assert.ok(violations(r0.primitives, 80, 24).violations.length > 0, name + ": requested-gap placement alone violates I2");
+    assert.deepEqual([...violations(r0.primitives, 80, 24).violations].map((v) => v.inv + " " + v.what), []);
+    // Requested-gap placement alone (no compression) still overflows, so the #1130 fix remains load-bearing.
+    const r1 = requestedGapDensityOff.render(inputOf(f, 80, 24, { theme: { base: "light", tokens } }));
+    assert.ok(violations(r1.primitives, 80, 24).violations.length > 0, name + ": requested-gap placement alone violates I2");
   }
 });
 
-test("the grouped-gap matrix: custom gaps paint positive bars inside the frame; the eight dense default rows keep base geometry", () => {
+test("the grouped-gap matrix: custom gaps paint positive bars; dense subpixel rows refuse on density", () => {
   const frames = [[80, 24], [81, 25], [100, 31], [120, 40], [160, 24], [960, 540]];
   const preserved = new Set(["80x24", "81x25", "100x31", "160x24"]);
   for (const name of ["fit-crowded-eight-series", "look-eight-series"]) {
@@ -316,15 +337,26 @@ test("the grouped-gap matrix: custom gaps paint positive bars inside the frame; 
           const tokens = gap === 2 ? {} : { "--chart-gap": gap };
           const r = R.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
           const where = name + (horiz ? " horizontal" : " vertical") + " " + w + "x" + h + " gap " + gap;
-          if (horiz && gap === 2 && preserved.has(w + "x" + h)) {
-            // The eight dense default rows keep the base's overflow (a subpixel allocation #1117 later refuses):
-            // byte-identical to requested-gap placement, so this lane changed nothing about them.
-            const r0 = requestedGapOnly.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
-            assert.equal(canonical(r), canonical(r0), where + " is byte-equal to the base");
+          if (r.state === "refused") {
+            // A dense subpixel allocation (owner 2026-11-24, #1117): the axis is the displayed category axis.
+            assert.equal(r.summary.refusal.code, "chart.rule.category-density", where);
+            assert.equal(r.summary.refusal.details.axis, vertical ? "x" : "y", where);
+            assert.equal(r.summary.refusal.details.categories, 3, where);
+            assert.equal(r.summary.refusal.details.groups, 8, where);
           } else {
             assert.deepEqual([...violations(r.primitives, w, h).violations].map((v) => v.inv + " " + v.what), [], where);
           }
-          if (gap === 4 || gap === 8) for (const b of barMarks(r).map(markBox)) {
+          // With density off, #1130's compressed widths paint positive bars inside the frame.
+          const r0 = densityOff.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
+          if (horiz && gap === 2 && preserved.has(w + "x" + h)) {
+            // The eight dense default rows keep the base's overflow (a subpixel allocation #1117 now refuses):
+            // byte-identical to requested-gap placement, so this lane changed nothing about them.
+            const r1 = requestedGapDensityOff.render(inputOf(src, w, h, { theme: { base: "light", tokens } }));
+            assert.equal(canonical(r0), canonical(r1), where + " is byte-equal to the base");
+          } else {
+            assert.deepEqual([...violations(r0.primitives, w, h).violations].map((v) => v.inv + " " + v.what), [], where + " (density off)");
+          }
+          if (gap === 4 || gap === 8) for (const b of barMarks(r0).map(markBox)) {
             assert.ok(catExtent(b, vertical) > 0, where + ": positive painted width");
           }
         }

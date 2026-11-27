@@ -10,7 +10,7 @@ const R = engine();
 const ROWS = R.tables.cap("rows");
 const MARKS = R.tables.cap("bar.marks");
 const doc = (color) => ({ display_name: "c", config: { mark: { type: "bar" }, encoding: Object.assign({ x: { field: "k", type: "nominal", title: null }, y: { field: "v", type: "quantitative", aggregate: "sum", title: null } }, color ? { color: { field: "c", type: "nominal" } } : {}) } });
-const input = (columns, color) => ({ type: "bar", document: doc(color), columns, types: { k: "STRING", v: "DOUBLE", c: "STRING" }, frame: { w: 960, h: 540 }, theme: "light", measure: null, hidden: [] });
+const input = (columns, color, frame = [960, 540]) => ({ type: "bar", document: doc(color), columns, types: { k: "STRING", v: "DOUBLE", c: "STRING" }, frame: { w: frame[0], h: frame[1] }, theme: "light", measure: null, hidden: [] });
 
 /** n rows aggregating to `groups` categories. */
 function rows(n, groups) {
@@ -84,14 +84,19 @@ test("5,000 groups all null is no-data, not a refusal", () => {
 });
 
 test("the mark cap: exactly the cap draws; one non-null cell over it is refused with chart.too_many_marks", () => {
-  const at = R.render(input(rows(MARKS, MARKS)));
+  // At 960 × 540 each of 1,000 bars gets 0.69 px, so the cap is drawn in a frame that gives each bar a whole pixel.
+  const at = R.render(input(rows(MARKS, MARKS), false, [1920, 540]));
   assert.equal(at.state, "rendered");
   assert.equal(at.summary.marks, MARKS);
+  // The same 1,000 bars at 960 × 540 refuse on category-axis density (#1117), not on the cap.
+  const dense = R.render(input(rows(MARKS, MARKS)));
+  assert.equal(dense.state, "refused");
+  assert.deepEqual(JSON.parse(JSON.stringify(dense.summary.refusal)), { code: "chart.rule.category-density", details: { axis: "x", categories: MARKS, groups: 1 } });
   const k = Array.from({ length: MARKS + 1 }, (_, i) => "g" + i), v = Array.from({ length: MARKS + 1 }, () => 1);
   const over = R.render(input({ k, v }));
   assert.equal(over.state, "refused");
   assert.deepEqual(JSON.parse(JSON.stringify(over.summary.refusal)), { code: "chart.too_many_marks", details: { marks: MARKS + 1, limit: MARKS } });
-  const nulls = R.render(input({ k: k.concat(["extra"]), v: v.slice(0, MARKS).concat([null, null]) }));
+  const nulls = R.render(input({ k: k.concat(["extra"]), v: v.slice(0, MARKS).concat([null, null]) }, false, [1920, 540]));
   assert.equal(nulls.state, "rendered", "a null cell is not a mark: 1,000 non-null of 1,002 groups draws");
 });
 
