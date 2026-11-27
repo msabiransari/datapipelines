@@ -124,6 +124,12 @@
         P.group(prims, { role: "mark" }, [cell, label]);
       } else prims.push(cell);
     }
+    // The final occupied cell allocation (owner 2026-11-24, #1117): each axis independently, after the gap and before
+    // the rounding floor, groups = 1 on each.
+    if (m.cells.length > 0) hand.density = [
+      { axis: "x", categories: hand.band.n, groups: 1, width: hand.band.step - 2 * gx },
+      { axis: "y", categories: hand.rows.n, groups: 1, width: hand.rows.step - 2 * gy },
+    ];
     return { primitives: prims, lookup: lookup, count: lookup.length };
   }
 

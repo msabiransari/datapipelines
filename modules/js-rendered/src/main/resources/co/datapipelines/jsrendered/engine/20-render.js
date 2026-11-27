@@ -52,6 +52,9 @@
     "chart.rule.negative-part": function () {
       return "This chart cannot show negative values.";
     },
+    "chart.rule.category-density": function (d) {
+      return "Too many categories to draw along the " + d.axis + "-axis (" + d.categories + (d.categories === "1" ? " category" : " categories") + ", " + d.groups + (d.groups === "1" ? " group" : " groups") + "). Widen the frame or aggregate in the query.";
+    },
   };
 
   /** The fixed sentence of a refusal {code, details} (§4.3), its numbers grouped as the engine writes numbers. */
@@ -59,7 +62,9 @@
     var f = SENTENCES[refusal.code];
     if (f === undefined) throw new Error("no sentence for " + refusal.code);
     var d = {};
-    for (var k in refusal.details) if (Object.prototype.hasOwnProperty.call(refusal.details, k)) d[k] = R.text.value(refusal.details[k], "integer");
+    for (var k in refusal.details) if (Object.prototype.hasOwnProperty.call(refusal.details, k)) {
+      d[k] = typeof refusal.details[k] === "number" ? R.text.value(refusal.details[k], "integer") : refusal.details[k];
+    }
     return f(d);
   }
 
@@ -217,6 +222,10 @@
     // visible series every data point's {at, datum, tip} as lists, which the index holds, and count = their number,
     // which summary.marks is (§4.9: thinning never changes either); ends = [{id, y}] of each drawn series' last point.
     var drawn = reg.marks(m, hand, h);
+    // The category-axis density decision (owner 2026-11-24, #1117): a type's marks writes its final occupied band
+    // allocations to hand.density; an allocation below one CSS pixel refuses before the index and primitives are kept.
+    var dens = R.cartesian.density(hand);
+    if (dens !== null) return refuse(out, "chart.rule.category-density", { axis: dens.axis, categories: dens.categories, groups: dens.groups });
     var marks = Array.isArray(drawn) ? drawn : drawn.primitives;
     var after = typeof geo.after === "function" ? geo.after(drawn) : [];
     // 7. The primitives in their order, then the index.

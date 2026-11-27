@@ -527,6 +527,9 @@
       count += ix.at.length;
       index.push(ix);
     }
+    // The final occupied band allocation (owner 2026-11-24, #1117): a nominal or ordinal x uses the whole band slot
+    // (never a glyph radius); a continuous position x is excluded, and a picture with no visible point reserves none.
+    if (!plot.x && count > 0) plot.density = [{ axis: "x", categories: m.xs.length, groups: 1, width: plot.band.step }];
     return { primitives: out, index: index, count: count, ends: ends };
   }
 

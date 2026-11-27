@@ -175,6 +175,8 @@
       });
     });
     P.group(out, { role: "mark", series: series.id, label: series.title }, children.concat(points));
+    // The final occupied box allocation (owner 2026-11-24, #1117): the box width after share and maximum width, groups = 1.
+    if (m.categories.length > 0) hand.density = [{ axis: "x", categories: m.categories.length, groups: 1, width: width }];
     return { primitives: out, lookup: boxes.concat(pointLookup), count: boxes.length };
   }
   R.type("box", { channels: CHANNELS, model: model, marks: marks, axes: "cartesian" });

@@ -155,6 +155,8 @@
         if (l !== null) labels.push(l);
       }
     }
+    // The final occupied bar allocation (owner 2026-11-24, #1117): each step and shown total's width, groups = 1.
+    if (m.bars.length > 0) hand.density = [{ axis: "x", categories: m.bars.length, groups: 1, width: bw }];
     return { primitives: out.concat(connectors, labels), lookup: lookup, count: lookup.length };
   }
   R.type("waterfall", { channels: CHANNELS, model: model, marks: marks, axes: "cartesian" });
