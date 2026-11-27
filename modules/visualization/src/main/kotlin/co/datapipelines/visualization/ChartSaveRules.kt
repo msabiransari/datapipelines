@@ -79,6 +79,7 @@ object ChartSaveRules {
         shapes.filter { it.shape == VALUE || it.shape == POSITION }.forEach { scaleRules(policyOf(it, policy), it, refusals) }
         shapes.filter { it.shape == SHADE }.forEach { shadeRules(it, refusals) }
         shapes.filter { it.shape == SIZE }.forEach { sizeRules(it, refusals) }
+        markRules(body.path("config"), shapes, refusals)
         val derived =
             shapes
                 .flatMap { it.positions }
@@ -238,6 +239,57 @@ object ChartSaveRules {
         val range = size.node.get("range")?.takeIf { it.isArray && it.size() == 2 } ?: return
         if (!(range[0].asDouble() < range[1].asDouble())) {
             refusals += ChartRefusal("chart.size.range_invalid", "${size.pointer}/range", "A size range must be increasing.")
+        }
+    }
+
+    /**
+     * Gauge members (owner ruling #1103): `chart.bands.outside_domain`, `chart.bands.not_ascending` and
+     * `chart.target.outside_domain`. Bands need not cover the domain; only inside ends raise the greatest end.
+     * An invalid domain belongs to [scaleRules] alone. Non-number members belong to the schema.
+     */
+    private fun markRules(
+        config: JsonNode,
+        shapes: List<ChartShapeNode>,
+        refusals: MutableList<ChartRefusal>,
+    ) {
+        val mark = config.path("mark")
+        val bands = mark.get("bands")?.takeIf { it.isArray }
+        val target = mark.get("target")?.takeIf { it.isNumber }
+        if (bands == null && target == null) return
+        val domain =
+            shapes
+                .firstOrNull { it.shape == VALUE }
+                ?.node
+                ?.path("scale")
+                ?.get("domain")
+                ?.takeIf { it.isArray && it.size() == 2 } ?: return
+        val lo = domain[0].asDouble()
+        val hi = domain[1].asDouble()
+        if (!linearRange(lo, hi, holdsZero = false)) return
+        var greatest = Double.NEGATIVE_INFINITY
+        bands?.forEachIndexed { i, band ->
+            val to = band.get("to")?.takeIf { it.isNumber }?.asDouble() ?: return@forEachIndexed
+            val inside = to > lo && to <= hi
+            val pointer = "/config/mark/bands/$i/to"
+            when {
+                !inside -> {
+                    refusals +=
+                        ChartRefusal(
+                            "chart.bands.outside_domain",
+                            pointer,
+                            "A band's end must be above the scale's low end and at most its high end.",
+                        )
+                }
+
+                to <= greatest -> {
+                    refusals +=
+                        ChartRefusal("chart.bands.not_ascending", pointer, "Each band's end must be greater than the ends before it.")
+                }
+            }
+            if (inside) greatest = maxOf(greatest, to)
+        }
+        if (target != null && !(lo <= target.asDouble() && target.asDouble() <= hi)) {
+            refusals += ChartRefusal("chart.target.outside_domain", "/config/mark/target", "The target must lie inside the scale's domain.")
         }
     }
 

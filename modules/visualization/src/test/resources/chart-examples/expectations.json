@@ -2702,6 +2702,64 @@
    "layer": "save",
    "code": "chart.color.nullable",
    "pointer": "/config/encoding/color/field"
+  },
+  "valid/gauge-bands-stop-short.json": {
+   "valid": true
+  },
+  "valid/gauge-band-and-target-at-ends.json": {
+   "valid": true
+  },
+  "valid/gauge-negative-domain.json": {
+   "valid": true
+  },
+  "invalid/gauge-bands-descending.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.not_ascending",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge bands descending"
+  },
+  "invalid/gauge-bands-equal.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.not_ascending",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge bands equal"
+  },
+  "invalid/gauge-band-above-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge band above domain"
+  },
+  "invalid/gauge-band-at-low-end.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/0/to",
+   "note": "gauge band at low end"
+  },
+  "invalid/gauge-band-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge band huge"
+  },
+  "invalid/gauge-target-above-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.target.outside_domain",
+   "pointer": "/config/mark/target",
+   "note": "gauge target above domain"
+  },
+  "invalid/gauge-target-below-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.target.outside_domain",
+   "pointer": "/config/mark/target",
+   "note": "gauge target below domain"
   }
  }
 }
