@@ -85,7 +85,7 @@ test("writeDom uses createElementNS, setAttribute, textContent (and appendChild/
 });
 
 test("the hostile fixture is text in the DOM: every hostile string is a text node, never an element or a name", () => {
-  assert.deepEqual(HOSTILES.map((f) => f.wire), ["area", "bar", "box", "combo", "funnel", "gauge", "heatmap", "histogram", "line", "pie", "scatter", "treemap", "waterfall"]);
+  assert.deepEqual(HOSTILES.map((f) => f.wire), ["area", "bar", "box", "combo", "funnel", "gauge", "heatmap", "histogram", "line", "pie", "scatter", "sparkline", "treemap", "waterfall"]);
   for (const f of HOSTILES) {
     const { svg } = fakeDocument();
     R.writeDom(R.render(inputOf(f.fixture, 960, 540)).primitives, svg);
@@ -98,7 +98,7 @@ test("the hostile fixture is text in the DOM: every hostile string is a text nod
     for (const t of tags) assert.ok(TAGS.has(t), f.wire + ": element " + t);
     if (f.wire === "bar") assert.deepEqual([...tags].sort(), ["g", "line", "path", "rect", "svg", "text"]);
     assert.ok(texts.some((t) => t.includes("<script>alert(1)</script>") || t.startsWith("<script>")), f.wire + ": the hostile text is drawn as text: " + texts.join(" | "));
-    assert.ok(texts.includes("__proto__"), f.wire + ": a name __proto__ is drawn");
+    assert.ok(f.wire === "sparkline" || texts.includes("__proto__"), f.wire + ": a name __proto__ is drawn");
   }
 });
 
@@ -184,7 +184,7 @@ function hostileString(f) {
     // Inside tags only (a value escapes >, so a tag ends at the first >): the hostile TEXT holds "onload=" as text.
     // A value holds no raw quote (escaped), so name="value" pairs parse exactly; a value may hold " onmouseover=" as text.
     const attrNames = (svg.match(/<[^>]*>/g) || []).flatMap((tag) => [...tag.matchAll(/\s([^\s="]+)="[^"]*"/g)].map((m) => m[1]));
-    assert.ok(attrNames.length > 100, "attributes parsed: " + attrNames.length);
+    assert.ok(attrNames.length > (f.wire === "sparkline" ? 40 : 100), "attributes parsed: " + attrNames.length);
     assert.deepEqual(attrNames.filter((n) => /^(href|xlink:href|style|on[a-z]+)$/i.test(n)), [], label + ": href, style or an event attribute");
     for (const n of attrNames) assert.ok(NAMES.has(n), label + ": attribute name " + n);
     assert.ok(/onload=/.test(svg), label + ": the hostile text is there, as text (non-vacuity of the check above)");

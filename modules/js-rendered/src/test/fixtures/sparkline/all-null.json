@@ -1,0 +1,63 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "every value null: the empty state",
+ "document": {
+  "display_name": "all-null",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01"
+  ],
+  "v": [
+   null,
+   null,
+   null,
+   null
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}

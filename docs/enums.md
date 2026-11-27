@@ -1430,6 +1430,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
 | `funnel` | Centred stage bars: required `stage` band and one aggregated `value`; value or first/previous shares, one colour, no legend, at most 12 stages (#1074) |
 | `gauge` | One aggregate `value` on a required domain; 240° open arc, optional target and up to four tone bands; one mark (#1075) |
+| `sparkline` | One line without axes, title or legend; required `x` (band or position) and one value `y`; `last` none, dot or value (default), `fill` true by default; data-range scale and last-point card (#1076) |
 | `treemap` | Nested squarified rectangles: `path` (one to three levels), `size` (one value), optional `color` (series or shade); whole labels that fit, key-only legend, no negative leaves, at most 500 positive leaves (#1078) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.

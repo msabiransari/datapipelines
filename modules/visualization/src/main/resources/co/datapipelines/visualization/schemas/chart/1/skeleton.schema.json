@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles.",
+      "description": "The family registry: bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles. Sparkline has no config.title.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -137,6 +137,9 @@
         },
         {
           "$ref": "gauge.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "sparkline.schema.json#/$defs/config"
         },
         {
           "$ref": "treemap.schema.json#/$defs/config"

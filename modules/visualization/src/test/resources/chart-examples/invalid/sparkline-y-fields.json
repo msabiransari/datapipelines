@@ -1,0 +1,44 @@
+{
+  "display_name": "Sparkline",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "x",
+          "type": "DECIMAL",
+          "nullable": true
+        },
+        {
+          "name": "v",
+          "type": "DECIMAL",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "sparkline"
+    },
+    "encoding": {
+      "x": {
+        "field": "x",
+        "type": "quantitative"
+      },
+      "y": {
+        "field": "v",
+        "type": "quantitative",
+        "aggregate": "sum",
+        "fields": [
+          {
+            "field": "v"
+          }
+        ]
+      }
+    }
+  }
+}

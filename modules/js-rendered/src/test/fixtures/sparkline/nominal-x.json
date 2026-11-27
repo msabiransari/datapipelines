@@ -1,0 +1,68 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "a nominal x spans edge to edge",
+ "document": {
+  "display_name": "nominal-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "nominal",
+     "sort": null
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "a",
+   "b",
+   "c",
+   "d",
+   "e",
+   "f"
+  ],
+  "v": [
+   3,
+   9,
+   4,
+   12,
+   8,
+   15
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "v": "DECIMAL"
+ }
+}

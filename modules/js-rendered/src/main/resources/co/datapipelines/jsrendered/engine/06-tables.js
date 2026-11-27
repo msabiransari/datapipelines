@@ -125,6 +125,12 @@
     gaugeWordNow: f("Now", "render", "brief 1075 D14: gaugeWordNow"),
     gaugeWordTarget: f("Target", "render", "brief 1075 D14: gaugeWordTarget"),
     gaugeWordTo: f("to", "render", "brief 1075 D14: gaugeWordTo"),
+    sparkLastDefault: f("value", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkLastDefault"),
+    sparkFillDefault: f(true, "render", "look contract §4.7 sparkline; brief 1076 D12: sparkFillDefault"),
+    sparkDotShrink: f(0.5, "render", "look contract §4.7 sparkline; brief 1076 D12: sparkDotShrink"),
+    sparkLastText: f("Last", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkLastText"),
+    sparkHighText: f("Highest", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkHighText"),
+    sparkLowText: f("Lowest", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkLowText"),
     treemapLabelsDefault: f("names_values", "render", "look contract §4.7; brief 1078 D14: treemapLabelsDefault"),
     treemapLabelRoomX: f(12, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomX"),
     treemapLabelRoomY: f(10, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomY"),
@@ -188,6 +194,8 @@
     "waterfall.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "bars", note: "Record §4.5 waterfall and §4.9: 50 bars including the total; inherited, not based on the lane 1073 prototype's 20,000-row timings (R19)." },
     "funnel.marks": { kind: "semantic", limit: 12, basis: "fixed", unit: "stages", note: "record §4.5 and §4.9: at most 12 stages; the thirteenth refuses with chart.too_many_marks. A semantic limit, not measured (R19)." },
     "gauge.marks": { kind: "semantic", limit: 1, basis: "fixed", unit: "marks", note: "record §4.5 gauge and §4.9 semantic limits: one aggregate, one arc; not a measured cap (#1075)" },
+    "sparkline.points": { kind: "mark", limit: 2000, basis: "inherited", unit: "points drawn in full, then thinned", note: "record §4.5 sparkline: cap as line (§4.9); not measured for sparkline (R19)." },
+    "sparkline.rows": { kind: "row", limit: 10000, basis: "inherited", unit: "rows", note: "record §4.5 sparkline: cap as line (§4.9); not measured for sparkline (R19)." },
     "treemap.marks": { kind: "mark", limit: 500, basis: "inherited", unit: "leaf cells", note: "record §4.5 treemap and §4.9: 500 leaves, derived from bar; inherited, not measured for treemap (R19)" },
   };
 

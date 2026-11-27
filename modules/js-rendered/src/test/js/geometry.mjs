@@ -105,6 +105,11 @@ export function expectedBarMarks(fx, hiddenIds) {
  * null x, a null series or a null aggregate is no point; on a log value axis (a line's) a value at or below 0 is none.
  * A temporal x counts any non-null text (the fixtures carry only valid dates); a quantitative one any finite number.
  */
+/** Sparkline uses the line aggregation count, including its log exclusion, without mutating the fixture. */
+export function expectedSparklineMarks(fx, hiddenIds) {
+  return expectedLineMarks({ ...fx, document: { ...fx.document, config: { ...fx.document.config, mark: { type: "line" } } } }, hiddenIds);
+}
+
 export function expectedLineMarks(fx, hiddenIds) {
   const e = fx.document.config.encoding, x = e.x, y = e.y, color = e.color || null;
   const col = (f) => (f && Object.prototype.hasOwnProperty.call(fx.columns, f) ? fx.columns[f] : []);
