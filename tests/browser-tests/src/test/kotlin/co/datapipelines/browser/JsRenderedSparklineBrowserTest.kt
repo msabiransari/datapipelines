@@ -97,6 +97,44 @@ class JsRenderedSparklineBrowserTest {
         }
     }
 
+    @Test
+    fun `the card keeps exact highest and lowest when distinct integers share one float`() {
+        val opened = PAGE.open(browser, VIEW_W, VIEW_H)
+        try {
+            val page = opened.page
+            draw(opened, "rising", 960, 540)
+            page.evaluate(
+                """() => {
+                  const input = ChartSparkline.input();
+                  input.columns = {x:[1,2],v:['9007199254740992','9007199254740993']};
+                  input.types = {x:'INTEGER',v:'BIGINT'};
+                  input.document.config.encoding = {
+                    x:{field:'x',type:'quantitative'},
+                    y:{field:'v',type:'quantitative',aggregate:'sum',format:'integer'}
+                  };
+                  return ChartSparkline.drawInput(input,{w:960,h:540});
+                }""",
+            )
+            page.locator("#chart").focus()
+            page.keyboard().press("ArrowRight")
+            page.locator("text.dp-tooltip").allTextContents() shouldBe
+                listOf(
+                    "1",
+                    "v",
+                    "9,007,199,254,740,992",
+                    "Last",
+                    "9,007,199,254,740,993",
+                    "Highest",
+                    "9,007,199,254,740,993",
+                    "Lowest",
+                    "9,007,199,254,740,992",
+                )
+            clean(opened)
+        } finally {
+            opened.context.close()
+        }
+    }
+
     private fun Any?.shouldBeEmptyResult() {
         @Suppress("UNCHECKED_CAST")
         (this as List<String>).shouldBeEmpty()

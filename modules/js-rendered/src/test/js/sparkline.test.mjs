@@ -285,3 +285,13 @@ test("A.5 the full keyboard plan and nearest-point plot boundaries",()=>{
   for(const [x,datum] of [[p.x,0],[p.x+p.w,11],[p.x-3,null],[p.x+p.w+3,null]]){const hit=I.lookup(E,model,{x,y});assert.equal(hit.mark?hit.mark.datum:null,datum);}
   for(const y of [p.y-1,p.y+p.h+1])assert.equal(I.lookup(E,model,{x:p.x+10,y}).mark,null);
 });
+
+test("A.5 exact extrema distinguish values that share one float and keep the first true tie",()=>{
+  const banks=[
+    [['9007199254740992','9007199254740993'],'9007199254740993','9007199254740992'], [['9007199254740993','9007199254740992'],'9007199254740993','9007199254740992'],
+    [['-9007199254740992','-9007199254740993'],'-9007199254740992','-9007199254740993'], [['-9007199254740993','-9007199254740992'],'-9007199254740992','-9007199254740993'],
+    [['12345678901234567890.1','12345678901234567890.2'],'12345678901234567890.2','12345678901234567890.1'], [['12345678901234567890.2','12345678901234567890.1'],'12345678901234567890.2','12345678901234567890.1']];
+  for(const [values,hi,lo] of banks){const f=fixture(values,undefined,{format:'integer'});f.types.v=values[0].includes('.')?'BIGDECIMAL':'BIGINTEGER';const {m}=draw(f,960,540);assert.equal(m.sparkCells.hi.exact,hi);assert.equal(m.sparkCells.lo.exact,lo);}
+  const equal=draw(fixture(['5.0','5.00']));assert.equal(equal.m.sparkCells.hi.row,0);assert.equal(equal.m.sparkCells.lo.row,0);
+  const {r}=draw(fixture(['9007199254740992','9007199254740993'],undefined,{format:'integer'}),960,540);assert.equal(r.index.series[0].tip[0][3],'Highest: 9,007,199,254,740,993');
+});

@@ -2,7 +2,7 @@
  "source": [
   "lane 1076 prototype mkfix.py"
  ],
- "note": "a flat series sits at the plot's middle",
+ "note": "A flat exact-decimal series sits at the plot middle; different decimal scales are true ties, keeping the first point for extrema.",
  "document": {
   "display_name": "flat",
   "renderer": {
@@ -58,18 +58,18 @@
    "2024-12-01"
   ],
   "v": [
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5,
-   5
+   "5.0",
+   "5.00",
+   "5.000",
+   "5.0",
+   "5.00",
+   "5.000",
+   "5.0",
+   "5.00",
+   "5.000",
+   "5.0",
+   "5.00",
+   "5.000"
   ]
  },
  "types": {

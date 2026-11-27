@@ -9,6 +9,16 @@
     { key: "y", required: true, node: { node: "shape", name: "value" } },
   ];
 
+  // Exact aggregates may share one float. Reuse the data helper for their signed difference; a true tie keeps
+  // the first point. Geometry still uses num, while Highest and Lowest retain the exact value they name.
+  function compareCells(a, b) {
+    if (a.num !== b.num) return a.num < b.num ? -1 : 1;
+    if (a.exact === null || b.exact === null) return 0;
+    var opposite = b.exact.charAt(0) === "-" ? b.exact.slice(1) : "-" + b.exact;
+    var difference = R.data.aggregate([a.exact, opposite], "sum", null).exact;
+    return /^-?0+(?:\.0+)?$/.test(difference) ? 0 : difference.charAt(0) === "-" ? -1 : 1;
+  }
+
   function model(doc, columns, types) {
     var m = L.model(doc, columns, types, { area: false });
     if (m.rule) return m;
@@ -20,8 +30,8 @@
       var c = cells[j];
       if (!c) continue;
       last = c;
-      if (hi === null || c.num > hi.num) hi = c;
-      if (lo === null || c.num < lo.num) lo = c;
+      if (hi === null || compareCells(c, hi) > 0) hi = c;
+      if (lo === null || compareCells(c, lo) < 0) lo = c;
     }
     m.sparkCells = { last: last, hi: hi, lo: lo };
     m.sparkFlat = false;
