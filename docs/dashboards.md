@@ -311,7 +311,8 @@ each as `{field: [values]}` (§2.1.2).
   word below the number: a border belongs to the lower band. A target draws a line at its clamped value.
   The save refuses a band whose `to` is not above the scale's low end and at most its high end, a `to` not
   greater than every earlier `to` inside the domain, and a `target` outside the domain. Bands that stop short
-  of the end are valid: a value past the last `to` has no zone and no word. The legend is keys only, including Target even without bands: no switches or keyboard stops.
+  of the end are valid: a value past the last `to` has no zone and no word. The legend is keys only, including
+  Target even without bands: no switches or keyboard stops.
   At small frames the ring and target drop if their fitted radius would be below 16 px; minimal has no text.
   The card heads with the chart title and rows Now, optional Target, then every band's word and `to` value,
   units once per value; a reduced card keeps Now. The pointer finds it over the arc's picture box and the

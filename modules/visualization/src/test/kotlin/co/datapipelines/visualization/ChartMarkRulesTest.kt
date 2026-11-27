@@ -2,7 +2,9 @@ package co.datapipelines.visualization
 
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
@@ -78,6 +80,33 @@ class ChartMarkRulesTest {
             )
     }
 
+    @Test
+    fun `a reversed gauge domain with bands and target has only the scale refusal through save validation`() {
+        val tree =
+            ArtifactJson.mapper.readTree(
+                checkNotNull(javaClass.getResource("/chart-examples/invalid/gauge-reversed-domain.json")).readText(),
+            ) as ObjectNode
+        tree.put("name", "examples/visualizations/reversed-gauge")
+        (tree.path("config").path("mark") as ObjectNode).apply {
+            putArray("bands").addObject().put("to", 50).put("tone", "warn")
+            put("target", 130)
+        }
+        val outcome =
+            ValidatorFakes.Fakes().visualizationValidator().validate(
+                ValidatorFakes.WORKSPACE,
+                ValidatorFakes.visualizationDocument(tree),
+            )
+        val failures = outcome.shouldBeInstanceOf<ArtifactValidation.Invalid>().result.failures
+        failures.map { Triple(it.code, it.details["reason"], it.path) } shouldBe
+            listOf(
+                Triple(
+                    VisualizationErrorCodes.CONFIG_SCHEMA_INVALID,
+                    "chart.scale.domain_invalid",
+                    ChartPaths.dotted(tree, "/config/encoding/value/scale/domain"),
+                ),
+            )
+    }
+
     private fun body(
         domain: String,
         mark: String,
@@ -104,7 +133,9 @@ class ChartMarkRulesTest {
         private val MARK_CODES = setOf("chart.bands.outside_domain", "chart.bands.not_ascending", "chart.target.outside_domain")
 
         @JvmStatic
-        fun cases(): List<Case> =
+        fun cases(): List<Case> = bandCases() + targetAndRangeCases()
+
+        private fun bandCases(): List<Case> =
             listOf(
                 Case("50,100", "[0,100]", """"bands":[{"to":50},{"to":100}]""", emptyList()),
                 Case(
@@ -162,6 +193,10 @@ class ChartMarkRulesTest {
                 Case("100", "[0,100]", """"bands":[{"to":100}]""", emptyList()),
                 Case("25,50,75,100", "[0,100]", """"bands":[{"to":25},{"to":50},{"to":75},{"to":100}]""", emptyList()),
                 Case("stop short 50,80", "[0,100]", """"bands":[{"to":50},{"to":80}]""", emptyList()),
+            )
+
+        private fun targetAndRangeCases(): List<Case> =
+            listOf(
                 Case("target 0", "[0,100]", """"target":0""", emptyList()),
                 Case("target 100", "[0,100]", """"target":100""", emptyList()),
                 Case("target 100.0001", "[0,100]", """"target":100.0001""", listOf("chart.target.outside_domain" to "/config/mark/target")),

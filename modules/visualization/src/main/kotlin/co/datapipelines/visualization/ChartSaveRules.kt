@@ -269,7 +269,7 @@ object ChartSaveRules {
         var greatest = Double.NEGATIVE_INFINITY
         bands?.forEachIndexed { i, band ->
             val to = band.get("to")?.takeIf { it.isNumber }?.asDouble() ?: return@forEachIndexed
-val inside = to > lo && to <= hi
+            val inside = to > lo && to <= hi
             val pointer = "/config/mark/bands/$i/to"
             when {
                 !inside -> {
@@ -286,7 +286,7 @@ val inside = to > lo && to <= hi
                         ChartRefusal("chart.bands.not_ascending", pointer, "Each band's end must be greater than the ends before it.")
                 }
             }
-if (inside) greatest = maxOf(greatest, to)
+            if (inside) greatest = maxOf(greatest, to)
         }
         if (target != null && !(lo <= target.asDouble() && target.asDouble() <= hi)) {
             refusals += ChartRefusal("chart.target.outside_domain", "/config/mark/target", "The target must lie inside the scale's domain.")
