@@ -2,7 +2,7 @@
  "source": [
   "lane 1076 prototype mkfix.py"
  ],
- "note": "a nominal x spans edge to edge",
+ "note": "Long nominal x headings; the first and last non-null points span the plot without drawing axis labels.",
  "document": {
   "display_name": "nominal-x",
   "renderer": {
@@ -45,12 +45,12 @@
  },
  "columns": {
   "x": [
-   "a",
-   "b",
-   "c",
-   "d",
-   "e",
-   "f"
+   "North Atlantic enterprise subscriptions, annual commitment",
+   "South Pacific enterprise subscriptions, annual commitment",
+   "Central Europe enterprise subscriptions, annual commitment",
+   "Eastern Europe enterprise subscriptions, annual commitment",
+   "South America enterprise subscriptions, annual commitment",
+   "Western Asia enterprise subscriptions, annual commitment"
   ],
   "v": [
    3,

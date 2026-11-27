@@ -669,12 +669,12 @@
   },
   "columns": {
    "x": [
-    "a",
-    "b",
-    "c",
-    "d",
-    "e",
-    "f"
+    "North Atlantic enterprise subscriptions, annual commitment",
+    "South Pacific enterprise subscriptions, annual commitment",
+    "Central Europe enterprise subscriptions, annual commitment",
+    "Eastern Europe enterprise subscriptions, annual commitment",
+    "South America enterprise subscriptions, annual commitment",
+    "Western Asia enterprise subscriptions, annual commitment"
    ],
    "v": [
     3,
