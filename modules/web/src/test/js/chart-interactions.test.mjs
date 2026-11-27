@@ -855,8 +855,8 @@ test("the layer's file: 0 getComputedStyle, 0 colour literals, 0 markup sinks (D
 
 /**
  * The interaction layer loaded a second time from its own source, [edit] changing the text first (a falsification's
- * copy), so the base and the candidate are two independent loads of the one file. Each reads the engine from
- * globalThis.JsRendered (set at the top), the same engine every layer here uses.
+ * copy), so the falsification's copy and the shipped layer are two independent loads of the one file. Each reads the
+ * engine from globalThis.JsRendered (set at the top), the same engine every layer here uses.
  */
 function layerWith(edit) {
   const src = readFileSync(path.join(STATIC_JS, "datapipelines-chart-interactions.js"), "utf8");
@@ -869,8 +869,10 @@ function layerWith(edit) {
 /** The crosshair before issue 1132: the dot's radius and ring exactly as the theme gives them, never fitted. */
 const UNFITTED = ['var fit = dotFit(R, frame, x, y, m.dot, t.n("--chart-gap"));', 'var fit = { r: m.dot, ring: t.n("--chart-gap") };'];
 
-/** The base the candidate is compared with: the layer with the fit taken back out (the post-issue-1128 behaviour). */
-const BASE = layerWith((s) => s.replace(UNFITTED[0], UNFITTED[1]))._internal;
+/** The layer with the fit taken back out (the post-issue-1128 behaviour): the same-file control the plants and the
+ * default no-op check compare against. It is not an acceptance base — the acceptance comparison is the store's
+ * two-export harness, which loads the pinned base from its own export. */
+const UNFITTED_LAYER = layerWith((s) => s.replace(UNFITTED[0], UNFITTED[1]))._internal;
 
 /** Every chart fixture (wire, name, fixture), the engine module's own list, read the same way. */
 function allFixtures() {
@@ -883,7 +885,7 @@ function allFixtures() {
   return out;
 }
 
-/** The engine's picture of [fx] at the frame under [theme]; the layer draws none of it, so the base and the candidate share it. */
+/** The engine's picture of [fx] at the frame under [theme]; the layer draws none of it, so the shipped layer and the unfitted control share it. */
 function renderAt(fx, w, h, theme) {
   return R.render(inputOf(fx.document.config.mark.type, fx.document, fx.columns, fx.types, { w, h }, { theme }));
 }
@@ -924,10 +926,10 @@ function dotInside(dot, w, h, tol) {
 /**
  * The crosshair over every line and area fixture at the small frames under --chart-point 16 and each gap, both inputs,
  * the first, middle and last datum of every visible series: each guide dot's whole ink inside the frame and its center
- * the data point (unchanged from the base), the guide line, the focus ring and the card drawn. Returns the counts and
+ * the data point (unchanged from the unfitted control), the guide line, the focus ring and the card drawn. Returns the counts and
  * the problems; the main test asserts none, a falsification asserts some.
  */
-function geometry(LAYER) {
+function geometry(LAYER, base = "light") {
   const frames = [[80, 24], [160, 24], [120, 40], [200, 140]];
   const gaps = [0, 2, 8];
   const seen = { pictures: 0, scenes: 0, dots: 0, shrunk: 0, whole: 0 };
@@ -935,7 +937,7 @@ function geometry(LAYER) {
   for (const f of allFixtures()) {
     if (f.wire !== "line" && f.wire !== "area") continue;
     for (const gap of gaps) for (const [w, h] of frames) {
-      const theme = { base: "light", tokens: { "--chart-point": 16, "--chart-gap": gap } };
+      const theme = { base, tokens: { "--chart-point": 16, "--chart-gap": gap } };
       const out = renderAt(f.fixture, w, h, theme);
       if (out.state !== "rendered") continue;
       const { m, measures } = modelAt(I, out, theme);
@@ -948,10 +950,10 @@ function geometry(LAYER) {
           ["pointer", { last: "pointer", target: null, hit: { mark: { id, datum }, entry: null, cut: null }, pointer: anchor }],
         ]) {
           const cand = LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
-          const base = BASE.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          const unfitted = UNFITTED_LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
           const at = `${f.wire}/${f.name} ${w}x${h} gap ${gap} ${mode} ${id}@${datum}`;
           const cdots = guideDots(cand);
-          const bdots = guideDots(base);
+          const bdots = guideDots(unfitted);
           seen.scenes++;
           if (cdots.length === 0) {
             problems.push(`${at}: no guide dot`);
@@ -986,22 +988,27 @@ test("1132: the fit at its witness and its borders", () => {
 });
 
 test("1132: at --chart-point 16 the crosshair dot's whole ink stays inside the frame and its center is the data point", () => {
-  const { seen, problems } = geometry(I);
-  assert.deepEqual(problems.slice(0, 5), [], `${problems.length} problems`);
-  console.log(`1132 point-16: ${JSON.stringify(seen)}`);
-  assert.ok(seen.pictures >= 200 && seen.scenes >= 1000 && seen.dots >= 2000 && seen.shrunk >= 1000 && seen.whole >= 50, JSON.stringify(seen));
+  const byBase = {};
+  for (const base of ["light", "dark"]) {
+    const { seen, problems } = geometry(I, base);
+    assert.deepEqual(problems.slice(0, 5), [], `${base}: ${problems.length} problems`);
+    console.log(`1132 point-16 ${base}: ${JSON.stringify(seen)}`);
+    assert.ok(seen.pictures >= 200 && seen.scenes >= 1000 && seen.dots >= 2000 && seen.shrunk >= 1000 && seen.whole >= 50, JSON.stringify(seen));
+    byBase[base] = seen;
+  }
+  assert.deepEqual(byBase.dark, byBase.light, "the fit's counts are the same under light and dark (length tokens only)");
 });
 
-test("1132: at the default light and dark tokens the candidate is the base, byte for byte, in every picture and hover scene", () => {
+test("1132: at the default light and dark tokens the fit is a no-op, so every hover scene equals the unfitted control", () => {
   const frames = [[80, 24], [160, 24], [360, 240], [960, 540]];
   const themes = ["light", "dark"];
-  const seen = { pictures: 0, scenes: 0 };
+  const visited = { pictures: 0, scenes: 0 };
   const problems = [];
   for (const f of allFixtures()) {
     for (const [w, h] of frames) for (const theme of themes) {
       const out = renderAt(f.fixture, w, h, theme);
       if (out.state !== "rendered") continue;
-      seen.pictures++;
+      visited.pictures++;
       if (f.wire !== "line" && f.wire !== "area") continue;
       const { m, measures } = modelAt(I, out, theme);
       if (m.series.length === 0) continue;
@@ -1012,16 +1019,16 @@ test("1132: at the default light and dark tokens the candidate is the base, byte
           { last: "pointer", target: null, hit: { mark: { id, datum }, entry: null, cut: null }, pointer: anchor },
         ]) {
           const cand = I.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
-          const base = BASE.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
-          seen.scenes++;
-          if (JSON.stringify(cand) !== JSON.stringify(base)) problems.push(`${f.wire}/${f.name} ${w}x${h} ${theme} ${id}@${datum} differs`);
+          const unfitted = UNFITTED_LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          visited.scenes++;
+          if (JSON.stringify(cand) !== JSON.stringify(unfitted)) problems.push(`${f.wire}/${f.name} ${w}x${h} ${theme} ${id}@${datum} differs`);
         }
       }
     }
   }
-  assert.deepEqual(problems.slice(0, 5), [], `${problems.length} hover scenes differ from the base`);
-  console.log(`1132 default: ${JSON.stringify(seen)}`);
-  assert.ok(seen.pictures >= 1500 && seen.scenes >= 1000, JSON.stringify(seen));
+  assert.deepEqual(problems.slice(0, 5), [], `${problems.length} hover scenes differ from the unfitted control`);
+  console.log(`1132 default no-op control: visited ${JSON.stringify(visited)}`);
+  assert.ok(visited.pictures >= 1500 && visited.scenes >= 1000, JSON.stringify(visited));
 });
 
 test("1132 plant 1: without the downward rounding the witness dot's ink leaks past the frame", () => {
@@ -1034,9 +1041,9 @@ test("1132 plant 1: without the downward rounding the witness dot's ink leaks pa
 });
 
 test("1132 plant 2: the theme-only radius lets the crosshair dot leave the frame at --chart-point 16", () => {
-  const { seen, problems } = geometry(BASE);
+  const { seen, problems } = geometry(UNFITTED_LAYER);
   assert.ok(problems.some((p) => /leaves the frame/.test(p)), problems[0] || "no bounds problem");
-  assert.equal(seen.shrunk, 0, "nothing is fitted, so nothing differs from the base");
+  assert.equal(seen.shrunk, 0, "nothing is fitted, so nothing differs from the unfitted control");
 });
 
 test("1132 plant 3: without the half ring in the fit's reach a nonzero-ring dot near the edge is kept and leaks", () => {
