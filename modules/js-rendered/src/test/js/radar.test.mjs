@@ -230,7 +230,7 @@ for (const [name, from, to, check] of [
   ["G4 reach omitted", 'reach: function (h)', 'unusedReach: function (h)', checkReach],
   ["G6 keep first", 'if (oi === si) keep = rows.length;', '', checkBudgets],
 ]) test(name + ": the same assertion rejects a mutated copy and accepts clean code", () => {
-  assert.throws(() => check(probe(changed(from, to)))); check(E);
+  const bad = probe(changed(from, to)); assert.throws(() => check(bad)); check(E);
 });
 function checkLookup(eng = E) {
   const { r, m } = draw(FX["two-series"], 960, 540, {}, eng);
@@ -247,9 +247,9 @@ for (const [name, from, to, check] of [
   ["G6 near false", 'near: true, emphasis:', 'near: false, emphasis:', checkLookup],
   ["G6 heading", 'heading: cat.full', 'heading: "Scorecard"', checkLookup],
   ["G6 hidden card", 'hand.visible[other.id] !== true || ', '', checkLookup],
-  ["G6 emphasis", 'emphasis: "ring"', 'emphasis: "none"', checkLookup],
+  ["G6 emphasis", 'emphasis: "ring", ', '', checkLookup],
   ["G4 first axis rotated", 'hand.angles[ci])', 'hand.angles[ci] + 90)', checkGeometry],
-]) test(name + ": the copy fails, the original passes", () => { assert.throws(() => check(probe(changed(from, to)))); check(E); });
+]) test(name + ": the copy fails, the original passes", () => { const bad = probe(changed(from, to)); assert.throws(() => check(bad)); check(E); });
 test("LA2: at full point changes only dot radius; LA5 radar fill reads its look field", () => {
   const a = draw().r, b = draw(FX["two-series"], 960, 540, { theme: { base: "light", tokens: { "--chart-point": 8 } } }).r;
   assert.equal(a.level, "full");
@@ -259,7 +259,7 @@ test("LA2: at full point changes only dot radius; LA5 radar fill reads its look 
     eng.tables.LOOK.radarFillShare.value = 0.112;
     assert.ok(paths(draw(FX["two-series"], 960, 540, {}, eng).r).filter(p => p.fill).every(p => p.opacity === 0.112));
   };
-  assert.throws(() => check(probe(changed('opacity: look("radarFillShare")', 'opacity: 0.14')))); check(probe());
+  const literal = probe(changed('opacity: look("radarFillShare")', 'opacity: 0.14')); assert.throws(() => check(literal)); check(probe());
 });
 test("G3: the refusal needs its sentence; G5: dot-less and consumer fields cannot be hardcoded", () => {
   const noSentence = probe(s => { s["20-render.js"] = s["20-render.js"].replace('"chart.rule.radar-axes": function', '"chart.rule.unused": function'); });
@@ -274,12 +274,12 @@ test("G2 warnings once and G4 extent follows only visible series: plants fail th
     const a = draw(f, 960, 540, {}, eng), b = draw(f, 960, 540, { hidden: ["string:S1"] }, eng);
     assert.ok(b.hand.r.hi < a.hand.r.hi);
   };
-  assert.throws(() => checkExtent(probe(changed('if (visible[ser.id] !== true) return;', '')))); checkExtent(E);
+  const allSeries = probe(changed('if (visible[ser.id] !== true) return;', '')); assert.throws(() => checkExtent(allSeries)); checkExtent(E);
   const checkWarning = eng => {
     const f = variant("two-series", f => { f.columns.a[0] = null; f.columns.a[1] = null; });
     assert.equal(warnings(draw(f, 960, 540, {}, eng).r).filter(c => c === "chart.rule.null-category").length, 1);
   };
-  assert.throws(() => checkWarning(probe(changed('if (dropped) warnings.push({ code: "chart.rule.null-category" });', 'if (dropped) for (var w = 0; w < 2; w++) warnings.push({ code: "chart.rule.null-category" });')))); checkWarning(E);
+  const repeated = probe(changed('if (dropped) warnings.push({ code: "chart.rule.null-category" });', 'if (dropped) for (var w = 0; w < 2; w++) warnings.push({ code: "chart.rule.null-category" });')); assert.throws(() => checkWarning(repeated)); checkWarning(E);
 });
 test("D8: long one-series and legend-null names are key targets; every series enters its own entry", () => {
   for (const mode of ["one", "null", "three"]) {
