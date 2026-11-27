@@ -1,0 +1,153 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "seven series refuse the chart",
+  "document": {
+    "display_name": "too-many-series",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "s": [
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S3",
+      "S3",
+      "S3",
+      "S3",
+      "S4",
+      "S4",
+      "S4",
+      "S4",
+      "S5",
+      "S5",
+      "S5",
+      "S5",
+      "S6",
+      "S6",
+      "S6",
+      "S6",
+      "S7",
+      "S7",
+      "S7",
+      "S7"
+    ],
+    "v": [
+      10,
+      11,
+      12,
+      13,
+      11,
+      12,
+      13,
+      14,
+      12,
+      13,
+      14,
+      15,
+      13,
+      14,
+      15,
+      16,
+      14,
+      15,
+      16,
+      17,
+      15,
+      16,
+      17,
+      18,
+      16,
+      17,
+      18,
+      19
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

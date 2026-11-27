@@ -131,6 +131,10 @@
     sparkLastText: f("Last", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkLastText"),
     sparkHighText: f("Highest", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkHighText"),
     sparkLowText: f("Lowest", "render", "look contract §4.7 sparkline; brief 1076 D12: sparkLowText"),
+    radarFillDefault: f(true, "render", "record §4.5 radar: fill unless authored otherwise"),
+    radarFillShare: f(0.14, "render", "look contract §2.1 radar: filled at 14% of its colour"),
+    radarDotLess: f(0.5, "render", "px: look contract §3.8 radar dot below --chart-point"),
+    radarRingShare: f(0.75, "render", "× --chart-gap: look contract §3.8 radar dot ring"),
     treemapLabelsDefault: f("names_values", "render", "look contract §4.7; brief 1078 D14: treemapLabelsDefault"),
     treemapLabelRoomX: f(12, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomX"),
     treemapLabelRoomY: f(10, "render", "look contract §4.7; brief 1078 D14: treemapLabelRoomY"),
@@ -196,6 +200,7 @@
     "gauge.marks": { kind: "semantic", limit: 1, basis: "fixed", unit: "marks", note: "record §4.5 gauge and §4.9 semantic limits: one aggregate, one arc; not a measured cap (#1075)" },
     "sparkline.points": { kind: "mark", limit: 2000, basis: "inherited", unit: "points drawn in full, then thinned", note: "record §4.5 sparkline: cap as line (§4.9); not measured for sparkline (R19)." },
     "sparkline.rows": { kind: "row", limit: 10000, basis: "inherited", unit: "rows", note: "record §4.5 sparkline: cap as line (§4.9); not measured for sparkline (R19)." },
+    "radar.marks": { kind: "semantic", limit: 72, basis: "fixed", unit: "points", note: "record §4.5 row radar and §4.9: 3 to 12 axes × at most 6 series; not measured (R19). Unreachable: the model refuses a seventh series and a thirteenth axis first." },
     "treemap.marks": { kind: "mark", limit: 500, basis: "inherited", unit: "leaf cells", note: "record §4.5 treemap and §4.9: 500 leaves, derived from bar; inherited, not measured for treemap (R19)" },
   };
 

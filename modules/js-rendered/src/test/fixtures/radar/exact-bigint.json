@@ -1,0 +1,64 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "an exact column: the card writes the exact text",
+  "document": {
+    "display_name": "exact-bigint",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "BIGINTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "v": [
+      "9007199254740993",
+      "9007199254740995",
+      "5",
+      "6"
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "BIGINTEGER"
+  }
+}

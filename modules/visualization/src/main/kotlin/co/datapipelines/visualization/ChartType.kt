@@ -78,6 +78,17 @@ enum class ChartType(
     /** One measure over an ordered axis, without axes, title or legend (§4.5; #1076). */
     SPARKLINE("sparkline", ChartChannelNodes.sparkline, ChartMarkPolicy.LINE),
 
+    /** Several series on one zero-based radial scale, over 3 to 12 categories (§4.5; #1077). */
+    RADAR(
+        "radar",
+        listOf(
+            ChartChannel("theta", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("r", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+        ),
+        ChartMarkPolicy.AREA,
+    ),
+
     /** Nested leaf rectangles, with a key-only legend (§4.5 treemap; #1078). */
     TREEMAP("treemap", ChartChannelNodes.treemap, ChartMarkPolicy.AREA),
     ;

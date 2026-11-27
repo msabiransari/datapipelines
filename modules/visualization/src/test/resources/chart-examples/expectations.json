@@ -1,5 +1,5 @@
 {
- "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and §4.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
+ "_doc": "Expected verdict per example (lane #860; re-cut from the 854 lane expectations under design record R11 and \u00a74.2). valid = passes the schema, the save rules and the product text rules. schema = fails ONLY at the schema, with an error of the named keyword at the named instance path. save = the save-rule refusal codes are EXACTLY [code]. product = passes the schema and the save rules and is refused by the product rule named (code, reason, path) - the JS reference stops at the save rules, so these are product-only.",
  "examples": {
   "valid/bar-vertical.json": {
    "valid": true
@@ -109,7 +109,7 @@
   },
   "valid/display-name-120.json": {
    "valid": true,
-   "note": "the product bound exactly (design record §4.2)"
+   "note": "the product bound exactly (design record \u00a74.2)"
   },
   "invalid/display-name-61-astral.json": {
    "valid": false,
@@ -280,7 +280,7 @@
    "layer": "schema",
    "keyword": "oneOf",
    "path": "/config/encoding/x",
-   "note": "record §4.2: a temporal x has ONE form on the line family"
+   "note": "record \u00a74.2: a temporal x has ONE form on the line family"
   },
   "invalid/line-band-sort-by-total.json": {
    "valid": false,
@@ -2585,6 +2585,121 @@
    "valid": false,
    "layer": "save",
    "code": "chart.scale.domain_invalid"
+  },
+  "valid/radar-plain.json": {
+   "valid": true
+  },
+  "valid/radar-no-fill.json": {
+   "valid": true
+  },
+  "valid/radar-unit.json": {
+   "valid": true
+  },
+  "valid/radar-legend-bottom.json": {
+   "valid": true
+  },
+  "valid/radar-sort.json": {
+   "valid": true
+  },
+  "invalid/radar-fill-string.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/fill"
+  },
+  "invalid/radar-unknown-option.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/radar-missing-theta.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-missing-r.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-theta-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/radar-theta-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/radar-theta-sort.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/theta/sort"
+  },
+  "invalid/radar-r-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-color-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/radar-extra-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-extra-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-text-measure.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/radar-nullable-color.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.color.nullable"
   }
  }
 }

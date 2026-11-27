@@ -1,0 +1,68 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "one series: no legend",
+  "document": {
+    "display_name": "one-series",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Speed",
+      "Cost",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime"
+    ],
+    "v": [
+      82,
+      64,
+      91,
+      73,
+      88,
+      96
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "v": "INTEGER"
+  }
+}
