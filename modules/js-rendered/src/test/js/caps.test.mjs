@@ -34,7 +34,7 @@ function counted(edit) {
 
 test("the cap table: every entry has a kind, a limit, a basis and a note; the bar and line-family needs are there", () => {
   const caps = R.tables.CAPS;
-  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "box.marks", "box.outliers", "box.outliers_each", "combo.layers", "combo.rows", "funnel.marks", "gauge.marks", "heatmap.marks", "histogram.marks", "line.points", "line.rows", "pie.marks", "rows", "scatter.marks", "series", "sparkline.points", "sparkline.rows", "treemap.marks", "waterfall.marks"]);
+  assert.deepEqual(Object.keys(caps).sort(), ["area.points", "area.rows", "bar.marks", "box.marks", "box.outliers", "box.outliers_each", "combo.layers", "combo.rows", "funnel.marks", "gauge.marks", "heatmap.marks", "histogram.marks", "line.points", "line.rows", "pie.marks", "radar.marks", "rows", "scatter.marks", "series", "sparkline.points", "sparkline.rows", "treemap.marks", "waterfall.marks"]);
   for (const [name, c] of Object.entries(caps)) {
     assert.ok(["row", "mark", "semantic"].includes(c.kind), name);
     assert.ok(Number.isInteger(c.limit) && c.limit > 0, name);
@@ -112,4 +112,17 @@ test("the refusal order: rows before series before marks", () => {
   assert.equal(R.render(input(many, true)).summary.refusal.code, "chart.too_many_rows");
   const seriesAndMarks = { k: Array.from({ length: 2000 }, (_, i) => "g" + i), c: Array.from({ length: 2000 }, (_, i) => "s" + (i % 9)), v: new Array(2000).fill(1) };
   assert.equal(R.render(input(seriesAndMarks, true)).summary.refusal.code, "chart.too_many_series");
+});
+
+test("radar's 72-point cap is semantic, fixed, not measured, and enforced on a 73-mark stand-in", () => {
+  const cap = R.tables.CAPS["radar.marks"];
+  assert.deepEqual([cap.kind, cap.limit, cap.basis, cap.unit], ["semantic", 72, "fixed", "points"]);
+  assert.match(cap.note, /not measured/); assert.match(cap.note, /§4\.5 row radar/);
+  const E = engine(s => {
+    const anchor = "function model(doc, columns, types) {";
+    assert.equal(s["types/radar.js"].split(anchor).length, 2);
+    s["types/radar.js"] = s["types/radar.js"].replace(anchor, anchor + ' return {series: [], markCount: 73, warnings: []};');
+  });
+  const i = input({ k: [], v: [] }); i.type = "radar"; i.document.config.mark.type = "radar";
+  assert.deepEqual(JSON.parse(JSON.stringify(E.render(i).summary.refusal)), { code: "chart.too_many_marks", details: { marks: 73, limit: 72 } });
 });

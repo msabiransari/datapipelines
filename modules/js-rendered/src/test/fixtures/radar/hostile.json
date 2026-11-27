@@ -1,0 +1,109 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "markup in names, a title and a series name",
+  "document": {
+    "display_name": "hostile",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      },
+      "title": {
+        "text": "<img src=x onerror=alert(1)>",
+        "subtitle": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "onload=alert(1)",
+      "\" onmouseover=\"x",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "<script>alert(1)</script>",
+      "__proto__",
+      "a & b \"c\" 'd'",
+      "onload=alert(1)",
+      "\" onmouseover=\"x",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "s": [
+      "</text><script>1</script>",
+      "</text><script>1</script>",
+      "</text><script>1</script>",
+      "</text><script>1</script>",
+      "</text><script>1</script>",
+      "</text><script>1</script>",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    ],
+    "v": [
+      3,
+      5,
+      2,
+      4,
+      1,
+      6,
+      4,
+      1,
+      5,
+      2,
+      6,
+      3
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

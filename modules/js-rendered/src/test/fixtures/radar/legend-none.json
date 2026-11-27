@@ -1,0 +1,106 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "legend null",
+  "document": {
+    "display_name": "legend-none",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null,
+          "legend": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Speed",
+      "Cost",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime",
+      "Speed",
+      "Cost",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime"
+    ],
+    "s": [
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2"
+    ],
+    "v": [
+      82,
+      64,
+      91,
+      73,
+      88,
+      96,
+      70,
+      71,
+      78,
+      60,
+      81,
+      93
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

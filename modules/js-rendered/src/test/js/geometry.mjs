@@ -234,6 +234,31 @@ export function expectedScatterMarks(fx, hiddenIds) {
   return n;
 }
 
+/** Radar I3, independently grouped from the input rows, including all semantic refusals before visibility. */
+export function expectedRadarMarks(fx, hiddenIds = []) {
+  const e = fx.document.config.encoding, t = fx.columns[e.theta.field];
+  const c = e.color ? fx.columns[e.color.field] : null, v = e.r.field ? fx.columns[e.r.field] : null;
+  const axes = new Set(), series = new Set(), groups = new Map();
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] == null || c && c[i] == null) continue;
+    const axis = typeof t[i] + ":" + String(t[i]), sid = c ? typeof c[i] + ":" + String(c[i]) : "measure";
+    axes.add(axis); series.add(sid);
+    const key = JSON.stringify([axis, sid]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v ? v[i] : 1);
+  }
+  let count = 0;
+  for (const [key, values] of groups) {
+    const present = values.filter(x => x != null), xs = present.map(Number);
+    if (e.r.aggregate !== "count" && !xs.length) continue;
+    const a = e.r.aggregate === "count" ? values.length : present.some(x => typeof x === "string") ? heatmapExact(present, e.r.aggregate) : e.r.aggregate === "min" ? Math.min(...xs) : e.r.aggregate === "max" ? Math.max(...xs) : xs.reduce((a, b) => a + b, 0) / (e.r.aggregate === "mean" ? xs.length : 1);
+    if (!Number.isFinite(a)) continue;
+    if (a < 0) return 0;
+    if (!hiddenIds.includes(JSON.parse(key)[1])) count++;
+  }
+  return series.size > 6 || axes.size < 3 || axes.size > 12 ? 0 : count;
+}
+
 // Waterfall I3, derived independently from the document and rows: order categories before the overflow cut.
 // Lists keep unlisted categories in first-appearance order; numbers, plain dates and code points have their own
 // order below. An exact-number or non-plain-date band is refused when this oracle cannot order it independently.

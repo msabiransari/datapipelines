@@ -37,4 +37,5 @@ types/waterfall.js
 types/funnel.js
 types/gauge.js
 types/sparkline.js
+types/radar.js
 types/treemap.js

@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.98 (frozen contract — additive-only changes after this point)
+**Status:** v1.99 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-11-27
@@ -2086,7 +2086,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline, radar or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2098,7 +2098,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a radar's points drawn, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2166,7 +2166,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline, radar or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2178,7 +2178,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a radar's points drawn, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3173,6 +3173,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v1.99 | 1077 (#1077) | Chart configuration and mark counts include radar points. |
 | 2026-11-27 | v1.98 | 1076 (#1076) | Chart configuration includes sparkline without a title; mark counts include its non-null data points. |
 | 2026-11-27 | v1.97 | 1069 (#1069) | Chart configuration and mark counts include combo cells with a value. |
 | 2026-11-26 | v1.96 | 1075 (#1075) | Chart mark type gauge and its one-arc mark count. |

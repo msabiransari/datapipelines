@@ -46,6 +46,9 @@
     "chart.too_many_series": function (d) {
       return "Too many series to draw (" + d.series + ", the limit is " + d.limit + "). Group the smaller ones in the query.";
     },
+    "chart.rule.radar-axes": function (d) {
+      return "A radar needs " + d.min + " to " + d.max + " axes, and this one has " + d.axes + ".";
+    },
     "chart.rule.negative-part": function () {
       return "This chart cannot show negative values.";
     },

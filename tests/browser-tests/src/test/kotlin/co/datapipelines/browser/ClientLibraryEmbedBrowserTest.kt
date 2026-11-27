@@ -554,6 +554,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(SPARKLINE_CONFIG))
                     body.toString()
                 },
+                "radar" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Radar")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(RADAR_CONFIG))
+                    body.toString()
+                },
                 "treemap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Treemap")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -570,6 +576,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             check(body.split(BAR_MARK).size == 2) { "the bar body holds its mark type once" }
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
+
+        const val RADAR_CONFIG =
+            """{"mark":{"type":"radar"},"encoding":{"theta":{"field":"x","type":"nominal","sort":null},""" +
+                """"r":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
 
         private const val TREEMAP_CONFIG =
             """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],""" +

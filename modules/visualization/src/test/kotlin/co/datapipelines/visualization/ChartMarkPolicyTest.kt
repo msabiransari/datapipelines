@@ -51,6 +51,7 @@ class ChartMarkPolicyTest {
                 "funnel" to ChartMarkPolicy.AREA,
                 "gauge" to ChartMarkPolicy.LINE,
                 "sparkline" to ChartMarkPolicy.LINE,
+                "radar" to ChartMarkPolicy.AREA,
                 "treemap" to ChartMarkPolicy.AREA,
             )
     }

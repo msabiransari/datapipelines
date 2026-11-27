@@ -195,6 +195,7 @@ test("the fixed sentence of every refusal code, numbers grouped", () => {
   assert.equal(R.sentence({ code: "chart.too_many_rows", details: { rows: 100001, limit: 100000 } }), "Too many rows to draw (100,001, the limit is 100,000). Aggregate in the query.");
   assert.equal(R.sentence({ code: "chart.too_many_series", details: { series: 9, limit: 8 } }), "Too many series to draw (9, the limit is 8). Group the smaller ones in the query.");
   assert.equal(R.sentence({ code: "chart.rule.negative-part", details: {} }), "This chart cannot show negative values.");
+  assert.equal(R.sentence({ code: "chart.rule.radar-axes", details: { axes: 1234, min: 3, max: 12 } }), "A radar needs 3 to 12 axes, and this one has 1,234.");
   assert.throws(() => R.sentence({ code: "chart.nope", details: {} }), /no sentence for chart\.nope/);
 });
 
@@ -209,8 +210,8 @@ test("the input is closed: an unknown member, an unknown type or a wrong frame t
 });
 
 test("the registry: types() lists bar, line, area and scatter with their descriptors; a second registration or a wrong member throws", () => {
-  same(R.types().map((t) => t.name), ["bar", "line", "area", "scatter", "pie", "combo", "heatmap", "histogram", "box", "waterfall", "funnel", "gauge", "sparkline", "treemap"]);
-  const keys = { sparkline: ["x", "y"], combo: ["x", "layers", "tooltip"], funnel: ["stage", "value"], gauge: ["value"], waterfall: ["x", "y"], box: ["x", "y"], bar: ["x", "y", "color", "tooltip"], line: ["x", "y", "color", "tooltip"], area: ["x", "y", "color", "tooltip"], scatter: ["x", "y", "color", "size", "tooltip"], pie: ["theta", "color"], heatmap: ["x", "y", "color"], histogram: ["x", "y", "color"], treemap: ["path", "size", "color"] };
+  same(R.types().map((t) => t.name), ["bar", "line", "area", "scatter", "pie", "combo", "heatmap", "histogram", "box", "waterfall", "funnel", "gauge", "sparkline", "radar", "treemap"]);
+  const keys = { radar: ["theta", "r", "color"], sparkline: ["x", "y"], combo: ["x", "layers", "tooltip"], funnel: ["stage", "value"], gauge: ["value"], waterfall: ["x", "y"], box: ["x", "y"], bar: ["x", "y", "color", "tooltip"], line: ["x", "y", "color", "tooltip"], area: ["x", "y", "color", "tooltip"], scatter: ["x", "y", "color", "size", "tooltip"], pie: ["theta", "color"], heatmap: ["x", "y", "color"], histogram: ["x", "y", "color"], treemap: ["path", "size", "color"] };
   for (const t of R.types()) same(t.channels.map((c) => c.key), keys[t.name]);
   const ok = { channels: [], model: () => null, marks: () => [], axes: "cartesian" };
   assert.throws(() => R.type("bar", ok), /already registered/);
