@@ -567,8 +567,9 @@ class LookReferencePageBrowserTest {
 
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
+        /** Brief 1077: first green page run per theme, 53 scatter + 13 box + 134 radar points. */
         private const val MIN_RADAR_TILES = 8
-        private const val MIN_POINTS = 187
+        private const val MIN_POINTS = 200
 
         /** Brief 1071: seven tiles; segments counted from each rendered histogram's mark primitives, per theme. */
         private const val MIN_HISTOGRAM_TILES = 7
