@@ -1,0 +1,58 @@
+{
+ "source": [
+  "lane 1102 mkfix1102.mjs"
+ ],
+ "note": "a count value axis on a line, tallest count 3: the axis reads whole numbers",
+ "document": {
+  "display_name": "count-small",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "line"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "y": {
+     "type": "quantitative",
+     "aggregate": "count",
+     "title": "Rows"
+    }
+   },
+   "title": {
+    "text": "count-small"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "a",
+   "b",
+   "c",
+   "c",
+   "c"
+  ]
+ },
+ "types": {
+  "k": "STRING"
+ }
+}

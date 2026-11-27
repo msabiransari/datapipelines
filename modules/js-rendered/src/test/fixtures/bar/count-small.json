@@ -1,0 +1,58 @@
+{
+ "source": [
+  "lane 1102 mkfix1102.mjs"
+ ],
+ "note": "a count value axis, vertical bars, tallest count 3: the axis reads 0 1 2 3, never 0.5 steps",
+ "document": {
+  "display_name": "count-small",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "y": {
+     "type": "quantitative",
+     "aggregate": "count",
+     "title": "Rows"
+    }
+   },
+   "title": {
+    "text": "count-small"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "a",
+   "a",
+   "b",
+   "c",
+   "c"
+  ]
+ },
+ "types": {
+  "k": "STRING"
+ }
+}

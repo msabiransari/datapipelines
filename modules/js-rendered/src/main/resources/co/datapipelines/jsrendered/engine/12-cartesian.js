@@ -88,7 +88,7 @@
 
   /** The value axis of a layout part over `length` px: a log axis (G4) or the linear one. */
   function valueAxisOf(lvl, L, ext, length, room) {
-    return L.log === true ? A.logAxis(lvl, ext, L.domain, length, L.format) : A.valueAxis(lvl, ext, L.domain, length, L.format, room);
+    return L.log === true ? A.logAxis(lvl, ext, L.domain, length, L.format) : A.valueAxis(lvl, ext, L.domain, length, L.format, room, L.whole);
   }
 
   /**

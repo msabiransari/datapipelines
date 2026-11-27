@@ -1,0 +1,76 @@
+{
+ "source": [
+  "lane 1102 mkfix1102.mjs"
+ ],
+ "note": "control: a count stacked to 100 percent is a share, its axis is percent ticks and is not whole-number",
+ "document": {
+  "display_name": "count-normalized",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "s",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "x": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "y": {
+     "type": "quantitative",
+     "aggregate": "count",
+     "title": "Rows",
+     "stack": "normalize"
+    },
+    "color": {
+     "sort": null,
+     "field": "s",
+     "type": "nominal"
+    }
+   },
+   "title": {
+    "text": "count-normalized"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "a",
+   "b",
+   "b",
+   "b"
+  ],
+  "s": [
+   "x",
+   "y",
+   "x",
+   "x",
+   "y"
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "s": "STRING"
+ }
+}

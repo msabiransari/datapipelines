@@ -102,7 +102,7 @@ output of its pinned script template), and every `field` names one of its column
 - **Nothing is left to a library's default.** The band's `sort` is required: `"ascending"`, `"descending"`, `null`
   (input order), an explicit list of values, or by each band's total — `"y"`/`"-y"` vertical, `"x"`/`"-x"`
   horizontal. The value's `aggregate` is required: `sum`, `mean`, `min`, `max`, or `count` (which takes no
-  `field`). A series' `sort` is required too, in the same forms without the by-total ones.
+  `field`; on a linear scale its value axis marks whole numbers only, except under a `scale.domain` with an end that is not whole; a log scale and a `normalize` share keep their own ticks). A series' `sort` is required too, in the same forms without the by-total ones.
 - **Types.** The band is `nominal`, `ordinal` or `temporal` (a DATE or TIMESTAMP column); the value is
   `quantitative` over a numeric column; the band and series columns are not nullable. A temporal band is
   grouped and labelled in UTC, its `format` one of `date`, `month`, `year`, `datetime`.
