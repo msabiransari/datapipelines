@@ -506,10 +506,22 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(PIE_CONFIG))
                     body.toString()
                 },
+                "combo" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Combo")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(COMBO_CONFIG))
+                    body.toString()
+                },
                 "heatmap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Heatmap")
                     val body = JsonParser.parseString(bar).asJsonObject
                     body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
+                    body.toString()
+                },
+                "histogram" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Histogram")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(HISTOGRAM_CONFIG))
                     body.toString()
                 },
                 "box" to {
@@ -536,6 +548,18 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(GAUGE_CONFIG))
                     body.toString()
                 },
+                "sparkline" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Sparkline")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(SPARKLINE_CONFIG))
+                    body.toString()
+                },
+                "radar" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Radar")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(RADAR_CONFIG))
+                    body.toString()
+                },
                 "treemap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Treemap")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -553,6 +577,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             return body.replace(BAR_MARK, "\"mark\":{\"type\":\"$mark\"}")
         }
 
+        const val RADAR_CONFIG =
+            """{"mark":{"type":"radar"},"encoding":{"theta":{"field":"x","type":"nominal","sort":null},""" +
+                """"r":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
+
         private const val TREEMAP_CONFIG =
             """{"mark":{"type":"treemap"},"encoding":{"path":[{"field":"x"}],""" +
                 """"size":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
@@ -567,6 +595,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             """{"mark":{"type":"heatmap"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
                 """"y":{"field":"y","type":"nominal","sort":null},""" +
                 """"color":{"field":"y","type":"quantitative","aggregate":"sum","scale":"sequential"}}}"""
+
+        /** Histogram over the board’s INTEGER x column (#1071). */
+        const val HISTOGRAM_CONFIG =
+            """{"mark":{"type":"histogram"},"encoding":{"x":{"field":"x","type":"quantitative"},"y":{"aggregate":"count"}}}"""
 
         /** Box over the same INTEGER columns, one distribution per x category (brief 1072 A.7). */
         const val BOX_CONFIG =
@@ -586,6 +618,19 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
         const val BAR_MARK = "\"mark\":{\"type\":\"bar\"}"
 
         /** Scatter's config over the same two INTEGER columns: a point per row, no aggregate (brief 1062 A.8). */
+        private const val COMBO_CONFIG = """
+          {"mark":{"type":"combo"},"encoding":{
+            "x":{"field":"x","type":"ordinal","sort":null},
+            "layers":[
+              {"mark":"bar","y":{"field":"y","type":"quantitative","aggregate":"sum"}},
+              {"mark":"line","y":{"field":"y","type":"quantitative","aggregate":"mean"}}
+            ]
+          }}
+        """
+
+        const val SPARKLINE_CONFIG =
+            """{"mark":{"type":"sparkline"},"encoding":{"x":{"field":"x","type":"quantitative"},""" +
+                """"y":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
         const val SCATTER_CONFIG =
             """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""

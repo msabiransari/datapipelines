@@ -1,0 +1,599 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/combo.schema.json",
+  "$comment": "Combo: one category band, two to four layers, one scale and format per axis (brief 1069 D3).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "combo"
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "layers"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/x"
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/layer"
+          },
+          "contains": {
+            "anyOf": [
+              {
+                "not": {
+                  "required": [
+                    "axis"
+                  ]
+                }
+              },
+              {
+                "properties": {
+                  "axis": {
+                    "const": "left"
+                  }
+                }
+              }
+            ]
+          },
+          "minContains": 1,
+          "allOf": [
+            {
+              "description": "G3: one scale per axis, so at most one layer per axis carries y.scale",
+              "contains": {
+                "allOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "not": {
+                          "required": [
+                            "axis"
+                          ]
+                        }
+                      },
+                      {
+                        "properties": {
+                          "axis": {
+                            "const": "left"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "required": [
+                      "y"
+                    ],
+                    "properties": {
+                      "y": {
+                        "required": [
+                          "scale"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "axis": {
+                        "const": "right"
+                      }
+                    },
+                    "required": [
+                      "axis"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "y"
+                    ],
+                    "properties": {
+                      "y": {
+                        "required": [
+                          "scale"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            },
+            {
+              "description": "one format per axis",
+              "contains": {
+                "allOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "not": {
+                          "required": [
+                            "axis"
+                          ]
+                        }
+                      },
+                      {
+                        "properties": {
+                          "axis": {
+                            "const": "left"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "required": [
+                      "y"
+                    ],
+                    "properties": {
+                      "y": {
+                        "required": [
+                          "format"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "axis": {
+                        "const": "right"
+                      }
+                    },
+                    "required": [
+                      "axis"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "y"
+                    ],
+                    "properties": {
+                      "y": {
+                        "required": [
+                          "format"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            },
+            {
+              "description": "left axis containing a bar or area holds zero on a linear scale.",
+              "if": {
+                "contains": {
+                  "allOf": [
+                    {
+                      "properties": {
+                        "axis": {
+                          "const": "left"
+                        }
+                      }
+                    },
+                    {
+                      "required": [
+                        "mark"
+                      ],
+                      "properties": {
+                        "mark": {
+                          "enum": [
+                            "bar",
+                            "area"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "then": {
+                "not": {
+                  "contains": {
+                    "allOf": [
+                      {
+                        "properties": {
+                          "axis": {
+                            "const": "left"
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "y"
+                        ],
+                        "properties": {
+                          "y": {
+                            "required": [
+                              "scale"
+                            ],
+                            "properties": {
+                              "scale": {
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "type"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "const": "log"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "required": [
+                                      "zero"
+                                    ],
+                                    "properties": {
+                                      "zero": {
+                                        "const": false
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "required": [
+                                      "domain"
+                                    ],
+                                    "properties": {
+                                      "domain": {
+                                        "anyOf": [
+                                          {
+                                            "prefixItems": [
+                                              {
+                                                "exclusiveMinimum": 0
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "prefixItems": [
+                                              {},
+                                              {
+                                                "exclusiveMaximum": 0
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "description": "right axis containing a bar or area holds zero on a linear scale.",
+              "if": {
+                "contains": {
+                  "allOf": [
+                    {
+                      "properties": {
+                        "axis": {
+                          "const": "right"
+                        }
+                      },
+                      "required": [
+                        "axis"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "mark"
+                      ],
+                      "properties": {
+                        "mark": {
+                          "enum": [
+                            "bar",
+                            "area"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "then": {
+                "not": {
+                  "contains": {
+                    "allOf": [
+                      {
+                        "properties": {
+                          "axis": {
+                            "const": "right"
+                          }
+                        },
+                        "required": [
+                          "axis"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "y"
+                        ],
+                        "properties": {
+                          "y": {
+                            "required": [
+                              "scale"
+                            ],
+                            "properties": {
+                              "scale": {
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "type"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "const": "log"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "required": [
+                                      "zero"
+                                    ],
+                                    "properties": {
+                                      "zero": {
+                                        "const": false
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "required": [
+                                      "domain"
+                                    ],
+                                    "properties": {
+                                      "domain": {
+                                        "anyOf": [
+                                          {
+                                            "prefixItems": [
+                                              {
+                                                "exclusiveMinimum": 0
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "prefixItems": [
+                                              {},
+                                              {
+                                                "exclusiveMaximum": 0
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "tooltip": {
+          "$ref": "skeleton.schema.json#/$defs/tooltip"
+        }
+      }
+    },
+    "x": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/band"
+        }
+      ],
+      "properties": {
+        "type": {
+          "$ref": "skeleton.schema.json#/$defs/bandType"
+        },
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "y"
+      ],
+      "properties": {
+        "mark": {
+          "enum": [
+            "bar",
+            "line",
+            "area",
+            "point"
+          ]
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        },
+        "axis": {
+          "enum": [
+            "left",
+            "right"
+          ]
+        },
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/plainTextRequired"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mark": {
+                "enum": [
+                  "bar",
+                  "area"
+                ]
+              }
+            },
+            "required": [
+              "mark"
+            ]
+          },
+          "then": {
+            "properties": {
+              "y": {
+                "properties": {
+                  "scale": {
+                    "properties": {
+                      "zero": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mark": {
+                "const": "area"
+              }
+            },
+            "required": [
+              "mark"
+            ]
+          },
+          "then": {
+            "properties": {
+              "y": {
+                "properties": {
+                  "scale": {
+                    "properties": {
+                      "type": {
+                        "const": "linear"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "axis"
+            ],
+            "properties": {
+              "axis": {
+                "const": "right"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "y": {
+                "properties": {
+                  "axis": false
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "value": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "fields"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

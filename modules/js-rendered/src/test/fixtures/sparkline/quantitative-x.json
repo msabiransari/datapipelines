@@ -1,0 +1,68 @@
+{
+  "source": [
+    "lane 1076 prototype mkfix.py"
+  ],
+  "note": "a quantitative x, rows out of order: sorted by x",
+  "document": {
+    "display_name": "quantitative-x",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "x",
+            "type": "DECIMAL",
+            "nullable": true
+          },
+          {
+            "name": "v",
+            "type": "DECIMAL",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "sparkline"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "quantitative",
+          "unit": "km"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        }
+      }
+    }
+  },
+  "columns": {
+    "x": [
+      5,
+      1,
+      3,
+      2,
+      4,
+      0
+    ],
+    "v": [
+      9,
+      2,
+      6,
+      4,
+      8,
+      1
+    ]
+  },
+  "types": {
+    "x": "DECIMAL",
+    "v": "DECIMAL"
+  }
+}

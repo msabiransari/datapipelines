@@ -1,0 +1,64 @@
+{
+ "source": [
+  "lane 1105 mkfix1105.mjs"
+ ],
+ "note": "a count value axis, horizontal bars, counts 7, 4 and 1: the axis ends at 8 and the label of its last tick is drawn whole at every size (before #1105 it was cut or left out at 26 of the 175 sizes of the invariant sweep)",
+ "document": {
+  "display_name": "horizontal-last-tick-count",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "type": "quantitative",
+     "aggregate": "count",
+     "title": "Rows"
+    }
+   },
+   "title": {
+    "text": "horizontal-last-tick-count"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "a",
+   "a",
+   "a",
+   "a",
+   "a",
+   "a",
+   "b",
+   "b",
+   "b",
+   "b",
+   "c"
+  ]
+ },
+ "types": {
+  "k": "STRING"
+ }
+}

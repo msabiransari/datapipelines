@@ -1,5 +1,5 @@
 {
- "note": "case (c): a left axis with the domain 0.55..1.45, one tick (1) where the plot is short",
+ "note": "a left axis with the domain 0.55..1.45: where the plot is short its two ends 0.55 and 1.45 (before #1104 one tick, 1, and case (c); now two ticks and case (a))",
  "document": {
   "display_name": "Test type test_two_axes",
   "config": {

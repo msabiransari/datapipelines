@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.io.File
 
 /**
- * The 253 chart examples (`chart-examples/`: the 854 set re-cut under design record R11, lane 989's line, area and
+ * The 578 chart examples (`chart-examples/`: the 854 set re-cut under design record R11, lane 989's line, area and
  * shared-shape additions G1, G4, G6, G7, G8, lane 1050's bar coloured by value, lane 1112's five count-value
  * examples, lane 1116's four refused x-axis units, and the chart-family examples synced from main) through the save path —
  * the reader, then [VisualizationValidator] with its three layers — each against `expectations.json`: `valid` passes;
@@ -84,7 +84,7 @@ class ChartExamplesTest {
         private val ROOT: File by lazy {
             File(checkNotNull(ChartExamplesTest::class.java.getResource("/chart-examples/expectations.json")).toURI()).parentFile
         }
-        private const val EXAMPLE_COUNT = 253
+        private const val EXAMPLE_COUNT = 578
 
         private val EXPECTATIONS: Map<String, JsonNode> by lazy {
             ArtifactJson.mapper

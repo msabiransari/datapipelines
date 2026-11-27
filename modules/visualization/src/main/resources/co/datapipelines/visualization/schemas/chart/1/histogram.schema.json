@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/histogram.schema.json",
+  "title": "datapipelines chart document, version 1, family histogram",
+  "description": "One numeric column binned on nice edges, optionally stacked by series. The last bin includes its upper edge.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "histogram"
+            },
+            "bins": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 50
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/x"
+        },
+        "y": {
+          "$ref": "skeleton.schema.json#/$defs/count"
+        },
+        "color": {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      }
+    },
+    "x": {
+      "description": "Only quantitative positions; bin edges alone set the horizontal range.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/position"
+        }
+      ],
+      "properties": {
+        "type": {
+          "const": "quantitative"
+        },
+        "scale": false
+      }
+    }
+  }
+}

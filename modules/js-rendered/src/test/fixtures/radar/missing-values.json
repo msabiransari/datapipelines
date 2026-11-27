@@ -1,0 +1,108 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "a value missing for one axis of one series, and two series with fewer than three values",
+  "document": {
+    "display_name": "missing-values",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Speed",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime",
+      "Speed",
+      "Cost",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime",
+      "Speed",
+      "Uptime"
+    ],
+    "s": [
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S3",
+      "S3"
+    ],
+    "v": [
+      80,
+      60,
+      70,
+      90,
+      50,
+      70,
+      60,
+      50,
+      80,
+      40,
+      90,
+      30,
+      40
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

@@ -187,13 +187,17 @@ test("A.3: each fixture meets the case it was written for at 960 x 540", () => {
   // step holds both signs, so (c), and the picture's checks above (the data held) find nothing.
   const signed = secondProblems(fixture(TYPE, "signed-two-ticks"), 240, 140);
   assert.deepEqual([signed.rule, signed.problems], ["c", []]);
-  // left-one-tick: its one tick where the plot is short.
-  const one = SWEEP.filter(([w, h]) => {
+  // left-one-tick: before #1104 its one tick (1) where the plot is short; an author's domain draws two ticks or more now, so
+  // there the domain's two ends, 0.55 and 1.45, and never one tick. Two left ticks are equally spaced, so the right axis (no
+  // domain) takes case (a) there: it took case (c) with the one tick.
+  const ticksOf = ([w, h]) => {
     const { hand, r } = draw(R, fixture(TYPE, "left-one-tick"), w, h);
-    return r.state === "rendered" && r.level !== "minimal" && hand.value.ticks.length === 1;
-  });
-  assert.ok(one.length >= 1, "a frame where the left axis has one tick");
-  for (const [w, h] of one) assert.equal(secondProblems(fixture(TYPE, "left-one-tick"), w, h).rule, "c");
+    return r.state === "rendered" && r.level !== "minimal" ? hand.value.ticks : null;
+  };
+  assert.deepEqual(SWEEP.filter((f) => ticksOf(f) !== null && ticksOf(f).length === 1), [], "no frame where the left axis has one tick");
+  const ends = SWEEP.filter((f) => { const t = ticksOf(f); return t !== null && t.length === 2 && t[0] === 0.55 && t[1] === 1.45; });
+  assert.ok(ends.length >= 1, "a frame where the left axis draws the domain's two ends");
+  for (const [w, h] of ends) assert.equal(secondProblems(fixture(TYPE, "left-one-tick"), w, h).rule, "a");
   const domainLeft = draw(R, fixture(TYPE, "case-a-left-domain"), 960, 540).hand.value;
   assert.ok(share(domainLeft, domainLeft.ticks[0]) > 0.001, "the left domain's first tick is above the plot's bottom edge");
 });

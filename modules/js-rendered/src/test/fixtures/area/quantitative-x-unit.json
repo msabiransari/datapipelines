@@ -1,0 +1,76 @@
+{
+ "source": [
+  "lane 1094 (a unit on a number x)"
+ ],
+ "note": "a quantitative x with a unit (G6): the unit follows the x title in the axis title and the x value in the tooltip, never a tick; y has its own unit",
+ "document": {
+  "display_name": "quantitative-x-unit",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DECIMAL",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "area"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "quantitative",
+     "title": "Distance",
+     "unit": "km"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "unit": "t"
+    }
+   },
+   "title": {
+    "text": "By distance"
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   5,
+   1,
+   3,
+   2,
+   8,
+   13,
+   21
+  ],
+  "v": [
+   10,
+   4,
+   7,
+   5,
+   12,
+   15,
+   18
+  ]
+ },
+ "types": {
+  "x": "DECIMAL",
+  "v": "DECIMAL"
+ }
+}

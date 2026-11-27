@@ -1,0 +1,57 @@
+{
+  "display_name": "two-series",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "a",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "s",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "radar"
+    },
+    "encoding": {
+      "theta": {
+        "field": "a",
+        "type": "nominal",
+        "sort": null
+      },
+      "r": {
+        "field": "v",
+        "type": "quantitative",
+        "aggregate": "sum",
+        "axis": {
+          "grid": true
+        }
+      },
+      "color": {
+        "field": "s",
+        "type": "nominal",
+        "sort": null
+      }
+    },
+    "title": {
+      "text": "Scorecard",
+      "subtitle": "Six measures, two quarters"
+    }
+  }
+}

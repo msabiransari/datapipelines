@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.74 (living document — updated as enums evolve)
+**Status:** v1.78 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1423,11 +1423,15 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `area` | As `line`, each series filled down to zero, or stacked on the series below it (zero or normalized), with a fade from the line down (#989); the value axis always holds zero and has no log scale; channels as `line` |
 | `scatter` | One point per row over two continuous axes, no aggregation; with `size` it is the bubble chart (#1062); channels `x` (a position: a number or time axis), `y` (a position narrowed to a number axis, linear or log), `color` (series or shade), `size` (diameters from `range`, the area following the value), `tooltip` (up to six details) |
 | `pie` | Parts of a whole, a ring by default (`inner` 0 draws a disc); channels `theta` (one value) and `color` (series); at most eight slices, smallest parts folded into Other, negative parts refused (#1068) |
+| `combo` | Two to four layers (`bar`, `line`, `area`, `point`) over one category band `x`; one value `y` per layer, a left and optional right axis, layer legend switches and up to six `tooltip` details (#1069) |
 | `heatmap` | One shaded cell per pair of category bands; channels `x`, `y` (bands) and required `color` (shade); missing cells are empty, labels optional, at most 1,000 cells (#1070) |
+| `histogram` | One numeric distribution on nice bin edges, optionally stacked by series; `bins` targets 5 to 50 bins. |
 | `box` | One distribution per optional category band `x`; quantitative position `y`, no aggregation; median, interpolated quartiles, whiskers at the last values inside 1.5 × IQR and optional outside points; at most 50 boxes (#1072) |
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
 | `funnel` | Centred stage bars: required `stage` band and one aggregated `value`; value or first/previous shares, one colour, no legend, at most 12 stages (#1074) |
 | `gauge` | One aggregate `value` on a required domain; 240° open arc, optional target and up to four tone bands; one mark (#1075) |
+| `sparkline` | One line without axes, title or legend; required `x` (band or position) and one value `y`; `last` none, dot or value (default), `fill` true by default; data-range scale and last-point card (#1076) |
+| `radar` | Three to twelve category axes (`theta` band), one aggregated value `r`, optional series `color`; one zero-based radial scale, at most six series and 72 points (#1077) |
 | `treemap` | Nested squarified rectangles: `path` (one to three levels), `size` (one value), optional `color` (series or shade); whole labels that fit, key-only legend, no negative leaves, at most 500 positive leaves (#1078) |
 
 **Closed.** Each later type lane adds its row with its enum entry, its schema file, its template and at least five fixtures (one of them the empty case) in the same commit; the registry guard is red on any one of them alone.
@@ -1438,6 +1442,10 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v1.78 | 1077 (#1077) | Radar: category spokes, shared radial scale, polygons and selected-point cards. |
+| 2026-11-27 | v1.77 | 1076 (#1076) | Sparkline: one measure, bare frame, last-value fit and selected-point card. |
+| 2026-11-27 | v1.76 | 1071 (#1071) | **§63:** Add histogram with a quantitative position, fieldless count and optional series. |
+| 2026-11-27 | v1.75 | 1069 (#1069) | **§63:** Combo: two to four bar, line, area or point layers on a category axis. |
 | 2026-11-26 | v1.74 | 1078 (#1078) | **§63:** Add treemap nested leaf rectangles, labels and a key-only legend. |
 | 2026-11-26 | v1.73 | 1075 (#1075) | **§63:** Add gauge: one aggregate on a required domain, optional target and tone bands. |
 | 2026-11-26 | v1.72 | 1074 (#1074) | **§63:** Add funnel: centred bars for up to twelve ordered stages, one aggregate and no legend. |

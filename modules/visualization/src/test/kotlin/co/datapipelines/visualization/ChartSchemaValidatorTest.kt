@@ -46,12 +46,16 @@ class ChartSchemaValidatorTest {
             "valid/line-log.json",
             "valid/area-stacked.json",
             "valid/scatter-plain.json",
+            "valid/combo-bar-line-right.json",
             "valid/waterfall-plain.json",
             "valid/box-plain.json",
             "valid/pie-plain.json",
             "valid/heatmap-plain.json",
+            "valid/histogram-plain.json",
             "valid/funnel-plain.json",
             "valid/gauge-plain.json",
+            "valid/sparkline-plain.json",
+            "valid/radar-plain.json",
             "valid/treemap-plain.json",
         )) {
             val body = example(file)

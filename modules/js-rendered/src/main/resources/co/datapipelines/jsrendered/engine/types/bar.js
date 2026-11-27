@@ -307,6 +307,7 @@
         valueGrid: value.axis ? value.axis.grid : undefined,
         format: format,
         domain: value.scale && value.scale.domain ? value.scale.domain : null,
+        whole: agg === "count" && !normalize,
         endLabels: endLabels,
         extent: function (visible) {
           refreshEndLabels(visible);

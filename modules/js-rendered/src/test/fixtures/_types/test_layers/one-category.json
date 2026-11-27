@@ -1,0 +1,42 @@
+{
+ "note": "one category",
+ "document": {
+  "display_name": "Test type test_layers",
+  "config": {
+   "mark": {
+    "type": "test_layers"
+   },
+   "encoding": {
+    "x": {
+     "field": "m"
+    },
+    "y": {
+     "field": "a"
+    },
+    "y2": {
+     "field": "b"
+    }
+   }
+  }
+ },
+ "columns": {
+  "m": [
+   "Only"
+  ],
+  "a": [
+   100
+  ],
+  "b": [
+   0.5
+  ]
+ },
+ "types": {
+  "m": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE"
+ },
+ "expect": {
+  "marks": 2
+ }
+}

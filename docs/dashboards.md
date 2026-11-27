@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.91 — treemap draws nested rectangles sized by value (#1078) beside gauge draws one aggregate on a required range with optional tone bands and a target (#1075) beside waterfall draws running changes and a closing total (#1073) beside box draws quartiles and whiskers per category (#1072) beside heatmap draws one shaded cell per pair of categories (#1070) beside pie and donut draw parts of a whole (#1068) beside a scatter draws one point per row over two continuous axes, coloured by series or by value, with an optional bubble size (§2.1.2, §6.3, #1062) beside an embedding host loads the client library, one script `/js/datapipelines.js` and one stylesheet `/css/datapipelines.css` that the application joins from the source files the product's pages load, and the font files allow any origin (§6, §6.4, #1064) beside a bar's shade may be two-sided, `scale: "diverging"` around `mid` with the same distance on both sides and the legend's two numbers (§2.1.2, #1053) beside a bar may be coloured by value (`color` as a `shade`: a seven-step sequential ramp and its legend), and the skeleton defines the `size`, `count` and `level` shapes for types that come later (§2.1.2, #1050) beside a chart that carries a legend switch is a group for assistive technology, its switches buttons that answer a press, and a chart without one stays an image (§6.3, #1010) beside every render warning code the chart engine has carries its own fixed sentence on the page (§6.1, #1008) beside a chart answers the pointer, a legend click and the keyboard through one shared interaction layer (the tooltip card that shows what fits, hover dimming, the crosshair, the legend switch, one tab stop and a focus ring, the cut-text card), and the picture carries its own accessible description (§6.3, §6.4, §6.6, #990) beside the line and area chart families, a continuous position axis, and `fields`, `unit`, `tooltip`, `scale.type: "log"` and `scale.zero` on the shapes (§2.1.2, §6.1, #989) beside §6.6 no longer describes the removed vendored bundles' source patches and no line above the Change Log names a chart library (§2.1, §2.1.2, §6.6, #988) beside the pages draw charts with the product's own chart engine, its files loaded from one list, `init` refuses a `charts` option and the chart tokens are the look contract's, set once in `app.css` (§6.1–§6.4, §6.6, §7, #987) beside the mechanical check judges a chart case from the chart engine's canonical render at 640 × 400, a chart save has two layers and never draws, its write answers no `warnings`, and the retired kind is refused as any unknown kind (§2.1, §2.1.2, §3.4, §6.1, #986) beside the Release dialogs render the shared release plan and a bare `release_pinned_*` is refused 428 (§3.1, §3.2, §7, #876) beside the dashboards and visualizations workspaces gain a Dependencies tab (§7, #876) beside the explicit action buttons are unavailable while the action gate is closed, `aria-disabled` and described by one sentence per refusal (visible for invalid parameters only), through the optional `renderActionAvailability` hook, and an in-flight refresh does not close the gate (§6.2, #548) beside a 2-row chart with both axis titles is held to a 40% plot-area floor, #386's half kept for untitled axes (§6.3, #870) beside `renderData` has one signature, the mounted handle's `(occurrenceRef, rows, bindings)`, and the composite's adapter-level function forwards exactly those three (§6.2, #852) beside the activity dock's toggle reads Expand while the dock is collapsed and Collapse while it is open (§7, #842) beside a refresh and a draft preview send a read-only request, so each source's DQL runs in the per-lease read-only mode where the database enforces it (§5.1, #463) beside the `chart` kind (the chart document v1, its served schema and three save layers) replaces the retired kind, a chart occurrence's configuration carries its encoded fields' `columns`, `init` takes `charts`, and the runtime's mount refusals are tabled (§2.1, §3.4, §5.2, §5.3, §6.1–§6.4, §7, #860) beside the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small chart cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside the colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside the host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
+**Status:** v0.98 — a gauge's bands and target are checked at save (§2.1.2, #1103) beside radar compares series over category spokes with one zero-based scale (#1077) beside sparkline draws one trend on a bare frame with a fitted last value and selected-point card (#1076) beside histogram distributions use nice bins and whole count ticks (#1071) beside combo layers share a category axis with one or two value axes (#1069) beside a count value axis on a linear scale marks whole numbers only (#1102) beside a line or area's number x writes its unit after the axis title and the tooltip's x value, never a tick (#1094) beside treemap draws nested rectangles sized by value (#1078) beside gauge draws one aggregate on a required range with optional tone bands and a target (#1075) beside waterfall draws running changes and a closing total (#1073) beside box draws quartiles and whiskers per category (#1072) beside heatmap draws one shaded cell per pair of categories (#1070) beside pie and donut draw parts of a whole (#1068) beside a scatter draws one point per row over two continuous axes, coloured by series or by value, with an optional bubble size (§2.1.2, §6.3, #1062) beside an embedding host loads the client library, one script `/js/datapipelines.js` and one stylesheet `/css/datapipelines.css` that the application joins from the source files the product's pages load, and the font files allow any origin (§6, §6.4, #1064) beside a bar's shade may be two-sided, `scale: "diverging"` around `mid` with the same distance on both sides and the legend's two numbers (§2.1.2, #1053) beside a bar may be coloured by value (`color` as a `shade`: a seven-step sequential ramp and its legend), and the skeleton defines the `size`, `count` and `level` shapes for types that come later (§2.1.2, #1050) beside a chart that carries a legend switch is a group for assistive technology, its switches buttons that answer a press, and a chart without one stays an image (§6.3, #1010) beside every render warning code the chart engine has carries its own fixed sentence on the page (§6.1, #1008) beside a chart answers the pointer, a legend click and the keyboard through one shared interaction layer (the tooltip card that shows what fits, hover dimming, the crosshair, the legend switch, one tab stop and a focus ring, the cut-text card), and the picture carries its own accessible description (§6.3, §6.4, §6.6, #990) beside the line and area chart families, a continuous position axis, and `fields`, `unit`, `tooltip`, `scale.type: "log"` and `scale.zero` on the shapes (§2.1.2, §6.1, #989) beside §6.6 no longer describes the removed vendored bundles' source patches and no line above the Change Log names a chart library (§2.1, §2.1.2, §6.6, #988) beside the pages draw charts with the product's own chart engine, its files loaded from one list, `init` refuses a `charts` option and the chart tokens are the look contract's, set once in `app.css` (§6.1–§6.4, §6.6, §7, #987) beside the mechanical check judges a chart case from the chart engine's canonical render at 640 × 400, a chart save has two layers and never draws, its write answers no `warnings`, and the retired kind is refused as any unknown kind (§2.1, §2.1.2, §3.4, §6.1, #986) beside the Release dialogs render the shared release plan and a bare `release_pinned_*` is refused 428 (§3.1, §3.2, §7, #876) beside the dashboards and visualizations workspaces gain a Dependencies tab (§7, #876) beside the explicit action buttons are unavailable while the action gate is closed, `aria-disabled` and described by one sentence per refusal (visible for invalid parameters only), through the optional `renderActionAvailability` hook, and an in-flight refresh does not close the gate (§6.2, #548) beside a 2-row chart with both axis titles is held to a 40% plot-area floor, #386's half kept for untitled axes (§6.3, #870) beside `renderData` has one signature, the mounted handle's `(occurrenceRef, rows, bindings)`, and the composite's adapter-level function forwards exactly those three (§6.2, #852) beside the activity dock's toggle reads Expand while the dock is collapsed and Collapse while it is open (§7, #842) beside a refresh and a draft preview send a read-only request, so each source's DQL runs in the per-lease read-only mode where the database enforces it (§5.1, #463) beside the `chart` kind (the chart document v1, its served schema and three save layers) replaces the retired kind, a chart occurrence's configuration carries its encoded fields' `columns`, `init` takes `charts`, and the runtime's mount refusals are tabled (§2.1, §3.4, §5.2, §5.3, §6.1–§6.4, §7, #860) beside the activity dock starts collapsed on short windows until a first gesture, and both docks use one handle class (§7, #800/#801) beside a never-admissible refresh refusal is published with no Retry offer and a fixed sentence naming the configuration key to raise, while a busy refusal keeps its Retry offer (§5.5, #771) beside a board taller than its region scrolls inside it with the activity dock kept in main, and the dock's height is the shared splitter's, remembered across tab switches, Back and reload (§7, #783) beside a refresh needing more distinct executions than the instance can ever admit is refused at once with `details.reason = never_admissible`, and startup refuses or warns on the ceilings that would cause it (§5.5, #762) beside a refresh sent for an older selection may render its result but never clears a later commit's stale mark (§6.6, #550) beside the Board tab flexes its panes into a full-height column so the activity dock stays visible without scrolling main (§7, #612) beside a 1280 px window with the resource browser shown already puts the board region under the filters' 820 px drawer threshold, and a resize of the browser at a fixed viewport crosses it (§7, #573) beside small chart cards keep a drawable body and renderer rejections leave a bounded browser diagnostic (§6.6, #536); committed parameter changes mark their affected cards stale after parent re-evaluation or immediately for leaves, and retain the mark through success settling (§6.6, #542) beside a stale card's border is the warning accent, not #536's gray (§6.6, #544) beside the card's border carries every state and the status chip is never shown: one class vocabulary shared by the runtime and the sheet, an animated loading edge, green success for three seconds, a stale border, red error and abort in both phases (§6.2, §6.6, #536) beside explicit action-control buttons in the filters pane (§6.2/§7, #543) beside a draft-only workspace opens its admitted draft directly, labelled (§7, #537) beside the default heatmap’s pixelated rendering hint is a CSSOM write under the enforced policy (§6.6, #531) beside the colorbar fills are reset by removing the style attribute, so a colorbar draws under the enforced policy and the collector has no exception left (§6.4, §6.6, #525) beside the missing-marker fallback creates a CSP-compliant template marker (§6.6, #526) beside the host marker precedes bundle load and CSP refusals are collected by provenance (§6.6, #456) beside the parameters pane's error row wraps its sentence as prose and its code chip stays inside the panel (§6.2, §7, #507) beside the drawer's Close heads the form and a rejected typed value stays in its field beside its error while the last valid value travels (§6.2, §7, #496/#497) beside the parameters pane's error row speaks the design system's field error and every checkbox or radio option is one row (§6.2, §7, #498/#499) beside the KPI has no label of its own and its card heading titles it (§2.1.2, §6.3, #475, owner ruling) beside the filters drawer follows the board region at 820 px (§7, #492) beside the compact chart card: the chip on the heading line, the message over the body's lower edge (§6.2, §6.6, #501) beside the board presentation's filters panel, chart cards and activity dock (§6.1's `parametersContainer`, §6.2's card wrap and pane mount target, §6.6's border-speaks-the-state, §7's Board tab, #473) beside renderer-aware binding types and nullable transform output (§3.4, #458/#457) beside the board-width breakpoint on the composite host, with a 640 px default (#412) beside a target the refresh's own abort cancelled reports `abort` whichever side of the race wins (§6.6, #435) beside the declarative read-only rule (§5.1, #463), then draft dashboard dependencies (#459), then the Release dialogs post the draft hash they read (§7, #416) beside numeric bound-value assertion feasibility (§3.4, #377) beside the visualizations workspace's tab switches on the shared history helper, the parameter-set decision (§7, #426) beside the pipeline editor runs the shared tab core (§7, #420) beside the Versions tables' created/released relative with the UTC stamp on hover (§7, #422) beside Back/Forward across the dashboards workspace's tab switches (§7, #402) beside the visualizations workspace (§7, #399) beside the dashboards workspace (§5.2's `version`, §7's workspace, #400; #409 closes with it) beside the
 board's small-slot margins and its breakpoint collapse (§6.2, §6.3, #386/#387), 328's release-record judgement (§4.3)
 permissions (§4, lane L1b); the transfer routes and their limits' honest contract (§3.3, lanes L1c/L1c-b/L1c-c: the
 import's atomicity, the RELEASE rules on a landing, the aggregate count ceiling, the wire's per-family arms); the server
@@ -15,7 +15,7 @@ page, the screenshot upload and the two test tools — §3.4.1 (lane L4b, #353).
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.62 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-11-26
+**Last updated:** 2026-11-27
 
 A dashboard presents pipeline results. Draft development admits draft dependencies; published boards require released dependencies. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin exact pipeline versions as sources, map their results onto visualization inputs, and arrange visualizations, groups, actions and
@@ -102,15 +102,16 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline`, `radar` and `treemap` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge and treemap families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline, radar and treemap families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
   `type: "quantitative"`, `aggregate` required (`sum`, `mean`, `min`, `max`, or `count`, which takes no field).
+  A `count` value axis on a linear scale marks whole numbers only (0, 1, 2 …), also inside a `scale.domain` whose two ends are whole numbers; a `scale.domain` with an end that is not a whole number is drawn as written, a log scale keeps its own ticks, and a `normalize` share keeps its percent ticks.
   `y` quantitative draws vertical bars, `x` quantitative horizontal ones. `color` has two forms, chosen by its
   `type`. As a **series** (`nominal` or `ordinal`) it names the series column, and then the value's `stack` is
   required: `"zero"` stacked, `"normalize"` (shares; `percent` format) or `null` grouped.
@@ -152,7 +153,9 @@ each as `{field: [values]}` (§2.1.2).
   `ordinal`, as the bar's) or a **position** — `{field, type: "quantitative" | "temporal", title?, format?, unit?,
   scale?, axis?}`, a continuous axis. A temporal `x` has ONE form, the position: a `temporal` band is refused on line
   and area by the schema. A temporal position takes `date`, `month`, `year` or `datetime` (UTC) and no `scale` or
-  `unit`; a quantitative position takes a number format. `curve` is `smooth` (the default: the curve never leaves
+  `unit`; a quantitative position takes a number format. Its `unit` follows the x axis title (`Distance (km)`;
+  `title: null` writes neither title nor unit) and the tooltip's x value (`5 km`), never a tick.
+  `curve` is `smooth` (the default: the curve never leaves
   the range of the two points it joins), `step` or `linear`; `points` is `end` (the default: a dot on each line's last
   point), `markers` or `none`; `labels` is `none` (the default) or `last` (the last point's value at the line's end).
   A null value is a gap. With 2 to 4 series and no `legend` written, the series' names are written at the lines'
@@ -198,6 +201,20 @@ each as `{field: [values]}` (§2.1.2).
   re-proportions the remaining slices without changing their colours. At most eight slices are drawn.
   The card heads with the chart title, then one row: the slice name and its value with unit and finer share.
 
+  **Combo (#1069).** Use an amount beside a rate on one category band: `{mark: {type: "combo"},
+  encoding: {x, layers, tooltip?}}`. Required `x` is a band; `layers` holds two to four closed objects
+  `{mark: "bar" | "line" | "area" | "point", y, axis?: "left" | "right", title?}`. Each `y` is one
+  numeric value with an aggregate, optional title, unit, format and scale; no `fields`, stacking or colour channel.
+  At least one layer uses the left axis (the default). Each axis has at most one authored scale and one format,
+  inherited by all its layers, including when the declaring layer is hidden. An axis with a bar or area is linear,
+  includes zero, refuses `zero: false` and requires an authored domain to contain zero. Line/point-only axes may
+  use log or a raised domain. The first explicit y title names its axis. Empty layers do not extend the axis;
+  hiding the last populated layer retains its range. Bars draw behind areas, lines and points; layer order sets
+  colours, legend keys and card rows. Every line point has a dot; an area has its end dot. A legend switch hides
+  that layer. The crosshair card heads with the category, then each visible non-null layer and its unit; a pointer
+  inside a bar selects the bar layer (unless within a dot's reach) and its row is kept when space is short.
+  Limits: 10,000 input rows, 1,000 bars or points per layer; line and area layers are thinned by their own caps.
+
   **Heatmap (#1070).** A measure over two categories: `{title?, mark: {type: "heatmap", labels?: "none" | "values"},
   encoding: {x, y, color}}`. Both `x` and `y` are bands (`nominal`, `ordinal` or `temporal`), each with a required
   `sort`: `null` preserves first appearance among rows with non-null categories; `ascending`, `descending` or a list
@@ -219,6 +236,12 @@ each as `{field: [values]}` (§2.1.2).
   rounded or floored boxes can overlap; the last containing box wins). Left/Right walk a row, Up/Down the nearest
   cell in the adjacent occupied row, Home/End the row's ends, skipping empty cells. Right at a row's end can reach a
   shortened text; Left from the first shortened text returns to the first row's last cell.
+
+  **Histogram (#1071).** The distribution of one numeric column: `{title?, mark: {type: "histogram", bins?}, encoding: {x, y, color?}}`. Required `x` is a quantitative position (field, optional title, format, unit and axis grid). Required `y` is only `{aggregate: "count" | "share"}`, with no field. Optional `color` is a nominal or ordinal series with a sort. A temporal or nominal x is refused. Every explicit x.scale (linear, domain or log) is refused: the bins' edges alone set the horizontal range. A shade color, authored tooltip, value labels and unequal-width bins are refused.
+
+  Null series and null x rows are dropped with one `chart.rule.null-category` and `chart.rule.null-position` warning respectively; non-finite x values give one `chart.rule.non-finite`. Numeric text is read as a number. No counted rows means no data. By default the target is Sturges' ceil(log2(rows)) + 1, bounded to 5–50. An integer `bins` from 5 to 50 overrides the target. Nice edges may give fewer bins; the last bin includes its upper edge. All series set the edges, including hidden ones. Count ticks are whole numbers; share divides by all shown rows. At most 20,000 rows, eight series and 50 bins; nothing is thinned. `mark_count` counts drawn series/bin segments.
+
+  Bins have gaps and stack in series order, rounding only the outermost segment. The card heads with “from … to …”, with the unit after each edge, then each shown series' count or share, top first; the hovered row is kept when space is short. The full bin interval, gap included, is a pointer target. Left/Right walk nonempty bins in a series, Up/Down adjacent drawn series, Home/End the series' ends. Switches hide series and refit the count axis without moving the edges or changing colours. With no drawn switch (minimal size or a null legend), hidden ids are ignored.
 
   **Box (#1072).** The spread of one number in each category: `{title?, mark: {type: "box",
   outliers?: "none" | "points"}, encoding: {x?, y}}`. `x` is an optional band (nominal, ordinal or temporal),
@@ -286,12 +309,36 @@ each as `{field: [values]}` (§2.1.2).
   order, from the greatest previous `to` to this `to`, clipped to the domain; empty intervals are skipped.
   Bands may stop short of the end. The first band whose `to` is at least the clamped value supplies the
   word below the number: a border belongs to the lower band. A target draws a line at its clamped value.
-  Band order/range and a target outside the domain are admitted at save (#1103); the renderer follows these
-  rules. The legend is keys only, including Target even without bands: no switches or keyboard stops.
+  The save refuses a band whose `to` is not above the scale's low end and at most its high end, a `to` not
+  greater than every earlier `to` inside the domain, and a `target` outside the domain. Bands that stop short
+  of the end are valid: a value past the last `to` has no zone and no word. The legend is keys only, including
+  Target even without bands: no switches or keyboard stops.
   At small frames the ring and target drop if their fitted radius would be below 16 px; minimal has no text.
   The card heads with the chart title and rows Now, optional Target, then every band's word and `to` value,
   units once per value; a reduced card keeps Now. The pointer finds it over the arc's picture box and the
   full drawn end labels, bounded by the plot. One semantic mark, not a measured cap.
+
+  **Radar (#1077).** Compare series on 3 to 12 category axes, clockwise from 12 o'clock, using one
+  radial scale from zero: `{title?, mark: {type: "radar", fill?: boolean}, encoding: {theta, r, color?}}`.
+  `theta` is a band (`field`, nominal/ordinal/temporal `type`, required `sort`: null, ascending,
+  descending or explicit list; optional temporal `format`). `r` is one value (`aggregate`, `field`
+  except with count, optional `format` and `unit`). `color` is an optional series with required `sort`
+  and optional `legend` (top, bottom, left, right, or null). No channel title, axis, wide `fields`,
+  stack, authored scale or tooltip. Use a bar for more axes or series, or negative values.
+  Rows aggregate per (axis, series). Null axes or series are skipped with one `chart.rule.null-category`;
+  null cells have no point, and non-finite aggregates are omitted with one `chart.rule.non-finite`.
+  An all-null axis remains a spoke. Missing points join their neighbours. Three or more points have
+  a polygon fill at 14% and an outline; two have a line; one has its dot. `fill: false` removes fills.
+  The model refuses, in order: a negative aggregate (including hidden series), `chart.rule.negative-part`
+  — “This chart cannot show negative values.”; over six series, `chart.too_many_series`
+  — “Too many series to draw (N, the limit is 6). Group the smaller ones in the query.”; fewer than
+  three or over twelve axes, `chart.rule.radar-axes` — “A radar needs 3 to 12 axes, and this one has N.”
+  No axes or no non-null cells is no data. The semantic cap is 72 points (not measured), unreachable
+  beyond those earlier refusals; the shared 20,000-row cap applies before aggregation.
+  A switch legend appears for multiple series. Hidden series keep their colours and entries; the rings
+  refit to visible values. At minimal, all series draw without a legend. The card heads with the axis
+  and lists visible series with a value there, in data order; the hovered row is bold and kept when
+  space is short. There are no value labels.
 
   **Treemap (#1078).** A whole broken into nested parts by size: `{title?, mark: {type: "treemap",
   labels?: "none" | "names" | "names_values"}, encoding: {path, size, color?}}`. `path` is one to three
@@ -323,19 +370,39 @@ each as `{field: [values]}` (§2.1.2).
   Left/Right walk all cells in layout order, Home/End their ends, Up/Down stay. Right after the last cell
   reaches shortened text if present, otherwise stays.
 
+  **Sparkline (#1076).** One measure over ordered `x`, without axes, title or legend at any size:
+  `{mark: {type: "sparkline", last?: "none" | "dot" | "value", fill?: boolean}, encoding: {x, y}}`.
+  `x` is the line's band or position, without `title`, `axis` or `scale`; `y` is one value, without
+  `fields`, `stack`, `title` or `axis`. There is no `color` or `tooltip` channel. Defaults are `last: value`
+  and `fill: true`: a fade under the line, an end dot and the last value after it. `dot` omits the text;
+  `none` omits both. A null y is a gap; a null x or non-finite value is not a point, with one warning per kind.
+  Rows at the same x aggregate by y's aggregate. Marks count the non-null points.
+  The first and last non-null points span the plot's edges; one point sits at the right edge, without a line.
+  The value scale spans the data's lowest to highest; a flat series sits at the middle. An authored domain
+  is used exactly, `zero: true` includes zero, and a log scale uses the line's scale (values at or below zero
+  are not drawn). The last value is written only when the frame is one text line high and the line retains
+  at least half the frame width after the value and its gap. The dot remains at every size, smaller when
+  the frame cannot hold the theme's dot. The value starts clear of the dot's ring.
+  A value's unit follows the value; a number x's unit follows x in the card heading, nowhere else.
+  The crosshair follows the nearest x, or the point selected by the arrow keys. Its card shows that x,
+  the selected value, Last, Highest and Lowest; a reduced card keeps the selected value. Inherited limits:
+  10,000 rows, 2,000 points in full and then thinned (not measured for sparkline); thinning preserves gaps
+  and each pixel column's first, lowest, highest and last point.
+
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
     field a series in the list's order; it replaces `field`, and `color` is then refused (the fields are the series).
     With `aggregate: "count"` neither is written. Scatter's and a box's `y` are positions: one `field`, no `fields`, no
     `aggregate`.
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
-    quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
-  - `encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
-    show (not on a funnel or gauge; not on a treemap: its card is the type's own).
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
+    quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, on a radar's `r`, and on a tooltip detail.
+    On a sparkline it follows only values and the card's number x. On a value axis or a number axis it also follows that axis's title, never a tick.
+  - `encoding.tooltip` (bar, line, area, scatter and combo only): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
+    show (not on a funnel or gauge; not on a treemap or radar: their cards are the type's own).
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie, a histogram's x, a sparkline's x or a radar's r) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
-    on a line, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
+    on a line or a sparkline's value, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
     §6.1). A shape inside a layer object is judged by that layer's mark (bar and area hold zero, line and point do
     not; log is refused on an area), any other by the chart's family.
 
@@ -365,10 +432,13 @@ each as `{field: [values]}` (§2.1.2).
   | `chart.category.type_mismatch` | save rules | a `temporal` band or position on a column that is not DATE or TIMESTAMP |
   | `chart.category.nullable` / `chart.color.nullable` | save rules | a nullable band or `level` / series column |
   | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | save rules | a `scale.domain` on a normalized stack / not increasing or not finite, or without zero where the axis holds zero (a bar's or an area's value, or `zero: true`) |
-  | `chart.scale.log_unsupported` | save rules | `scale.type: "log"` on an area or waterfall, on a stacked or normalized value, or beside `scale.zero` (fix: a linear scale, or an unstacked bar, a line or a scatter) |
+  | `chart.scale.log_unsupported` | save rules | `scale.type: "log"` on an area or waterfall, on a stacked or normalized value, or beside `scale.zero` (fix: a linear scale, or an unstacked bar, a line, a sparkline or a scatter) |
   | `chart.scale.domain_log` | save rules | a log scale whose `domain` is not greater than 0, increasing and finite |
   | `chart.shade.mid_invalid` | save rules | a `shade`'s `mid` that is not a finite number (`1e400` reads as infinity) |
   | `chart.size.range_invalid` | save rules | a `size`'s `range` that is not increasing |
+  | `chart.bands.outside_domain` | save rules | a band's `to` not above the scale's low end and at most its high end (`1e400` reads as infinity; an end at the low end covers no span) |
+  | `chart.bands.not_ascending` | save rules | a band's `to` not greater than every earlier band's `to` inside the domain (equal included) |
+  | `chart.target.outside_domain` | save rules | a `target` below the scale's low end or above its high end (an end is allowed) |
   | `chart.format.normalize_percent` / `chart.format.currency_unknown` | save rules | a normalized stack whose format is not `percent` / an unknown currency code |
   | `chart.bindings.mismatch` | save rules | `bindings` present and not the derived map |
 
@@ -960,7 +1030,7 @@ drawn by the datapipelines client library"; the message never echoes the host's 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
 with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out; a gauge also uses it for an overflowing domain span),
-`chart.rule.negative-part` (a pie, funnel or treemap with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
+`chart.rule.negative-part` (a pie, funnel or treemap with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line, an area or a sparkline whose position is null, is a time that cannot be read or is not
 a finite number were left out), `chart.rule.log-nonpositive` (on a log axis of any chart type a value at or below
 zero was not drawn), `chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per
 refused token, naming it — when the page's value of a `--chart-*` token is not one that token may hold and its
@@ -1521,6 +1591,13 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v0.98 | 1103 (#1103) | **§2.1.2:** Refuse gauge bands outside the domain or not ascending and a target outside it at save; bands may stop short of the end. |
+| 2026-11-27 | v0.97 | 1077 (#1077) | Radar: category spokes, shared radial scale, polygons and selected-point cards. |
+| 2026-11-27 | v0.96 | 1076 (#1076) | Sparkline: one measure, bare frame, last-value fit and selected-point card. |
+| 2026-11-27 | v0.95 | 1071 (#1071) | **§2.1.2:** Histogram distributions, nice target bins, whole count ticks, share, cards and keyboard navigation. |
+| 2026-11-27 | v0.94 | 1069 (#1069) | **§2.1.2:** Combo layers, shared axis scales, per-layer caps, card and bar hover. |
+| 2026-11-27 | v0.93 | 1102 (#1102) — renumbered after #1094’s v0.92 | **§2.1.2:** Linear count value axes mark whole numbers, including domains with whole ends; fractional authored domains, log scales and normalized shares keep their ticks. |
+| 2026-11-26 | v0.92 | 1094 (#1094) | **§2.1.2:** A line or area's number x writes its unit after the axis title and the tooltip's x value, never a tick. |
 | 2026-11-26 | v0.91 | 1078 (#1078) | **§2.1.2:** Treemap channels, leaves, colours, caps, fitted labels, cards and keyboard access. |
 | 2026-11-26 | v0.90 | 1075 (#1075) | **§2.1.2:** Add gauge: one aggregate on a 240° arc, tone bands, target and key-only legend. |
 | 2026-11-26 | v0.89 | 1074 (#1074) | **§2.1.2, §6.1, §6.3:** Add funnel stages, labels, width and share rules, fixed twelve-stage cap, cards and keyboard navigation. |
