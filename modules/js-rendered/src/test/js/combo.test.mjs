@@ -154,6 +154,12 @@ test('A.2: layer, row and per-layer mark caps refuse only above their boundary; 
     const r=draw(f).r;
     assert.equal(r.state,'refused');
     assert.equal(r.summary.refusal.code,n===10000?'chart.rule.category-density':'chart.too_many_rows');
+    // The row-cap boundary stays observable in a roomy frame beside the dense expectation (#1117): 10,000 rows render
+    // as 20,000 marks (two lines) at 11000 × 540, and one row over the cap refuses on rows at every width.
+    const roomy=draw(f,11000,540).r;
+    assert.equal(roomy.state,n===10000?'rendered':'refused');
+    if(n===10000){assert.equal(roomy.summary.marks,20000);assert.equal(roomy.summary.refusal,null);}
+    else assert.equal(roomy.summary.refusal.code,'chart.too_many_rows');
   }
 });
 
