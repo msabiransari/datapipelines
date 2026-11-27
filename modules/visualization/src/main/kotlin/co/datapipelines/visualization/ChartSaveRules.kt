@@ -4,12 +4,14 @@ import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.util.Currency
 
-/** One save-rule refusal: a stable `chart.*` code (record §4.4), the JSON Pointer it names, a message that echoes no document text. */
+/** One save-rule refusal: a stable [ChartReason] (record §4.4), the JSON Pointer it names, a message that echoes no document text. */
 data class ChartRefusal(
-    val code: String,
+    val reason: ChartReason,
     val pointer: String,
     val message: String,
-)
+) {
+    val code: String get() = reason.wire
+}
 
 /** The save rules' verdict: every refusal, and the bindings the encoding derives (sorted, each field to itself). */
 data class ChartSaveVerdict(
@@ -60,12 +62,12 @@ object ChartSaveRules {
         val refusals = mutableListOf<ChartRefusal>()
         val hasTransform = body.get("transform")?.isObject == true
         if (!hasTransform && body.path("inputs").size() != 1) {
-            refusals += ChartRefusal("chart.inputs.cardinality", "/inputs", "Without a transform a chart binds exactly one input.")
+            refusals += ChartRefusal(ChartReason.INPUTS_CARDINALITY, "/inputs", "Without a transform a chart binds exactly one input.")
         }
         if (columns == null) {
             refusals +=
                 ChartRefusal(
-                    "chart.transform.output_unknown",
+                    ChartReason.TRANSFORM_OUTPUT_UNKNOWN,
                     "/transform",
                     "The transform output contract is needed to type the encoded fields.",
                 )
@@ -90,7 +92,7 @@ object ChartSaveRules {
         if (authored != null && !sameBindings(authored, derived)) {
             refusals +=
                 ChartRefusal(
-                    "chart.bindings.mismatch",
+                    ChartReason.BINDINGS_MISMATCH,
                     "/bindings",
                     "bindings is derived from the encoding: each encoded field maps to itself.",
                 )
@@ -132,20 +134,20 @@ object ChartSaveRules {
         val refusal =
             when {
                 column == null -> {
-                    ChartRefusal("chart.field.unknown", path, "The encoded field is not a column of the bound input.")
+                    ChartRefusal(ChartReason.FIELD_UNKNOWN, path, "The encoded field is not a column of the bound input.")
                 }
 
                 column.type == LogicalType.BINARY -> {
-                    ChartRefusal("chart.field.binary", path, "A BINARY column cannot be encoded.")
+                    ChartRefusal(ChartReason.FIELD_BINARY, path, "A BINARY column cannot be encoded.")
                 }
 
                 column.type == LogicalType.NULL -> {
-                    ChartRefusal("chart.field.null_type", path, "A column of type NULL cannot be encoded.")
+                    ChartRefusal(ChartReason.FIELD_NULL_TYPE, path, "A column of type NULL cannot be encoded.")
                 }
 
                 shape == VALUE && column.type !in ChartTypes.QUANTITATIVE -> {
                     ChartRefusal(
-                        "chart.measure.not_numeric",
+                        ChartReason.MEASURE_NOT_NUMERIC,
                         path,
                         "A measure must be an INTEGER, BIGINTEGER, DECIMAL or BIGDECIMAL column.",
                     )
@@ -153,7 +155,7 @@ object ChartSaveRules {
 
                 (shape == SHADE || shape == SIZE) && column.type !in ChartTypes.QUANTITATIVE -> {
                     ChartRefusal(
-                        "chart.measure.not_numeric",
+                        ChartReason.MEASURE_NOT_NUMERIC,
                         path,
                         "A colour or size by value must be an INTEGER, BIGINTEGER, DECIMAL or BIGDECIMAL column.",
                     )
@@ -161,7 +163,7 @@ object ChartSaveRules {
 
                 shape == POSITION && holderType == "quantitative" && column.type !in ChartTypes.QUANTITATIVE -> {
                     ChartRefusal(
-                        "chart.measure.not_numeric",
+                        ChartReason.MEASURE_NOT_NUMERIC,
                         path,
                         "A quantitative axis must be an INTEGER, BIGINTEGER, DECIMAL or BIGDECIMAL column.",
                     )
@@ -169,18 +171,18 @@ object ChartSaveRules {
 
                 (shape == BAND || shape == POSITION) && holderType == "temporal" && column.type !in ChartTypes.TEMPORAL -> {
                     ChartRefusal(
-                        "chart.category.type_mismatch",
+                        ChartReason.CATEGORY_TYPE_MISMATCH,
                         "${position.holder.pointer}/type",
                         "A temporal category must be a DATE or TIMESTAMP column.",
                     )
                 }
 
                 (shape == BAND || shape == LEVEL) && column.nullable -> {
-                    ChartRefusal("chart.category.nullable", path, "A category column must not be nullable.")
+                    ChartRefusal(ChartReason.CATEGORY_NULLABLE, path, "A category column must not be nullable.")
                 }
 
                 shape == SERIES && column.nullable -> {
-                    ChartRefusal("chart.color.nullable", path, "A series column must not be nullable.")
+                    ChartRefusal(ChartReason.COLOR_NULLABLE, path, "A series column must not be nullable.")
                 }
 
                 else -> {
@@ -199,16 +201,20 @@ object ChartSaveRules {
         val normalize = v.path("stack").asText() == "normalize"
         val domain = v.path("scale").get("domain")?.takeIf { it.isArray && it.size() == 2 }
         if (domain != null && normalize) {
-            refusals += ChartRefusal("chart.scale.domain_normalize", "$vp/scale", "A normalized stack has the fixed range 0 to 100 %.")
+            refusals += ChartRefusal(ChartReason.SCALE_DOMAIN_NORMALIZE, "$vp/scale", "A normalized stack has the fixed range 0 to 100 %.")
         }
         val format = v.get("format")?.takeIf { it.isTextual }?.asText()
         if (normalize && format != null && format != "percent") {
-            refusals += ChartRefusal("chart.format.normalize_percent", "$vp/format", "A normalized stack is labelled in percent.")
+            refusals += ChartRefusal(ChartReason.FORMAT_NORMALIZE_PERCENT, "$vp/format", "A normalized stack is labelled in percent.")
         }
         val currency = format?.let { CURRENCY.find(it)?.groupValues?.get(1) }
         if (currency != null && currency !in CURRENCIES) {
             refusals +=
-                ChartRefusal("chart.format.currency_unknown", "$vp/format", "The currency code is not an ISO 4217 code this server knows.")
+                ChartRefusal(
+                    ChartReason.FORMAT_CURRENCY_UNKNOWN,
+                    "$vp/format",
+                    "The currency code is not an ISO 4217 code this server knows.",
+                )
         }
     }
 
@@ -223,7 +229,7 @@ object ChartSaveRules {
         val mid = shade.node.get("mid") ?: return
         if (!mid.isNumber || !mid.asDouble().isFinite()) {
             refusals +=
-                ChartRefusal("chart.shade.mid_invalid", "${shade.pointer}/mid", "The middle of a colour scale must be a finite number.")
+                ChartRefusal(ChartReason.SHADE_MID_INVALID, "${shade.pointer}/mid", "The middle of a colour scale must be a finite number.")
         }
     }
 
@@ -238,7 +244,7 @@ object ChartSaveRules {
     ) {
         val range = size.node.get("range")?.takeIf { it.isArray && it.size() == 2 } ?: return
         if (!(range[0].asDouble() < range[1].asDouble())) {
-            refusals += ChartRefusal("chart.size.range_invalid", "${size.pointer}/range", "A size range must be increasing.")
+            refusals += ChartRefusal(ChartReason.SIZE_RANGE_INVALID, "${size.pointer}/range", "A size range must be increasing.")
         }
     }
 
@@ -275,7 +281,7 @@ object ChartSaveRules {
                 !inside -> {
                     refusals +=
                         ChartRefusal(
-                            "chart.bands.outside_domain",
+                            ChartReason.BANDS_OUTSIDE_DOMAIN,
                             pointer,
                             "A band's end must be above the scale's low end and at most its high end.",
                         )
@@ -283,13 +289,18 @@ object ChartSaveRules {
 
                 to <= greatest -> {
                     refusals +=
-                        ChartRefusal("chart.bands.not_ascending", pointer, "Each band's end must be greater than the ends before it.")
+                        ChartRefusal(ChartReason.BANDS_NOT_ASCENDING, pointer, "Each band's end must be greater than the ends before it.")
                 }
             }
             if (inside) greatest = maxOf(greatest, to)
         }
         if (target != null && !(lo <= target.asDouble() && target.asDouble() <= hi)) {
-            refusals += ChartRefusal("chart.target.outside_domain", "/config/mark/target", "The target must lie inside the scale's domain.")
+            refusals +=
+                ChartRefusal(
+                    ChartReason.TARGET_OUTSIDE_DOMAIN,
+                    "/config/mark/target",
+                    "The target must lie inside the scale's domain.",
+                )
         }
     }
 
@@ -313,7 +324,7 @@ object ChartSaveRules {
         if (log && !logAdmitted(policy, holder, scale)) {
             refusals +=
                 ChartRefusal(
-                    "chart.scale.log_unsupported",
+                    ChartReason.SCALE_LOG_UNSUPPORTED,
                     "$sp/type",
                     "A log scale is refused on this chart type, on a stacked or normalized value and beside zero.",
                 )
@@ -328,10 +339,10 @@ object ChartSaveRules {
         if (!fine) {
             refusals +=
                 if (log) {
-                    ChartRefusal("chart.scale.domain_log", "$sp/domain", "A log range must be greater than 0 and increasing.")
+                    ChartRefusal(ChartReason.SCALE_DOMAIN_LOG, "$sp/domain", "A log range must be greater than 0 and increasing.")
                 } else {
                     ChartRefusal(
-                        "chart.scale.domain_invalid",
+                        ChartReason.SCALE_DOMAIN_INVALID,
                         "$sp/domain",
                         "The range must be increasing, and contain zero where the axis holds zero (a bar or an area grows from zero).",
                     )
