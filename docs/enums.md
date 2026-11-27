@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.74 (living document — updated as enums evolve)
+**Status:** v1.75 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -1423,6 +1423,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 | `area` | As `line`, each series filled down to zero, or stacked on the series below it (zero or normalized), with a fade from the line down (#989); the value axis always holds zero and has no log scale; channels as `line` |
 | `scatter` | One point per row over two continuous axes, no aggregation; with `size` it is the bubble chart (#1062); channels `x` (a position: a number or time axis), `y` (a position narrowed to a number axis, linear or log), `color` (series or shade), `size` (diameters from `range`, the area following the value), `tooltip` (up to six details) |
 | `pie` | Parts of a whole, a ring by default (`inner` 0 draws a disc); channels `theta` (one value) and `color` (series); at most eight slices, smallest parts folded into Other, negative parts refused (#1068) |
+| `combo` | Two to four layers (`bar`, `line`, `area`, `point`) over one category band `x`; one value `y` per layer, a left and optional right axis, layer legend switches and up to six `tooltip` details (#1069) |
 | `heatmap` | One shaded cell per pair of category bands; channels `x`, `y` (bands) and required `color` (shade); missing cells are empty, labels optional, at most 1,000 cells (#1070) |
 | `box` | One distribution per optional category band `x`; quantitative position `y`, no aggregation; median, interpolated quartiles, whiskers at the last values inside 1.5 × IQR and optional outside points; at most 50 boxes (#1072) |
 | `waterfall` | Running changes over required band `x` and one aggregated value `y`; opening and optional closing total, three direction colours, connectors, fitted labels and a key-only legend; at most 50 bars including the total (#1073) |
@@ -1438,6 +1439,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v1.75 | 1069 (#1069) | **§63:** Combo: two to four bar, line, area or point layers on a category axis. |
 | 2026-11-26 | v1.74 | 1078 (#1078) | **§63:** Add treemap nested leaf rectangles, labels and a key-only legend. |
 | 2026-11-26 | v1.73 | 1075 (#1075) | **§63:** Add gauge: one aggregate on a required domain, optional target and tone bands. |
 | 2026-11-26 | v1.72 | 1074 (#1074) | **§63:** Add funnel: centred bars for up to twelve ordered stages, one aggregate and no legend. |

@@ -140,7 +140,20 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")) {
+                for (wire in listOf(
+                    "bar",
+                    "line",
+                    "area",
+                    "scatter",
+                    "pie",
+                    "combo",
+                    "heatmap",
+                    "box",
+                    "waterfall",
+                    "funnel",
+                    "gauge",
+                    "treemap",
+                )) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +245,8 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/combo") shouldBeGreaterThanOrEqual MIN_COMBO_TILES
+                counts.getValue("$theme/comboDots") shouldBeGreaterThanOrEqual MIN_COMBO_DOTS
                 counts.getValue("$theme/treemap") shouldBeGreaterThanOrEqual MIN_TREEMAP_TILES
                 counts.getValue("$theme/gauge") shouldBeGreaterThanOrEqual MIN_GAUGE_TILES
                 counts.getValue("$theme/arcs") shouldBeGreaterThanOrEqual MIN_ARCS
@@ -538,6 +553,10 @@ class LookReferencePageBrowserTest {
         private const val MIN_PIE_TILES = 7
         private const val MIN_SLICES = 29
 
+        /** Brief 1069: seven tiles and 43 circles in the five rendered tiles. */
+        private const val MIN_COMBO_TILES = 7
+        private const val MIN_COMBO_DOTS = 43
+
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
         private const val MIN_POINTS = 53
@@ -739,7 +758,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, arcs: 0, points: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, comboDots: 0, arcs: 0, points: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -891,6 +910,7 @@ private object LookReferenceChecks {
         const dots = scatter || isBox ? [] : of("mark", "circle");
         const points = scatter || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
+        if (s.wire === "combo") counts.comboDots += dots.length;
         counts.points += points.length;
         const gaugeArcs = gauge ? of("mark", "path") : [];
         counts.arcs += gaugeArcs.length;
@@ -980,6 +1000,20 @@ private object LookReferenceChecks {
           if (!entry || p.cx - p.r < entry.shape.x - TOL || p.cx + p.r > entry.shape.x + entry.shape.w + TOL) bad("box outside point crosses its column");
         });
         dots.forEach((d) => {
+          if (s.wire === "combo") {
+            const ser = s.index.series.find((x) => x.id === d.series);
+            const paths = marks.filter((p) => p.k === "path" && p.series === d.series && p.stroke && p.fill === null);
+            const onPath = (p) => {
+              for (let i = 0; i < p.d.length;) {
+                const n = R.prim.ARITY[p.d[i]];
+                if (n >= 2 && near(p.d[i + n - 1], d.cx) && near(p.d[i + n], d.cy)) return true;
+                i += n + 1;
+              }
+              return false;
+            };
+            if (!ser || !ser.at.some((x) => near(x, d.cx)) || (paths.length && !paths.some(onPath))) bad("combo dot is not on its indexed point and path");
+            return;
+          }
           const line = marks.find((p) => p.k === "path" && p.series === d.series && p.stroke && p.fill === null);
           const last = line ? lastPoint(line) : null;
           if (!last || !near(last[0], d.cx) || !near(last[1], d.cy)) bad("the end dot of " + d.series + " is not on its line's last point");
@@ -1052,6 +1086,26 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(key);
         if (s.state !== "rendered") return null;
+        if (s.wire === "combo") {
+          const ser = s.index.series.find((x) => x.on && x.at.length > 0 && s.primitives.some((p) => p.k === "circle" && p.role === "mark" && p.series === x.id));
+          if (!ser) return null;
+          const dot = s.primitives.find((p) => p.k === "circle" && p.role === "mark" && p.series === ser.id);
+          const px = dot.cx;
+          const py = dot.cy;
+          // SAME in the interaction layer: bind the index to the circle the pointer actually probes.
+          const j = ser.at.findIndex((at) => Math.abs(at - dot.cx) < 0.005);
+          if (j < 0) return null;
+          const svg = svgOf(s);
+          // A fixed frame wider than its column scrolls inside its own tile: bring the target into that scroller's view first.
+          const scroller = svg.closest(".ref-scroll");
+          if (scroller) {
+            const r0 = svg.getBoundingClientRect();
+            const box = scroller.getBoundingClientRect();
+            scroller.scrollLeft += r0.left + (px * r0.width) / s.frame.w - (box.left + box.width / 2);
+          }
+          const r = svg.getBoundingClientRect();
+          return { x: r.left + (px * r.width) / s.frame.w, y: r.top + (py * r.height) / s.frame.h, series: ser.id, j: j };
+        }
         const ser = s.index.series.find((x) => x.on && x.at.length > 0);
         if (!ser) return null;
         let px;
@@ -1140,7 +1194,7 @@ private object LookReferenceChecks {
         if (heading !== null) {
           const cat = String(tip[0]);
           const enc = s.document.config.encoding;
-          const valueEnc = enc.y.type === "nominal" ? enc.x : enc.y;
+          const valueEnc = s.wire === "combo" ? enc.layers[0].y : enc.y.type === "nominal" ? enc.x : enc.y;
           const join = look("tipTotalJoin");
           if (s.wire === "bar" && valueEnc.stack === "normalize") {
             if (heading !== cat) bad("a normalized stack's card heads with '" + heading + "', not the category '" + cat + "' alone");

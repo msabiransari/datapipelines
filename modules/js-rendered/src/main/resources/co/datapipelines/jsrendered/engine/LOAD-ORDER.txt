@@ -29,6 +29,7 @@ types/line.js
 types/area.js
 types/scatter.js
 types/pie.js
+types/combo.js
 types/heatmap.js
 types/box.js
 types/waterfall.js

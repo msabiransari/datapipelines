@@ -54,6 +54,9 @@ enum class ChartType(
     /** Shares of a whole, drawn as a ring by default (§4.5; lane #1068). */
     PIE("pie", ChartChannelNodes.pie, ChartMarkPolicy.AREA),
 
+    /** Two to four layers over one category band, with one or two value axes (§4.5; #1069). */
+    COMBO("combo", ChartChannelNodes.combo, ChartMarkPolicy.LINE),
+
     /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
     HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
 
@@ -179,6 +182,22 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val combo: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel(
+                "layers",
+                required = true,
+                node =
+                    ChannelNode.ListOf(
+                        min = 2,
+                        max = 4,
+                        of = ChannelNode.ObjectOf(members = mapOf("y" to ChannelNode.Shape("value")), layer = "mark"),
+                    ),
+            ),
+            ChartChannel("tooltip", required = false, node = ChannelNode.ListOf(0, 6, ChannelNode.Shape("detail"))),
+        )
+
     val treemap: List<ChartChannel> =
         listOf(
             ChartChannel("path", required = true, node = ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))),

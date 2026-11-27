@@ -127,6 +127,20 @@ export function expectedLineMarks(fx, hiddenIds) {
   return points.filter((p) => !over.has(p.at) && !hiddenIds.includes(p.sid)).length;
 }
 
+/** Combo I3: count each visible layer using its axis scale, authored on any layer, hidden or visible. */
+export function expectedComboMarks(fx, hiddenIds) {
+  const { x, layers } = fx.document.config.encoding;
+  const side = layer => layer.axis === "right" ? "right" : "left";
+  const scales = {};
+  for (const layer of layers) if (layer.y.scale) scales[side(layer)] = layer.y.scale;
+  return layers.reduce((count, layer, i) => {
+    if (hiddenIds.includes("layer:" + i)) return count;
+    const y = { ...layer.y };
+    if (scales[side(layer)]) y.scale = scales[side(layer)]; else delete y.scale;
+    return count + expectedLineMarks({ ...fx, document: { config: { mark: { type: "line" }, encoding: { x, y } } } }, []);
+  }, 0);
+}
+
 /** Treemap I3, from delivered rows alone (1078 D18). Hidden ids never hide key-only legend entries. */
 export function expectedTreemapMarks(fx, hiddenIds) {
   const { path, size, color } = fx.document.config.encoding, groups = new Map();

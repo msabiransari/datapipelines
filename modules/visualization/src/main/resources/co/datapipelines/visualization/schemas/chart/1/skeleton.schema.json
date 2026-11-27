@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles.",
+      "description": "The family registry: bar, line, area, scatter, pie, combo, heatmap, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -116,6 +116,9 @@
         },
         {
           "$ref": "pie.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "combo.schema.json#/$defs/config"
         },
         {
           "$ref": "heatmap.schema.json#/$defs/config"
