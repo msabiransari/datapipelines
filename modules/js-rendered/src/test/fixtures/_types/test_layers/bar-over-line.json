@@ -1,0 +1,57 @@
+{
+ "note": "the line runs through the bars' tops (the line's dot on a bar's end)",
+ "document": {
+  "display_name": "Test type test_layers",
+  "config": {
+   "mark": {
+    "type": "test_layers"
+   },
+   "encoding": {
+    "x": {
+     "field": "m"
+    },
+    "y": {
+     "field": "a"
+    },
+    "y2": {
+     "field": "b"
+    }
+   }
+  }
+ },
+ "columns": {
+  "m": [
+   "Jan",
+   "Feb",
+   "Mar",
+   "Apr",
+   "May",
+   "Jun"
+  ],
+  "a": [
+   10,
+   20,
+   30,
+   40,
+   50,
+   60
+  ],
+  "b": [
+   10,
+   20,
+   30,
+   40,
+   50,
+   60
+  ]
+ },
+ "types": {
+  "m": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE"
+ },
+ "expect": {
+  "marks": 13
+ }
+}

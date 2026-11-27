@@ -415,7 +415,12 @@
       var e = ix[s];
       if (!e.on || e.at.length === 0) continue;
       var marks = [];
-      for (var k = 0; k < e.at.length; k++) marks.push({ datum: e.datum[k], at: e.at[k], tip: e.tip[k] });
+      for (var k = 0; k < e.at.length; k++) {
+        var mk = { datum: e.datum[k], at: e.at[k], tip: e.tip[k] };
+        // A bar layer's own box (brief 1101, the engine's `spans`): only a series that carries it gets the member.
+        if (Array.isArray(e.spans) && e.spans[k]) mk.span = e.spans[k];
+        marks.push(mk);
+      }
       model.series.push({ id: e.id, marks: marks });
     }
     return model;
@@ -513,7 +518,21 @@
     return null;
   }
 
-  /** The point a mark is anchored at: a bar's centre; a line point on its line. */
+  /**
+   * The y a mark of a layer is nearest by (brief 1101): a bar's `end` (its top, or its bottom when it grows down), else a line
+   * point's y on its drawn line; null when it has none.
+   */
+  function refY(model, id, mark) {
+    return mark.span ? mark.span.end : pointY(model, id, mark.at);
+  }
+
+  /** The box of a bar's span, {x, y, w, h}, whichever way the bar grows. */
+  function spanBox(span) {
+    var top = Math.min(span.foot, span.end);
+    return { x: span.x, y: top, w: span.w, h: Math.max(span.foot, span.end) - top };
+  }
+
+  /** The point a mark is anchored at: a bar's centre; a line point on its line; a bar layer's bar, at its end. */
   function anchorOf(model, id, datum) {
     if (model.marks) {
       var n = markAt(model, id, datum);
@@ -526,8 +545,8 @@
       var b = model.bars[id + "\u0000" + datum];
       return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2 } : null;
     }
-    var y = pointY(model, id, m.at);
-    return { x: m.at, y: y === null ? model.plot.y + model.plot.h / 2 : y };
+    var y = refY(model, id, m);
+    return { x: m.span ? m.span.x + m.span.w / 2 : m.at, y: y === null ? model.plot.y + model.plot.h / 2 : y };
   }
 
   /**
@@ -566,7 +585,7 @@
       if (d <= bestD + ONE_PLACE) best.push({ id: model.series[s].id, datum: r.datum, at: r.at });
     }
     if (best.length === 0) return hit;
-    hit.mark = model.crosshair ? pointUnder(model, best, pos) : barUnder(model, best, pos);
+    hit.mark = model.crosshair ? pointUnder(R, model, best, pos) : barUnder(model, best, pos);
     return hit;
   }
 
@@ -590,8 +609,9 @@
     return { id: pick.id, datum: pick.datum };
   }
 
-  function pointUnder(model, best, pos) {
+  function pointUnder(R, model, best, pos) {
     var datum = best[0].datum;
+    if (hasSpans(model, datum)) return layerUnder(R, model, datum, pos);
     var pick = null;
     var pickD = Infinity;
     for (var s = 0; s < model.series.length; s++) {
@@ -606,6 +626,65 @@
       }
     }
     return { id: pick, datum: datum };
+  }
+
+  /** Whether a series of the draw has a bar at datum (the draw then mixes bars with points: layerUnder decides). */
+  function hasSpans(model, datum) {
+    for (var s = 0; s < model.series.length; s++) {
+      var k = markOf(model.series[s], datum);
+      if (k >= 0 && model.series[s].marks[k].span) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The layer under the pointer where bars and points share one crosshair (brief 1101), at datum: (1) a point (a line's, an
+   * area's edge, a dot's) the pointer is on, that is within the radius of its crosshair dot, the nearest; else (2) the
+   * bar whose box holds the pointer (the one whose end is nearest when boxes overlap); else (3) the layer whose
+   * reference y (refY) is nearest. Ties within SAME go to the first in the series' order, as for a plain line.
+   */
+  function layerUnder(R, model, datum, pos) {
+    var reach = model.theme.n("--chart-point") + R.tables.look("crosshairDot");
+    var seen = [];
+    for (var s = 0; s < model.series.length; s++) {
+      var ser = model.series[s];
+      var k = markOf(ser, datum);
+      if (k < 0) continue;
+      var mk = ser.marks[k];
+      seen.push({ id: ser.id, at: mk.at, span: mk.span || null, y: refY(model, ser.id, mk) });
+    }
+    var pick = null;
+    var pickD = Infinity;
+    var i;
+    for (i = 0; i < seen.length; i++) {
+      if (seen[i].span !== null || seen[i].y === null) continue;
+      var dx = seen[i].at - pos.x;
+      var dy = seen[i].y - pos.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= reach + EPS && (pick === null || d < pickD - SAME)) {
+        pick = seen[i].id;
+        pickD = d;
+      }
+    }
+    if (pick !== null) return { id: pick, datum: datum };
+    for (i = 0; i < seen.length; i++) {
+      if (seen[i].span === null || !inside(spanBox(seen[i].span), pos)) continue;
+      var near = Math.abs(seen[i].y - pos.y);
+      if (pick === null || near < pickD - SAME) {
+        pick = seen[i].id;
+        pickD = near;
+      }
+    }
+    if (pick !== null) return { id: pick, datum: datum };
+    for (i = 0; i < seen.length; i++) {
+      if (seen[i].y === null) continue;
+      var away = Math.abs(seen[i].y - pos.y);
+      if (pick === null || away < pickD - SAME) {
+        pick = seen[i].id;
+        pickD = away;
+      }
+    }
+    return { id: pick === null ? seen[0].id : pick, datum: datum };
   }
 
   /**
@@ -980,6 +1059,9 @@
       return n < 0 ? null : model.marks[n].box;
     }
     if (!model.crosshair) return model.bars[target.id + "\u0000" + target.datum] || null;
+    var ts = model.series[seriesOf(model, target.id)];
+    var tm = ts ? ts.marks[markOf(ts, target.datum)] : null;
+    if (tm && tm.span) return spanBox(tm.span);
     var a = anchorOf(model, target.id, target.datum);
     return a === null ? null : { x: a.x - m.dot, y: a.y - m.dot, w: 2 * m.dot, h: 2 * m.dot };
   }
