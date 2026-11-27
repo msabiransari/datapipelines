@@ -165,7 +165,9 @@ class ChartJudgeEngineTest {
             failure.message shouldContain "chart.rule.category-density"
         }
         report.failures.size shouldBe 2
-        report.cases.values.single().rows shouldBe 1_000
+        report.cases.values
+            .single()
+            .rows shouldBe 1_000
     }
 
     // ---- the measure's types (VisualizationBindingContractTest's chart half) --------------------------
