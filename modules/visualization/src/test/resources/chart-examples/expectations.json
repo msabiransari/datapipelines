@@ -1678,7 +1678,7 @@
   "invalid/combo-all-layers-right.json": {
    "valid": false,
    "layer": "schema",
-   "keyword": "contains",
+   "keyword": "minContains",
    "path": "/config/encoding/layers"
   },
   "invalid/combo-third-axis-name.json": {
@@ -1726,8 +1726,8 @@
   "invalid/combo-right-layer-with-a-grid.json": {
    "valid": false,
    "layer": "schema",
-   "keyword": null,
-   "path": "/config/encoding/layers/1/y"
+   "keyword": "false",
+   "path": "/config/encoding/layers/1/y/axis"
   },
   "invalid/combo-x-without-sort.json": {
    "valid": false,
@@ -2357,7 +2357,7 @@
    "valid": false,
    "layer": "save",
    "code": "chart.measure.not_numeric",
-   "pointer": "/config/encoding/layers/0/y"
+   "pointer": "/config/encoding/layers/0/y/field"
   }
  }
 }
