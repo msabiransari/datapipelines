@@ -12,6 +12,34 @@ const ctx = vm.createContext({ PRISTINE: engine() });
 vm.runInContext(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "geometry.js"), "utf8") + "\nthis.G = JsRenderedInvariants(PRISTINE);", ctx, { filename: "geometry.js" });
 const G = ctx.G;
 
+/** Histogram I3: count occupied series/bin cells from the rows, using a linear interval scan. */
+export function expectedHistogram(fixture, hiddenIds = []) {
+  const e = fixture.document.config.encoding, x = fixture.columns[e.x.field];
+  const c = e.color ? fixture.columns[e.color.field] : null, R = ctx.PRISTINE, rows = [];
+  for (let i = 0; i < x.length; i++) {
+    if ((c && (c[i] === null || c[i] === undefined)) || x[i] === null || x[i] === undefined) continue;
+    const v = Number(x[i]);
+    if (!Number.isFinite(v)) continue;
+    rows.push({ v, id: c ? R.data.keyOf(c[i]) : "measure" });
+  }
+  if (!rows.length) return 0;
+  let k = 1, p = 1;
+  while (p < rows.length) { p *= 2; k++; }
+  const asked = fixture.document.config.mark.bins ?? Math.min(50, Math.max(5, k));
+  const edges = R.scales.nice(Math.min(...rows.map(r => r.v)), Math.max(...rows.map(r => r.v)), asked).ticks;
+  const occupied = new Set();
+  for (const row of rows) {
+    if (hiddenIds.includes(row.id)) continue;
+    for (let b = 0; b < edges.length - 1; b++) {
+      if (row.v >= edges[b] && (row.v < edges[b + 1] || b === edges.length - 2 && row.v === edges[b + 1])) {
+        occupied.add(JSON.stringify([row.id, b]));
+        break;
+      }
+    }
+  }
+  return occupied.size;
+}
+
 /** Overlap below this many px is not a meeting (rounding to two decimals moves an edge by at most 0.005). */
 export const TOL = G.TOL;
 export const { width, drawn, textBox, meet, markBox, arcExtremes, texts } = G;
@@ -71,6 +99,11 @@ export function expectedBarMarks(fx, hiddenIds) {
   return n;
 }
 
+/** Sparkline uses the line aggregation count, including its log exclusion, without mutating the fixture. */
+export function expectedSparklineMarks(fx, hiddenIds) {
+  return expectedLineMarks({ ...fx, document: { ...fx.document, config: { ...fx.document.config, mark: { type: "line" } } } }, hiddenIds);
+}
+
 /**
  * I3's expected count for a line or area fixture (brief 989 D8: mark_count counts the data's non-null points), computed
  * by this test from the delivered columns, never by the engine: rows sharing x and series are one point, aggregated; a
@@ -125,6 +158,20 @@ export function expectedLineMarks(fx, hiddenIds) {
     for (const [at, t] of sums) if (!Number.isFinite(t.up) || !Number.isFinite(t.down)) over.add(at);
   }
   return points.filter((p) => !over.has(p.at) && !hiddenIds.includes(p.sid)).length;
+}
+
+/** Combo I3: count each visible layer using its axis scale, authored on any layer, hidden or visible. */
+export function expectedComboMarks(fx, hiddenIds) {
+  const { x, layers } = fx.document.config.encoding;
+  const side = layer => layer.axis === "right" ? "right" : "left";
+  const scales = {};
+  for (const layer of layers) if (layer.y.scale) scales[side(layer)] = layer.y.scale;
+  return layers.reduce((count, layer, i) => {
+    if (hiddenIds.includes("layer:" + i)) return count;
+    const y = { ...layer.y };
+    if (scales[side(layer)]) y.scale = scales[side(layer)]; else delete y.scale;
+    return count + expectedLineMarks({ ...fx, document: { config: { mark: { type: "line" }, encoding: { x, y } } } }, []);
+  }, 0);
 }
 
 /** Treemap I3, from delivered rows alone (1078 D18). Hidden ids never hide key-only legend entries. */
@@ -185,6 +232,31 @@ export function expectedScatterMarks(fx, hiddenIds) {
     if (!hiddenIds.includes(sid)) n++;
   }
   return n;
+}
+
+/** Radar I3, independently grouped from the input rows, including all semantic refusals before visibility. */
+export function expectedRadarMarks(fx, hiddenIds = []) {
+  const e = fx.document.config.encoding, t = fx.columns[e.theta.field];
+  const c = e.color ? fx.columns[e.color.field] : null, v = e.r.field ? fx.columns[e.r.field] : null;
+  const axes = new Set(), series = new Set(), groups = new Map();
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] == null || c && c[i] == null) continue;
+    const axis = typeof t[i] + ":" + String(t[i]), sid = c ? typeof c[i] + ":" + String(c[i]) : "measure";
+    axes.add(axis); series.add(sid);
+    const key = JSON.stringify([axis, sid]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v ? v[i] : 1);
+  }
+  let count = 0;
+  for (const [key, values] of groups) {
+    const present = values.filter(x => x != null), xs = present.map(Number);
+    if (e.r.aggregate !== "count" && !xs.length) continue;
+    const a = e.r.aggregate === "count" ? values.length : present.some(x => typeof x === "string") ? heatmapExact(present, e.r.aggregate) : e.r.aggregate === "min" ? Math.min(...xs) : e.r.aggregate === "max" ? Math.max(...xs) : xs.reduce((a, b) => a + b, 0) / (e.r.aggregate === "mean" ? xs.length : 1);
+    if (!Number.isFinite(a)) continue;
+    if (a < 0) return 0;
+    if (!hiddenIds.includes(JSON.parse(key)[1])) count++;
+  }
+  return series.size > 6 || axes.size < 3 || axes.size > 12 ? 0 : count;
 }
 
 // Waterfall I3, derived independently from the document and rows: order categories before the overflow cut.

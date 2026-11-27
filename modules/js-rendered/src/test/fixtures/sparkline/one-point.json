@@ -1,0 +1,57 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "one point: the end dot at the plot's right edge, no line",
+ "document": {
+  "display_name": "one-point",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01"
+  ],
+  "v": [
+   7
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}

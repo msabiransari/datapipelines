@@ -88,7 +88,7 @@
 
   /** The value axis of a layout part over `length` px: a log axis (G4) or the linear one. */
   function valueAxisOf(lvl, L, ext, length, room) {
-    return L.log === true ? A.logAxis(lvl, ext, L.domain, length, L.format) : A.valueAxis(lvl, ext, L.domain, length, L.format, room);
+    return L.log === true ? A.logAxis(lvl, ext, L.domain, length, L.format) : A.valueAxis(lvl, ext, L.domain, length, L.format, room, L.whole);
   }
 
   /**
@@ -326,7 +326,11 @@
       nameTexts = column.texts;
       var ticks = [];
       for (var t = 0; t < ax.ticks.length; t++) ticks.push({ text: ax.texts[t], under: null, x: scale(ax.ticks[t]) });
-      row = A.labelRow(h, { labels: ticks, bounds: { x0: b.left, x1: b.right }, plot: plot, corner: last, cornerIsFirst: true, rotate: "never", room: extra });
+      // The loop above reserved half the last tick label's width at the right of the plot. The plot's left edge and its
+      // width are each rounded to a hundredth (r2), so the last tick can stand up to 0.01 px short of the reserved edge
+      // and the label's room (twice its distance to the box's edge) falls up to 0.02 px short: labelRow then cuts the
+      // label ("15" drawn as "…") or leaves it out (#1105). The box's edge gets 0.015 px back: 0.01 and half a hundredth.
+      row = A.labelRow(h, { labels: ticks, bounds: { x0: b.left, x1: b.right + 0.015 }, plot: plot, corner: last, cornerIsFirst: true, rotate: "never", room: extra });
       if (pass > 0 || row.corner === "clear") break;
       extra = row.need;
     }

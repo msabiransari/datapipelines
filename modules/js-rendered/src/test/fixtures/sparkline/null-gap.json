@@ -1,0 +1,79 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "a null inside and one trailing: the line splits, the dot and text sit at the last non-null point",
+ "document": {
+  "display_name": "null-gap",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-08-01",
+   "2024-09-01",
+   "2024-10-01",
+   "2024-11-01",
+   "2024-12-01"
+  ],
+  "v": [
+   5,
+   7,
+   null,
+   9,
+   11,
+   10,
+   null,
+   13,
+   14,
+   12,
+   15,
+   null
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}

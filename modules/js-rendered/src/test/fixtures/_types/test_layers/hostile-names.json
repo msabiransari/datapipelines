@@ -1,0 +1,50 @@
+{
+ "note": "markup in a category, a layer title and an axis title is text",
+ "document": {
+  "display_name": "Test type test_layers",
+  "config": {
+   "mark": {
+    "type": "test_layers"
+   },
+   "encoding": {
+    "x": {
+     "field": "m"
+    },
+    "y": {
+     "field": "a",
+     "title": "<b>bars</b>"
+    },
+    "y2": {
+     "field": "b",
+     "title": "</text><script>x</script>"
+    }
+   }
+  }
+ },
+ "columns": {
+  "m": [
+   "<img src=x onerror=alert(1)>",
+   "</text><script>alert(2)</script>",
+   "a&b\"c'd"
+  ],
+  "a": [
+   3,
+   5,
+   4
+  ],
+  "b": [
+   1,
+   2,
+   3
+  ]
+ },
+ "types": {
+  "m": "STRING",
+  "a": "DOUBLE",
+  "b": "DOUBLE",
+  "c": "DOUBLE"
+ },
+ "expect": {
+  "marks": 7
+ }
+}

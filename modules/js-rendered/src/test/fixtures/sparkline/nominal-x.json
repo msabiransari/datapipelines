@@ -1,0 +1,68 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "Long nominal x headings; the first and last non-null points span the plot without drawing axis labels.",
+ "document": {
+  "display_name": "nominal-x",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "nominal",
+     "sort": null
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum"
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "North Atlantic enterprise subscriptions, annual commitment",
+   "South Pacific enterprise subscriptions, annual commitment",
+   "Central Europe enterprise subscriptions, annual commitment",
+   "Eastern Europe enterprise subscriptions, annual commitment",
+   "South America enterprise subscriptions, annual commitment",
+   "Western Asia enterprise subscriptions, annual commitment"
+  ],
+  "v": [
+   3,
+   9,
+   4,
+   12,
+   8,
+   15
+  ]
+ },
+ "types": {
+  "x": "STRING",
+  "v": "DECIMAL"
+ }
+}

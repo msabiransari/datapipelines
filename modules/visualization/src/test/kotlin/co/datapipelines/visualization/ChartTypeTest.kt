@@ -88,7 +88,61 @@ class ChartTypeTest {
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
         ChartType.WIRE_VALUES shouldBe
-            listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+            listOf(
+                "bar",
+                "line",
+                "area",
+                "scatter",
+                "pie",
+                "combo",
+                "heatmap",
+                "histogram",
+                "box",
+                "waterfall",
+                "funnel",
+                "gauge",
+                "sparkline",
+                "radar",
+                "treemap",
+            )
+    }
+
+    @Test
+    fun `sparkline has only the line x and a value under the line policy`() {
+        ChartType.SPARKLINE.channels shouldBe ChartType.LINE.channels.filter { it.key == "x" || it.key == "y" }
+        ChartType.SPARKLINE.policy shouldBe ChartMarkPolicy.LINE
+    }
+
+    @Test
+    fun `radar has band and value with optional series under the area policy`() {
+        val channels = ChartType.RADAR.channels
+        channels.map { it.key } shouldBe listOf("theta", "r", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels.map { it.node } shouldBe
+            listOf(ChannelNode.Shape("band"), ChannelNode.Shape("value"), ChannelNode.Shape("series"))
+        ChartType.RADAR.policy shouldBe ChartMarkPolicy.AREA
+    }
+
+    @Test
+    fun `histogram has a position, a fieldless count and an optional series under the area policy`() {
+        val channels = ChartType.HISTOGRAM.channels
+        channels.map { it.key } shouldBe listOf("x", "y", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels.map { it.node } shouldBe
+            listOf(ChannelNode.Shape("position"), ChannelNode.Shape("count"), ChannelNode.Shape("series"))
+        ChartType.HISTOGRAM.policy shouldBe ChartMarkPolicy.AREA
+    }
+
+    @Test
+    fun `combo has two to four layer objects with one value each under the line policy`() {
+        val channels = ChartType.COMBO.channels
+        channels.map { it.key } shouldBe listOf("x", "layers", "tooltip")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels[0].node shouldBe ChannelNode.Shape("band")
+        channels[1].node shouldBe
+            ChannelNode.ListOf(2, 4, ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value")), layer = "mark"))
+        channels[2].node shouldBe ChannelNode.ListOf(0, 6, ChannelNode.Shape("detail"))
+        ChartType.COMBO.policy shouldBe ChartMarkPolicy.LINE
     }
 
     @Test

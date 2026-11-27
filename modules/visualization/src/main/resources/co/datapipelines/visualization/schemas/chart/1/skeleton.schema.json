@@ -100,7 +100,7 @@
       }
     },
     "familyConfig": {
-      "description": "The family registry: bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge. Treemap sizes nested leaf rectangles.",
+      "description": "The family registry: bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge. Radar compares categories on one radial scale. Treemap sizes nested leaf rectangles. Sparkline has no config.title.",
       "oneOf": [
         {
           "$ref": "bar.schema.json#/$defs/config"
@@ -118,7 +118,13 @@
           "$ref": "pie.schema.json#/$defs/config"
         },
         {
+          "$ref": "combo.schema.json#/$defs/config"
+        },
+        {
           "$ref": "heatmap.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "histogram.schema.json#/$defs/config"
         },
         {
           "$ref": "box.schema.json#/$defs/config"
@@ -131,6 +137,12 @@
         },
         {
           "$ref": "gauge.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "sparkline.schema.json#/$defs/config"
+        },
+        {
+          "$ref": "radar.schema.json#/$defs/config"
         },
         {
           "$ref": "treemap.schema.json#/$defs/config"
@@ -485,7 +497,7 @@
       ]
     },
     "unit": {
-      "description": "G6: a unit written after the number in tooltips, value labels and the value axis's title, never on a tick: plain text of 1 to 16 characters.",
+      "description": "G6: a unit written after the number in tooltips, value labels and the title of the value axis or of a number x axis, never on a tick: plain text of 1 to 16 characters.",
       "type": "string",
       "allOf": [
         {

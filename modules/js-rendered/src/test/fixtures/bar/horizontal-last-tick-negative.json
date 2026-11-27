@@ -1,0 +1,67 @@
+{
+ "source": [
+  "lane 1105 mkfix1105.mjs"
+ ],
+ "note": "a sum axis, horizontal bars, every sum below zero: the zero tick is the last tick, at the plot's right edge, and its label is drawn at every size (before #1105 it was left out at 76 of the 175 sizes)",
+ "document": {
+  "display_name": "horizontal-last-tick-negative",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "INTEGER",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "type": "quantitative",
+     "aggregate": "sum",
+     "field": "v",
+     "title": "Change"
+    }
+   },
+   "title": {
+    "text": "horizontal-last-tick-negative"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   -7,
+   -4,
+   -1
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "INTEGER"
+ }
+}

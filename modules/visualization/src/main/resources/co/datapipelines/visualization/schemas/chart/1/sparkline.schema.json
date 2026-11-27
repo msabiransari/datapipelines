@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/sparkline.schema.json",
+  "$comment": "Sparkline (#1076): one measure, bare frame (record \u00a74.5).",
+  "title": "datapipelines chart document, version 1, family sparkline",
+  "description": "One line with its last value, without axes, legend or title.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "sparkline"
+            },
+            "last": {
+              "enum": [
+                "none",
+                "dot",
+                "value"
+              ]
+            },
+            "fill": {
+              "type": "boolean"
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/x"
+        },
+        "y": {
+          "$ref": "#/$defs/value"
+        }
+      }
+    },
+    "x": {
+      "description": "x is a band (nominal, ordinal: evenly spaced, sort required) or a position (temporal: a continuous UTC time axis; quantitative: a number axis). A temporal x has ONE form, position (record \u00a74.2): a temporal band is refused.",
+      "oneOf": [
+        {
+          "type": "object",
+          "allOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/band"
+            }
+          ],
+          "properties": {
+            "type": {
+              "$ref": "skeleton.schema.json#/$defs/seriesType"
+            },
+            "sort": {
+              "description": "The x order, required; no by-total order.",
+              "$ref": "skeleton.schema.json#/$defs/orderSort"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "axis"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "object",
+          "allOf": [
+            {
+              "$ref": "skeleton.schema.json#/$defs/position"
+            }
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "scale"
+                ]
+              },
+              {
+                "required": [
+                  "axis"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "value": {
+      "description": "One measure with no stack or axis.",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -249,13 +249,17 @@
       var text = labelsOpt === "last" && last !== null ? withUnit(T.value(last.exact !== null ? last.exact : last.num, format || look("lastLabelFormat")), measures[s.measure].unit) : null;
       return { id: s.id, value: text };
     });
+    // G6: a number x carries its unit in the tooltip and axis title; time and band x take none.
+    var xUnit = position && !temporal && typeof x.unit === "string" && x.unit !== "" ? x.unit : null;
     var xFull = function (xe) {
-      return temporal ? T.temporalFull(xe.raw, gran) : position ? T.value(xe.at, x.format) : String(xe.raw);
+      return temporal ? T.temporalFull(xe.raw, gran) : position ? withUnit(T.value(xe.at, x.format), xUnit) : String(xe.raw);
     };
     var minAt = xs.length > 0 && position ? xs[0].at : 0, maxAt = xs.length > 0 && position ? xs[xs.length - 1].at : 0;
     var vt = fields ? null : titleOf(y, y.field ? y.aggregate.charAt(0).toUpperCase() + y.aggregate.slice(1) + " of " + y.field : "Count");
     if (fields && y.title !== undefined) vt = y.title;
     if (vt !== null && !fields && typeof y.unit === "string" && y.unit !== "") vt = vt + " (" + y.unit + ")";
+    var bt = titleOf(x, x.field);
+    if (bt !== null && xUnit !== null) bt = bt + " (" + xUnit + ")";
     var curveOpt = cfg.mark.curve === undefined ? look("curveDefault") : cfg.mark.curve;
     var pointsOpt = opts.area === true ? look("pointsDefault") : cfg.mark.points === undefined ? look("pointsDefault") : cfg.mark.points;
     var zero = opts.area === true || scaleY.zero === true;
@@ -286,12 +290,13 @@
         }),
         x: position ? { kind: temporal ? "time" : logX ? "log" : "linear", lo: temporal ? R.time.domain(minAt, maxAt, gran)[0] : minAt, hi: temporal ? R.time.domain(minAt, maxAt, gran)[1] : maxAt, gran: gran, format: x.format, domain: scaleX.domain || null, zero: scaleX.zero === true } : null,
         log: logY,
-        bandTitle: titleOf(x, x.field),
+        bandTitle: bt,
         valueTitle: vt,
         bandGrid: x.axis ? x.axis.grid : undefined,
         valueGrid: y.axis ? y.axis.grid : undefined,
         format: format,
         domain: scaleY.domain || null,
+        whole: agg === "count" && !normalize,
         endLabels: null,
         reach: function (h) {
           return pointsOpt === "none" ? h.theme.n("--chart-line") / 2 : h.theme.n("--chart-point") + h.theme.n("--chart-gap") / 2;

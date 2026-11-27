@@ -46,6 +46,9 @@
     "chart.too_many_series": function (d) {
       return "Too many series to draw (" + d.series + ", the limit is " + d.limit + "). Group the smaller ones in the query.";
     },
+    "chart.rule.radar-axes": function (d) {
+      return "A radar needs " + d.min + " to " + d.max + " axes, and this one has " + d.axes + ".";
+    },
     "chart.rule.negative-part": function () {
       return "This chart cannot show negative values.";
     },
@@ -339,14 +342,40 @@
 
   /**
    * The data index of the line family: per series every point's x (sorted by the template), datum and tip lines. drawn
-   * = the template's [{series, at, datum, tip}] of the series it drew; a series it did not draw has empty lists.
+   * = the template's [{series, at, datum, tip}] of the series it drew; a series it did not draw has empty lists. A
+   * series whose marks are bars may add `spans` (spansOf): the bars' own boxes, which the interaction layer reads.
    */
   function pointIndex(plot, series, visible, drawn) {
     var by = new Map(), out = { axis: "x", plot: plot, series: [] };
     for (var d = 0; d < drawn.length; d++) by.set(drawn[d].series, drawn[d]);
     for (var s = 0; s < series.length; s++) {
       var q = by.get(series[s].id);
-      out.series.push({ id: series[s].id, on: visible[series[s].id] === true, at: q ? q.at : [], datum: q ? q.datum : [], tip: q ? q.tip : [] });
+      var e = { id: series[s].id, on: visible[series[s].id] === true, at: q ? q.at : [], datum: q ? q.datum : [], tip: q ? q.tip : [] };
+      if (q && q.spans !== undefined) e.spans = spansOf(q.spans, e.at.length, series[s].id);
+      out.series.push(e);
+    }
+    return out;
+  }
+
+  /**
+   * A bar layer's `spans` (#1101): one entry per mark, in the order of `at`, either null (a mark that is no bar) or the
+   * bar's box as drawn, {x, w, foot, end}: x and w its left edge and width, foot the y where it starts (the zero line,
+   * or the plot's edge when the scale does not hold zero), end the y of its value (the top of a bar that grows up, the
+   * bottom of one that grows down). Checked whole before anything is kept; every number finite, w not below 0.
+   */
+  function spansOf(list, count, id) {
+    if (!Array.isArray(list) || list.length !== count) throw new Error("render: series " + id + ": spans is not a list of one entry per mark");
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var b = list[i];
+      if (b === null) {
+        out.push(null);
+        continue;
+      }
+      if (b === undefined || typeof b !== "object" || !(b.w >= 0)) throw new Error("render: series " + id + ": spans[" + i + "] is not null or a box with a width of 0 or more");
+      var names = ["x", "w", "foot", "end"];
+      for (var n = 0; n < 4; n++) if (typeof b[names[n]] !== "number" || b[names[n]] - b[names[n]] !== 0) throw new Error("render: series " + id + ": spans[" + i + "]." + names[n] + " is not a finite number");
+      out.push({ x: b.x, w: b.w, foot: b.foot, end: b.end });
     }
     return out;
   }

@@ -54,8 +54,14 @@ enum class ChartType(
     /** Shares of a whole, drawn as a ring by default (§4.5; lane #1068). */
     PIE("pie", ChartChannelNodes.pie, ChartMarkPolicy.AREA),
 
+    /** Two to four layers over one category band, with one or two value axes (§4.5; #1069). */
+    COMBO("combo", ChartChannelNodes.combo, ChartMarkPolicy.LINE),
+
     /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
     HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
+
+    /** Numeric rows binned on nice edges, optionally stacked by series (§4.5; #1071). */
+    HISTOGRAM("histogram", ChartChannelNodes.histogram, ChartMarkPolicy.AREA),
 
     /** Quartiles and whiskers per category, with outside points (§4.5 box; #1072). */
     BOX("box", ChartChannelNodes.box, ChartMarkPolicy.POINT),
@@ -68,6 +74,20 @@ enum class ChartType(
 
     /** One aggregate on an authored range, drawn as an open arc (§4.5; #1075). */
     GAUGE("gauge", listOf(ChartChannel("value", required = true, node = ChannelNode.Shape("value"))), ChartMarkPolicy.LINE),
+
+    /** One measure over an ordered axis, without axes, title or legend (§4.5; #1076). */
+    SPARKLINE("sparkline", ChartChannelNodes.sparkline, ChartMarkPolicy.LINE),
+
+    /** Several series on one zero-based radial scale, over 3 to 12 categories (§4.5; #1077). */
+    RADAR(
+        "radar",
+        listOf(
+            ChartChannel("theta", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel("r", required = true, node = ChannelNode.Shape("value")),
+            ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+        ),
+        ChartMarkPolicy.AREA,
+    ),
 
     /** Nested leaf rectangles, with a key-only legend (§4.5 treemap; #1078). */
     TREEMAP("treemap", ChartChannelNodes.treemap, ChartMarkPolicy.AREA),
@@ -179,6 +199,31 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val sparkline: List<ChartChannel> get() = lineFamily.filter { it.key == "x" || it.key == "y" }
+
+    val histogram: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("position")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("count")),
+            ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+        )
+
+    val combo: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
+            ChartChannel(
+                "layers",
+                required = true,
+                node =
+                    ChannelNode.ListOf(
+                        min = 2,
+                        max = 4,
+                        of = ChannelNode.ObjectOf(members = mapOf("y" to ChannelNode.Shape("value")), layer = "mark"),
+                    ),
+            ),
+            ChartChannel("tooltip", required = false, node = ChannelNode.ListOf(0, 6, ChannelNode.Shape("detail"))),
+        )
+
     val treemap: List<ChartChannel> =
         listOf(
             ChartChannel("path", required = true, node = ChannelNode.ListOf(1, 3, ChannelNode.Shape("level"))),

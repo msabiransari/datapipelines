@@ -22,21 +22,44 @@
   /**
    * The value axis over [lo, hi] (or the author's domain) for an axis `length` px long: {lo, hi, ticks, texts}. room:
    * px a value label needs beyond a data end; without an author's domain the range grows (at most three times) until
-   * the largest and the smallest value have that room inside the plot.
+   * the largest and the smallest value have that room inside the plot. whole === true (a count, #1102): every tick is a
+   * whole number (wholeTicks); anything else leaves the ticks as they were.
    */
-  function valueAxis(lvl, ext, domain, length, format, room) {
+  function valueAxis(lvl, ext, domain, length, format, room, whole) {
     var spacing = look(lvl === "compact" ? "tickSpacingCompact" : "tickSpacing");
     var intervals = Math.max(1, Math.floor(length / spacing));
-    var n = domain ? S.within(domain[0], domain[1], intervals) : S.nice(ext[0], ext[1], intervals);
+    var n = wholeTicks(domain, ext[0], ext[1], intervals, whole);
     for (var i = 0; !domain && room > 0 && i < 3; i++) {
       var span = n.hi - n.lo;
       if (!(span > 0 && span < Infinity) || !(length > room)) break;
       var u = (room * span) / length;
       var hi = ext[1] > 0 ? ext[1] + u : ext[1], lo = ext[0] < 0 ? ext[0] - u : ext[0];
       if (n.hi >= hi && n.lo <= lo) break;
-      n = S.nice(Math.min(lo, n.lo), Math.max(hi, n.hi), intervals);
+      n = wholeTicks(null, Math.min(lo, n.lo), Math.max(hi, n.hi), intervals, whole);
     }
     return { lo: n.lo, hi: n.hi, ticks: n.ticks, texts: T.ticks(n.ticks, format) };
+  }
+
+  /** Every number of the list is a whole number. */
+  function allWhole(t) {
+    for (var i = 0; i < t.length; i++) if (Math.floor(t[i]) !== t[i]) return false;
+    return true;
+  }
+
+  /**
+   * The nice ticks over [lo, hi] in at most `intervals` steps (the author's domain's ticks when domain is given). With
+   * whole === true the first answer whose ticks are all whole numbers, tried from `intervals` steps down to one: the
+   * finest whole step the room allows (a count of 3 reads 0 1 2 3, never 0 0.5 ... 3). The one-step answer of a range
+   * that is not whole itself (2.3: step 2.5) is the range widened to whole ends. An author's domain whose ends are not
+   * both whole numbers is the author's own range: it is drawn as written, as without whole. This is a linear value
+   * axis rule; the log axis never asks. A position axis's o.whole means uncut labels, a separate rule.
+   */
+  function wholeTicks(domain, lo, hi, intervals, whole) {
+    var w = whole === true && (!domain || allWhole(domain));
+    var n = domain ? S.within(domain[0], domain[1], intervals) : S.nice(lo, hi, intervals);
+    for (var k = intervals - 1; w && k >= 1 && !allWhole(n.ticks); k--) n = domain ? S.within(domain[0], domain[1], k) : S.nice(lo, hi, k);
+    if (w && !domain && !allWhole(n.ticks)) n = S.nice(Math.floor(lo), Math.ceil(hi), 1);
+    return n;
   }
 
   /**

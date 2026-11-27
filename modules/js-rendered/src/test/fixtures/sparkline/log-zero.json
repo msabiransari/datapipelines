@@ -1,0 +1,74 @@
+{
+ "source": [
+  "lane 1076 prototype mkfix.py"
+ ],
+ "note": "a log y with a zero: that row is no point (a warning)",
+ "document": {
+  "display_name": "log-zero",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "x",
+      "type": "DATE",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "sparkline"
+   },
+   "encoding": {
+    "x": {
+     "field": "x",
+     "type": "temporal"
+    },
+    "y": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "scale": {
+      "type": "log"
+     }
+    }
+   }
+  }
+ },
+ "columns": {
+  "x": [
+   "2024-01-01",
+   "2024-02-01",
+   "2024-03-01",
+   "2024-04-01",
+   "2024-05-01",
+   "2024-06-01",
+   "2024-07-01",
+   "2024-08-01"
+  ],
+  "v": [
+   1,
+   10,
+   0,
+   100,
+   1000,
+   50,
+   5,
+   500
+  ]
+ },
+ "types": {
+  "x": "DATE",
+  "v": "DECIMAL"
+ }
+}

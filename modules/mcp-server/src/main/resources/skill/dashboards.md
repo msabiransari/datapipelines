@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline`, `radar` or `treemap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -102,7 +102,7 @@ output of its pinned script template), and every `field` names one of its column
 - **Nothing is left to a library's default.** The band's `sort` is required: `"ascending"`, `"descending"`, `null`
   (input order), an explicit list of values, or by each band's total — `"y"`/`"-y"` vertical, `"x"`/`"-x"`
   horizontal. The value's `aggregate` is required: `sum`, `mean`, `min`, `max`, or `count` (which takes no
-  `field`). A series' `sort` is required too, in the same forms without the by-total ones.
+  `field`; on a linear scale its value axis marks whole numbers only, except under a `scale.domain` with an end that is not whole; a log scale and a `normalize` share keep their own ticks). A series' `sort` is required too, in the same forms without the by-total ones.
 - **Types.** The band is `nominal`, `ordinal` or `temporal` (a DATE or TIMESTAMP column); the value is
   `quantitative` over a numeric column; the band and series columns are not nullable. A temporal band is
   grouped and labelled in UTC, its `format` one of `date`, `month`, `year`, `datetime`.
@@ -164,7 +164,7 @@ to show how the parts add up to a total (`"normalize"`: shares of it). Prefer a 
 - **A time `x` is a position, never a band**, on a line or an area: `{field, type: "temporal", format?}` — a
   continuous UTC axis (`format` `date`, `month`, `year` or `datetime`), no `sort`. A number `x` is a position too
   (`type: "quantitative"`, a number format, optional `unit` and `scale`). A category `x` is a band, as on a bar
-  (`nominal` or `ordinal`, `sort` required).
+  (`nominal` or `ordinal`, `sort` required). A time `x` and a category `x` take no `unit`.
 - **The look is fixed:** a smooth line that never overshoots its points, a dot on each line's last point, and with
   2 to 4 series their names at the lines' ends. You may write `mark.curve` (`smooth`, `step`, `linear`),
   `mark.points` (`end`, `markers`, `none`), `mark.labels: "last"` (the last value at the line's end) and a legend
@@ -208,12 +208,32 @@ Labels stay inside slices where they fit; switching a slice off re-proportions t
 }}
 ```
 
+**Combo?** Choose `combo` for an amount beside a rate on one category band, two to four layers; for one measure use
+bar or line. Each layer is `{mark: "bar"|"line"|"area"|"point", y, axis?: "left"|"right", title?}`, with one
+aggregated value, no fields/stack/colour. At least one layer is left (default). One scale and format per axis,
+inherited even from hidden layers; any bar/area makes that axis linear with zero in its domain, never zero:false.
+The category heads the card; visible layer rows retain layer order; pointing inside a bar selects it and keeps its row.
+
+```json
+{"mark":{"type":"combo"},"encoding":{"x":{"field":"month","type":"nominal","sort":null},"layers":[{"mark":"bar","y":{"field":"amount","type":"quantitative","aggregate":"sum"}},{"mark":"line","axis":"right","y":{"field":"rate","type":"quantitative","aggregate":"mean","format":"percent"}}]}}
+```
+
 **Heatmap?** Use `heatmap` for a measure over two categories, such as weekday by hour: a few dozen to 1,000 cells. Aggregate in the query above 1,000; use a line for an ordered time series. Missing or all-null cells are empty, not zero. Labels default to none; choose `values` for a few cells.
 ```json
 "config": {"mark": {"type": "heatmap", "labels": "values"}, "encoding": {
   "x": {"field": "hour", "type": "nominal", "sort": "ascending"},
   "y": {"field": "weekday", "type": "nominal", "sort": null},
   "color": {"field": "orders", "type": "quantitative", "aggregate": "sum", "scale": "sequential"}
+}}
+```
+
+**Histogram?** Choose one numeric column's distribution; add a series to compare groups, or `share` for unequal groups. Aggregate nothing in the query: the engine bins the rows. `bins` is a target (5–50, default Sturges); nice edges may give fewer bins. The last bin includes its upper edge. Options: dashboards §2.1.2.
+
+```json
+"config": {"mark": {"type": "histogram", "bins": 10}, "encoding": {
+  "x": {"field": "duration", "type": "quantitative", "unit": "ms"},
+  "y": {"aggregate": "count"},
+  "color": {"field": "site", "type": "nominal", "sort": null}
 }}
 ```
 
@@ -241,6 +261,24 @@ when the arc clamps to an end. Bands and Target have keys, never switches. Optio
 ```
 
 
+**Sparkline?** Choose `sparkline` for one measure over ordered x in a table row or card only a few
+lines high. Choose a line chart when axes help. No axes, title or legend. The end dot remains at every
+size; the last value follows it where it fits. The value's unit follows the value; a number x's unit follows x only in
+its card heading. Options: `docs/dashboards.md`.
+
+```json
+{"mark":{"type":"sparkline"},"encoding":{"x":{"field":"day","type":"temporal"},"y":{"field":"visits","type":"quantitative","aggregate":"sum"}}}
+```
+
+**Radar?** Compare several series across 3 to 12 category axes, at most 6 series, on one scale from zero.
+Use a bar for more axes or series, or negative values. `theta` is a band (`sort` required), `r` one
+aggregate, `color` optional series. Each cell is one point; nulls leave gaps joined by the polygon;
+negatives refuse the chart. `fill` defaults to true. The card heads with the axis and lists the visible
+series, keeping the hovered row. No authored scale, channel title or extra tooltip.
+```json
+{"mark":{"type":"radar"},"encoding":{"theta":{"field":"metric","type":"nominal","sort":null},"r":{"field":"score","type":"quantitative","aggregate":"mean"},"color":{"field":"team","type":"nominal","sort":null}}}
+```
+
 **Treemap?** Choose `treemap` for a whole split into nested parts by size: one to three levels, at most
 500 positive leaves. Use a bar for exact comparisons; negative aggregates refuse the chart.
 Without `color`, the first path level supplies colours; a series field splits paths by its values.
@@ -258,10 +296,11 @@ Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail.
-- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
-- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
-  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
+  scatter's `y`, a box's `y`, a pie's `theta`, a radar's `r`, a tooltip detail. On a sparkline only values and the card's number x carry it. On an axis the unit also follows the title
+  (`Distance (km)`; `title: null` writes neither title nor unit), never a tick.
+- **`encoding.tooltip` (bar, line, area, scatter and combo only):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap or radar: their cards are the type's own).
+- **`scale` (on a value or a number axis; not on a pie, a histogram's x, a sparkline's x or a radar's r):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a sparkline, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each
@@ -279,6 +318,7 @@ failure's `path` names the field. Its `details.reason` says what to fix:
 | `chart.scale.log_unsupported` | use a linear scale — a log scale is refused on an area, on a stacked or normalized value and beside `scale.zero` |
 | `chart.scale.domain_log` | a log `domain` must be greater than 0 and increasing |
 | `chart.shade.mid_invalid` / `chart.size.range_invalid` | a shade's `mid` must be a finite number; a scatter's `size.range` must increase |
+| `chart.bands.outside_domain` / `chart.bands.not_ascending` / `chart.target.outside_domain` | on a gauge, give each band a `to` above the scale's low end and at most its high end, each greater than the one before, and a `target` inside the domain; bands may stop short of the end |
 | `chart.format.normalize_percent` / `chart.format.currency_unknown` | format a normalized value `percent`; use a known currency code |
 | `chart.bindings.mismatch` | delete `bindings` — the save derives them |
 

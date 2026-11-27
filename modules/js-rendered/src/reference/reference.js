@@ -18,7 +18,7 @@
   "use strict";
 
   var NS = "http://www.w3.org/2000/svg";
-  var WIRES = ["bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap"];
+  var WIRES = ["bar", "line", "area", "scatter", "pie", "combo", "heatmap", "histogram", "box", "waterfall", "funnel", "gauge", "sparkline", "radar", "treemap"];
   var THEME_FILES = { light: "vendor/design-system/themes/light.css", dark: "vendor/design-system/themes/dark.css" };
   /** The product's sentence for the warning a frame below `minimal` carries (the chart adapter's WARNING_TEXT). */
   var TOO_SMALL = "the chart's frame is too small to draw it";

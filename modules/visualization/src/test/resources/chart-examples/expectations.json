@@ -1266,6 +1266,1500 @@
    "layer": "schema",
    "keyword": "additionalProperties",
    "path": "/config/mark"
+  },
+  "valid/combo-bar-line-right.json": {
+   "valid": true
+  },
+  "valid/combo-two-lines-two-axes.json": {
+   "valid": true
+  },
+  "valid/combo-four-layers-every-mark.json": {
+   "valid": true
+  },
+  "valid/combo-layer-title-and-axis-title.json": {
+   "valid": true
+  },
+  "valid/combo-one-scale-per-axis-on-different-layers.json": {
+   "valid": true
+  },
+  "valid/combo-bar-scale-zero-true.json": {
+   "valid": true
+  },
+  "valid/combo-count-layer.json": {
+   "valid": true
+  },
+  "valid/combo-temporal-band.json": {
+   "valid": true
+  },
+  "valid/combo-tooltip.json": {
+   "valid": true
+  },
+  "valid/combo-left-axis-grid-off.json": {
+   "valid": true
+  },
+  "valid/combo-title.json": {
+   "valid": true
+  },
+  "valid/combo-area-scale-zero-true.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-bar-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-area-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-omitted-point-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-bar-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-area-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-left-point-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-bar-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-area-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-forward-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-0-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-zero-false.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-type-log.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-minus50-400.json": {
+   "valid": true
+  },
+  "valid/combo-axis-right-point-reverse-declaring-1-domain-0-400.json": {
+   "valid": true
+  },
+  "valid/combo-line-point-log.json": {
+   "valid": true
+  },
+  "valid/combo-right-line-raised.json": {
+   "valid": true
+  },
+  "invalid/combo-one-layer.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minItems",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-five-layers.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/combo-pie-mark-in-a-layer.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/layers/0/mark"
+  },
+  "invalid/combo-unknown-layer-member.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/layers/0"
+  },
+  "invalid/combo-fields-on-a-layer.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers/0/y"
+  },
+  "invalid/combo-stack-on-a-layer.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers/0/y"
+  },
+  "invalid/combo-all-layers-right.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minContains",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-third-axis-name.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/layers/0/axis"
+  },
+  "invalid/combo-two-scales-on-the-left.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxContains",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-two-scales-on-the-right.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxContains",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-two-formats-on-the-left.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxContains",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-bar-scale-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-area-scale-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-log-area-layer.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/type"
+  },
+  "invalid/combo-right-layer-with-a-grid.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/layers/1/y/axis"
+  },
+  "invalid/combo-x-without-sort.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding/x"
+  },
+  "invalid/combo-x-quantitative.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/combo-x-format-on-nominal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x"
+  },
+  "invalid/combo-tooltip-of-seven.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maxItems",
+   "path": "/config/encoding/tooltip"
+  },
+  "invalid/combo-top-level-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/combo-empty-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minProperties",
+   "path": "/config/encoding/layers/0/y/scale"
+  },
+  "invalid/combo-layers-missing.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/combo-log-bar.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-bar-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/type"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/type"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-omitted-area-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-bar-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/type"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/type"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-left-area-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-bar-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/zero"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/0/y/scale/type"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-forward-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-0-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-0-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-0-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/zero"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-0-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/layers/1/y/scale/type"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-1-domain-50-400.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-1-domain-minus5-minus1.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-1-zero-false.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-axis-right-area-reverse-declaring-1-type-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/layers"
+  },
+  "invalid/combo-measure-on-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/layers/0/y/field"
+  },
+  "valid/histogram-plain.json": {
+   "valid": true
+  },
+  "valid/histogram-bins.json": {
+   "valid": true
+  },
+  "valid/histogram-series.json": {
+   "valid": true
+  },
+  "valid/histogram-share.json": {
+   "valid": true
+  },
+  "valid/histogram-unit.json": {
+   "valid": true
+  },
+  "invalid/histogram-x-temporal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/histogram-x-nominal.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "const",
+   "path": "/config/encoding/x/type"
+  },
+  "invalid/histogram-x-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/x/scale"
+  },
+  "invalid/histogram-x-domain.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/x/scale"
+  },
+  "invalid/histogram-x-log.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "false",
+   "path": "/config/encoding/x/scale"
+  },
+  "invalid/histogram-bins-4.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "minimum",
+   "path": "/config/mark/bins"
+  },
+  "invalid/histogram-bins-51.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "maximum",
+   "path": "/config/mark/bins"
+  },
+  "invalid/histogram-y-field.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding/y"
+  },
+  "invalid/histogram-color-shade.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/encoding/color/type"
+  },
+  "invalid/histogram-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/histogram-unknown-field.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.field.unknown"
+  },
+  "valid/sparkline-plain.json": {
+   "valid": true
+  },
+  "valid/sparkline-last-dot.json": {
+   "valid": true
+  },
+  "valid/sparkline-fill-false.json": {
+   "valid": true
+  },
+  "valid/sparkline-nominal.json": {
+   "valid": true
+  },
+  "valid/sparkline-unit-domain.json": {
+   "valid": true
+  },
+  "valid/sparkline-log.json": {
+   "valid": true
+  },
+  "invalid/sparkline-last-label.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/last"
+  },
+  "invalid/sparkline-fill-text.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/fill"
+  },
+  "invalid/sparkline-curve.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/sparkline-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config"
+  },
+  "invalid/sparkline-y-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-y-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-y-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-x-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x"
+  },
+  "invalid/sparkline-x-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x"
+  },
+  "invalid/sparkline-missing-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-missing-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-y-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/sparkline-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/sparkline-domain-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
+  },
+  "valid/radar-plain.json": {
+   "valid": true
+  },
+  "valid/radar-no-fill.json": {
+   "valid": true
+  },
+  "valid/radar-unit.json": {
+   "valid": true
+  },
+  "valid/radar-legend-bottom.json": {
+   "valid": true
+  },
+  "valid/radar-sort.json": {
+   "valid": true
+  },
+  "invalid/radar-fill-string.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/fill"
+  },
+  "invalid/radar-unknown-option.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/radar-missing-theta.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-missing-r.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-theta-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/radar-theta-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/theta"
+  },
+  "invalid/radar-theta-sort.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "oneOf",
+   "path": "/config/encoding/theta/sort"
+  },
+  "invalid/radar-r-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-r-axis.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/r"
+  },
+  "invalid/radar-color-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/color"
+  },
+  "invalid/radar-extra-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-extra-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/radar-text-measure.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/r/field"
+  },
+  "invalid/radar-nullable-color.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.color.nullable",
+   "pointer": "/config/encoding/color/field"
+  },
+  "valid/gauge-bands-stop-short.json": {
+   "valid": true
+  },
+  "valid/gauge-band-and-target-at-ends.json": {
+   "valid": true
+  },
+  "valid/gauge-negative-domain.json": {
+   "valid": true
+  },
+  "invalid/gauge-bands-descending.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.not_ascending",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge bands descending"
+  },
+  "invalid/gauge-bands-equal.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.not_ascending",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge bands equal"
+  },
+  "invalid/gauge-band-above-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge band above domain"
+  },
+  "invalid/gauge-band-at-low-end.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/0/to",
+   "note": "gauge band at low end"
+  },
+  "invalid/gauge-band-huge.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.bands.outside_domain",
+   "pointer": "/config/mark/bands/1/to",
+   "note": "gauge band huge"
+  },
+  "invalid/gauge-target-above-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.target.outside_domain",
+   "pointer": "/config/mark/target",
+   "note": "gauge target above domain"
+  },
+  "invalid/gauge-target-below-domain.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.target.outside_domain",
+   "pointer": "/config/mark/target",
+   "note": "gauge target below domain"
   }
  }
 }

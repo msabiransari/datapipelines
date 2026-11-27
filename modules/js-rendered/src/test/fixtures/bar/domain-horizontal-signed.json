@@ -1,0 +1,73 @@
+{
+ "source": [
+  "lane 1104 mkfix1104.mjs"
+ ],
+ "note": "an author's domain [-10, 40], horizontal bars: its nice ticks inside are one (0) in a frame of 240 px, so the two ends -10 and 40 are drawn",
+ "document": {
+  "display_name": "domain-horizontal-signed",
+  "renderer": {
+   "kind": "chart",
+   "version": "1"
+  },
+  "inputs": {
+   "result": {
+    "columns": [
+     {
+      "name": "k",
+      "type": "STRING",
+      "nullable": true
+     },
+     {
+      "name": "v",
+      "type": "DECIMAL",
+      "nullable": true
+     }
+    ]
+   }
+  },
+  "config": {
+   "mark": {
+    "type": "bar"
+   },
+   "encoding": {
+    "y": {
+     "field": "k",
+     "type": "nominal",
+     "title": "Category",
+     "sort": null
+    },
+    "x": {
+     "field": "v",
+     "type": "quantitative",
+     "aggregate": "sum",
+     "title": "Value",
+     "scale": {
+      "domain": [
+       -10,
+       40
+      ]
+     }
+    }
+   },
+   "title": {
+    "text": "domain-horizontal-signed"
+   }
+  }
+ },
+ "columns": {
+  "k": [
+   "a",
+   "b",
+   "c"
+  ],
+  "v": [
+   30,
+   -8,
+   12
+  ]
+ },
+ "types": {
+  "k": "STRING",
+  "v": "DECIMAL"
+ }
+}

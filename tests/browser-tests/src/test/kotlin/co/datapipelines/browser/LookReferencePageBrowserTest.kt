@@ -140,7 +140,23 @@ class LookReferencePageBrowserTest {
         open(screen).use { s ->
             for (theme in listOf("light", "dark")) {
                 s.switchTo(theme)
-                for (wire in listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")) {
+                for (wire in listOf(
+                    "bar",
+                    "line",
+                    "area",
+                    "scatter",
+                    "pie",
+                    "combo",
+                    "heatmap",
+                    "histogram",
+                    "box",
+                    "waterfall",
+                    "funnel",
+                    "gauge",
+                    "sparkline",
+                    "radar",
+                    "treemap",
+                )) {
                     @Suppress("UNCHECKED_CAST")
                     val r = s.page.evaluate(LookReferenceChecks.HOSTILE_JS, "$wire:hostile") as Map<String, Any?>
                     withClue("$screen $theme $wire hostile: $r") {
@@ -232,6 +248,12 @@ class LookReferencePageBrowserTest {
                 (counts["$theme/line"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/area"] ?: 0) shouldBeGreaterThanOrEqual MIN_TILES
                 (counts["$theme/scatter"] ?: 0) shouldBeGreaterThanOrEqual MIN_SCATTER_TILES
+                counts.getValue("$theme/histogram") shouldBeGreaterThanOrEqual MIN_HISTOGRAM_TILES
+                counts.getValue("$theme/histogramSegments") shouldBeGreaterThanOrEqual MIN_HISTOGRAM_SEGMENTS
+                counts.getValue("$theme/combo") shouldBeGreaterThanOrEqual MIN_COMBO_TILES
+                counts.getValue("$theme/comboDots") shouldBeGreaterThanOrEqual MIN_COMBO_DOTS
+                counts.getValue("$theme/sparkline") shouldBeGreaterThanOrEqual MIN_SPARKLINE_TILES
+                counts.getValue("$theme/sparklineDots") shouldBeGreaterThanOrEqual MIN_SPARKLINE_DOTS
                 counts.getValue("$theme/treemap") shouldBeGreaterThanOrEqual MIN_TREEMAP_TILES
                 counts.getValue("$theme/gauge") shouldBeGreaterThanOrEqual MIN_GAUGE_TILES
                 counts.getValue("$theme/arcs") shouldBeGreaterThanOrEqual MIN_ARCS
@@ -245,6 +267,7 @@ class LookReferencePageBrowserTest {
                 counts.getValue("$theme/cells") shouldBeGreaterThanOrEqual MIN_CELLS
                 counts.getValue("$theme/pie") shouldBeGreaterThanOrEqual MIN_PIE_TILES
                 counts.getValue("$theme/slices") shouldBeGreaterThanOrEqual MIN_SLICES
+                counts.getValue("$theme/radar") shouldBeGreaterThanOrEqual MIN_RADAR_TILES
                 (counts["$theme/points"] ?: 0) shouldBeGreaterThanOrEqual MIN_POINTS
                 (counts["$theme/texts"] ?: 0) shouldBeGreaterThanOrEqual MIN_TEXTS
                 (counts["$theme/values"] ?: 0) shouldBeGreaterThanOrEqual MIN_VALUES
@@ -538,9 +561,20 @@ class LookReferencePageBrowserTest {
         private const val MIN_PIE_TILES = 7
         private const val MIN_SLICES = 29
 
+        /** Brief 1069: seven tiles and 43 circles in the five rendered tiles. */
+        private const val MIN_COMBO_TILES = 7
+        private const val MIN_COMBO_DOTS = 43
+
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
-        private const val MIN_POINTS = 53
+
+        /** Brief 1077: first green page run per theme, 53 scatter + 13 box + 134 radar points. */
+        private const val MIN_RADAR_TILES = 8
+        private const val MIN_POINTS = 200
+
+        /** Brief 1071: seven tiles; segments counted from each rendered histogram's mark primitives, per theme. */
+        private const val MIN_HISTOGRAM_TILES = 7
+        private const val MIN_HISTOGRAM_SEGMENTS = 40
 
         /** Brief 1075: eight gauge tiles, seven rendered arcs under each theme. */
         private const val MIN_GAUGE_TILES = 8
@@ -557,6 +591,10 @@ class LookReferencePageBrowserTest {
         /** Brief 1070: nine heatmap tiles, 145 cells across the seven rendered tiles. */
         private const val MIN_HEATMAP_TILES = 8
         private const val MIN_CELLS = 241
+
+        /** The ten tiles of tiles/sparkline.json and their end dots under one theme (#1076). */
+        private const val MIN_SPARKLINE_TILES = 10
+        private const val MIN_SPARKLINE_DOTS = 8
         private const val MIN_TREEMAP_TILES = 10
         private const val MIN_TEXTS = 850
         private const val MIN_VALUES = 5500
@@ -647,6 +685,7 @@ class LookReferencePageBrowserTest {
  * frame) with Playwright. They read the drawn DOM and the page's read-only snapshot of each draw, and compare both with
  * the tile's hand-written `expect` and the look contract's rules; the engine's own layout code is never called.
  */
+@Suppress("LargeClass") // Per-type checks share one snapshot/DOM probe; histogram joins this existing checker (#1071).
 private object LookReferenceChecks {
     private val HELPERS_BODY =
         """
@@ -739,7 +778,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, arcs: 0, points: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, sparklineDots: 0, comboDots: 0, arcs: 0, points: 0, histogramSegments: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -808,6 +847,9 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const radar = s.wire === "radar";
+        // Sparkline end dot: look contract §4.7, radius --chart-point minus 0.5.
+        const sparkline = s.wire === "sparkline";
         const treemap = s.wire === "treemap";
         const gauge = s.wire === "gauge";
         const track = gauge ? prims.find(p => p.k === "path" && p.role === "grid") : null;
@@ -820,7 +862,7 @@ private object LookReferenceChecks {
         const heatmap = s.wire === "heatmap";
         const pie = s.wire === "pie";
         const sizeEnc = scatter ? s.document.config.encoding.size || null : null;
-        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []).concat(isBox ? [R.tables.look("boxOutsideRing") * t.n("--chart-gap")] : []);
+        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []).concat(radar ? [R.tables.look("radarRingShare") * t.n("--chart-gap")] : []).concat(isBox ? [R.tables.look("boxOutsideRing") * t.n("--chart-gap")] : []);
         const radius = t.n("--chart-bar-radius");
         const has = (list, v) => list.some((x) => Math.abs(x - v) < 1e-6);
         svg.querySelectorAll("*").forEach((el) => {
@@ -840,9 +882,9 @@ private object LookReferenceChecks {
               case "font-weight": ok = has(weights, Number(v)); break;
               case "font-family": ok = v.replace(/["']/g, "").split(",")[0].trim() === t.font; break;
               case "stroke-width": ok = has(widths, Number(v)) || (gauge && has([R.tables.look("gaugeRingWidth"), R.tables.look("gaugeTargetBack"), gaugeWidth], Number(v))); break;
-              case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
+              case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (radar && has([R.tables.look("radarFillShare")], Number(v))) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
               case "stop-opacity": ok = has([t.n("--chart-area-top"), t.n("--chart-area-bottom")], Number(v)); break;
-              case "r": ok = has([t.n("--chart-point")], Number(v)) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
+              case "r": ok = has([t.n("--chart-point")], Number(v)) || (radar && has([t.n("--chart-point") - R.tables.look("radarDotLess")], Number(v))) || (sparkline && has([t.n("--chart-point") - 0.5], Number(v))) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
               case "rx":
               case "ry": {
                 // Heatmap corners use the cell token, capped by half either side.
@@ -859,7 +901,9 @@ private object LookReferenceChecks {
                   // §3.8: the data end's radius is --chart-bar-radius, never more than half the bar's width (its band side)
                   const r = Number(m[1]);
                   const half = Math.abs(2 * r - box.width) < 0.05 || Math.abs(2 * r - box.height) < 0.05
-                    || (waterfall && Math.abs(r - box.height) < 0.05);
+                    || (waterfall && Math.abs(r - box.height) < 0.05)
+                    // Histogram upper segments shorter than the radius round by their painted length.
+                    || (s.wire === "histogram" && Math.abs(r - box.height) < 0.05);
                   const sectorRadius = pie && (s.index.marks || []).some((entry) => entry.shape.kind === "sector" && Math.abs(entry.shape.r1 - r) < 0.05);
                   const gaugeArc = gauge && [gaugeRadius, gaugeRadius + gaugeWidth/2 + R.tables.look("gaugeRingOffset")].some(v => Math.abs(v-r) < 0.05);
                   if (!(gaugeArc || sectorRadius || (r <= radius + 1e-6 && (has([radius], r) || half)))) ok = false;
@@ -888,9 +932,11 @@ private object LookReferenceChecks {
         const marks = of("mark").filter((p) => p.k !== "group");
         const legend = of("legend").filter((p) => p.k !== "group");
         const labels = of("guide", "text");
-        const dots = scatter || isBox ? [] : of("mark", "circle");
-        const points = scatter || isBox ? of("mark", "circle") : [];
+        const dots = scatter || radar || isBox ? [] : of("mark", "circle");
+        const points = scatter || radar || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
+        if (sparkline) counts.sparklineDots += dots.length;
+        if (s.wire === "combo") counts.comboDots += dots.length;
         counts.points += points.length;
         const gaugeArcs = gauge ? of("mark", "path") : [];
         counts.arcs += gaugeArcs.length;
@@ -953,7 +999,7 @@ private object LookReferenceChecks {
         if (treemap && e.cells !== undefined && cells.length !== e.cells) bad(cells.length + " treemap cells, the expect says " + e.cells);
         if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
         if (gauge && e.arcs !== undefined && gaugeArcs.length !== e.arcs) bad("gauge arc count differs from expect");
-        if ((scatter || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
+        if ((scatter || radar || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
         if (funnel) {
           if (stages.length !== s.summary.marks) bad("funnel count differs from summary.marks");
           if (of("mark", "circle").length) bad("funnel draws a circle");
@@ -971,6 +1017,14 @@ private object LookReferenceChecks {
             if (p.x < plot.x - TOL || p.y < plot.y - TOL || p.x + p.w > plot.x + plot.w + TOL || p.y + p.h > plot.y + plot.h + TOL) bad("heatmap cell crosses the plot edge");
           });
         }
+        if (radar) points.forEach((p) => {
+          const line = of("mark", "path").find(q => q.series === p.series && q.stroke);
+          let onVertex = false;
+          if (line) for (let i = 0; i + 2 < line.d.length; i += 3) {
+            if (Math.abs(line.d[i+1] - p.cx) < 0.02 && Math.abs(line.d[i+2] - p.cy) < 0.02) onVertex = true;
+          }
+          if (!onVertex) bad("radar point is not on its series polygon vertex");
+        });
         points.forEach((p) => {
           if (p.cx - p.r < plot.x - TOL || p.cx + p.r > plot.x + plot.w + TOL || p.cy - p.r < plot.y - TOL || p.cy + p.r > plot.y + plot.h + TOL) bad("the point " + p.series + "/" + p.datum + " crosses the plot's edge");
         });
@@ -980,6 +1034,20 @@ private object LookReferenceChecks {
           if (!entry || p.cx - p.r < entry.shape.x - TOL || p.cx + p.r > entry.shape.x + entry.shape.w + TOL) bad("box outside point crosses its column");
         });
         dots.forEach((d) => {
+          if (s.wire === "combo") {
+            const ser = s.index.series.find((x) => x.id === d.series);
+            const paths = marks.filter((p) => p.k === "path" && p.series === d.series && p.stroke && p.fill === null);
+            const onPath = (p) => {
+              for (let i = 0; i < p.d.length;) {
+                const n = R.prim.ARITY[p.d[i]];
+                if (n >= 2 && near(p.d[i + n - 1], d.cx) && near(p.d[i + n], d.cy)) return true;
+                i += n + 1;
+              }
+              return false;
+            };
+            if (!ser || !ser.at.some((x) => near(x, d.cx)) || (paths.length && !paths.some(onPath))) bad("combo dot is not on its indexed point and path");
+            return;
+          }
           const line = marks.find((p) => p.k === "path" && p.series === d.series && p.stroke && p.fill === null);
           const last = line ? lastPoint(line) : null;
           if (!last || !near(last[0], d.cx) || !near(last[1], d.cy)) bad("the end dot of " + d.series + " is not on its line's last point");
@@ -1011,6 +1079,43 @@ private object LookReferenceChecks {
               const cat = ser.tip[j][0];
               const sum = rows.filter((r) => String(r.c) === String(cat)).reduce((acc, r) => acc + r.v, 0);
               if (!close(sum, l)) bad("the label '" + p.text + "' over " + cat + " is not the stack's total " + sum);
+            }
+          });
+        }
+        // --- histogram: independently bin rows, then derive lengths from the drawn value-axis tick spacing.
+        if (s.wire === "histogram" && s.state === "rendered") {
+          const enc = s.document.config.encoding, cols = s.columns, gap = t.n("--chart-gap");
+          const rows = cols[enc.x.field].map((v, i) => ({ v: v, c: enc.color ? cols[enc.color.field][i] : null }))
+            .filter(r => r.v !== null && Number.isFinite(Number(r.v)) && (!enc.color || r.c !== null));
+          let k = 1, power = 1;
+          while (power < rows.length) { power *= 2; k++; }
+          const edges = R.scales.nice(Math.min(...rows.map(r => Number(r.v))), Math.max(...rows.map(r => Number(r.v))), s.document.config.mark.bins || Math.min(50, Math.max(5, k))).ticks;
+          const shown = rows.filter(r => !enc.color || !s.hidden.includes(R.data.keyOf(r.c)));
+          const ticks = prims.filter(p => p.k === "text" && p.role === "tick" && p.anchor === "end" && parseShort(p.text));
+          const scale = Math.abs((ticks[1].y - ticks[0].y) / (parseShort(ticks[1].text).v - parseShort(ticks[0].text).v)) * (enc.y.aggregate === "share" ? 100 : 1);
+          const bins = new Map();
+          marks.filter(p => p.k === "rect" || p.k === "path").forEach(p => {
+            if (!bins.has(p.datum)) bins.set(p.datum, []);
+            bins.get(p.datum).push({ p: p, b: boxOf(p) }); counts.histogramSegments++;
+          });
+          const groups = [...bins.entries()].sort((a, b) => a[0] - b[0]);
+          groups.forEach(([bin, parts], groupIndex) => {
+            parts.sort((a, b) => s.index.series.findIndex(x => x.id === a.p.series) - s.index.series.findIndex(x => x.id === b.p.series));
+            parts.forEach((part, i) => {
+              const count = shown.filter(r => (!enc.color || R.data.keyOf(r.c) === part.p.series) && Number(r.v) >= edges[bin] && (Number(r.v) < edges[bin + 1] || bin === edges.length - 2 && Number(r.v) === edges[bin + 1])).length;
+              const length = count * scale / (enc.y.aggregate === "share" ? shown.length : 1);
+              const shift = i === 0 ? 0 : Math.min(gap, length);
+              if (Math.abs(part.b.h - (length - shift)) > EPS) bad("histogram bin " + bin + ": painted length differs from rows and axis");
+              if (i === parts.length - 1 && part.b.h >= 0.05 && !arcs(part.p)) bad("histogram bin " + bin + ": outer segment not rounded");
+              if (i < parts.length - 1 && arcs(part.p)) bad("histogram bin " + bin + ": inner segment rounded");
+              if (i > 0 && Math.abs(parts[i - 1].b.y - part.b.y - part.b.h - shift) > EPS) bad("histogram bin " + bin + ": stack gap differs from capped shift");
+              const plot = s.index.plot;
+              if (part.b.x < plot.x - EPS || part.b.x + part.b.w > plot.x + plot.w + EPS || part.b.y < plot.y - EPS || part.b.y + part.b.h > plot.y + plot.h + EPS) bad("histogram segment crosses plot");
+            });
+            if (groupIndex > 0) {
+              const prev = groups[groupIndex - 1][1][0].b, here = parts[0].b;
+              const step = s.index.plot.w / (edges.length - 1);
+              if (here.x - prev.x - prev.w < Math.min(gap, step / 2) - EPS) bad("histogram horizontal gap too small");
             }
           });
         }
@@ -1052,6 +1157,26 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(key);
         if (s.state !== "rendered") return null;
+        if (s.wire === "combo") {
+          const ser = s.index.series.find((x) => x.on && x.at.length > 0 && s.primitives.some((p) => p.k === "circle" && p.role === "mark" && p.series === x.id));
+          if (!ser) return null;
+          const dot = s.primitives.find((p) => p.k === "circle" && p.role === "mark" && p.series === ser.id);
+          const px = dot.cx;
+          const py = dot.cy;
+          // SAME in the interaction layer: bind the index to the circle the pointer actually probes.
+          const j = ser.at.findIndex((at) => Math.abs(at - dot.cx) < 0.005);
+          if (j < 0) return null;
+          const svg = svgOf(s);
+          // A fixed frame wider than its column scrolls inside its own tile: bring the target into that scroller's view first.
+          const scroller = svg.closest(".ref-scroll");
+          if (scroller) {
+            const r0 = svg.getBoundingClientRect();
+            const box = scroller.getBoundingClientRect();
+            scroller.scrollLeft += r0.left + (px * r0.width) / s.frame.w - (box.left + box.width / 2);
+          }
+          const r = svg.getBoundingClientRect();
+          return { x: r.left + (px * r.width) / s.frame.w, y: r.top + (py * r.height) / s.frame.h, series: ser.id, j: j };
+        }
         const ser = s.index.series.find((x) => x.on && x.at.length > 0);
         if (!ser) return null;
         let px;
@@ -1140,7 +1265,7 @@ private object LookReferenceChecks {
         if (heading !== null) {
           const cat = String(tip[0]);
           const enc = s.document.config.encoding;
-          const valueEnc = enc.y.type === "nominal" ? enc.x : enc.y;
+          const valueEnc = s.wire === "combo" ? enc.layers[0].y : enc.y.type === "nominal" ? enc.x : enc.y;
           const join = look("tipTotalJoin");
           if (s.wire === "bar" && valueEnc.stack === "normalize") {
             if (heading !== cat) bad("a normalized stack's card heads with '" + heading + "', not the category '" + cat + "' alone");
@@ -1169,7 +1294,7 @@ private object LookReferenceChecks {
         });
         const texts = Array.from(svg.querySelectorAll("text")).map((el) => el.textContent);
         const title = fig.querySelector(".dp-dashboard-card-title").textContent;
-        const literal = title === s.document.display_name && texts.some((x) => x.indexOf("<b>bold?") === 0);
+        const literal = title === s.document.display_name && texts.some((x) => s.wire === "sparkline" ? x.includes(" <b>bold?</b>") : x.indexOf("<b>bold?") === 0);
         return { scripts: fig.querySelectorAll("script").length, foreign: foreign, literal: literal, texts: texts.length };
         """.trimIndent()
 

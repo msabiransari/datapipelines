@@ -1,0 +1,142 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "twelve temporal axes, written as months",
+  "document": {
+    "display_name": "months",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "DATE",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "temporal",
+          "sort": null,
+          "format": "month"
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "2024-01-01",
+      "2024-02-01",
+      "2024-03-01",
+      "2024-04-01",
+      "2024-05-01",
+      "2024-06-01",
+      "2024-07-01",
+      "2024-08-01",
+      "2024-09-01",
+      "2024-10-01",
+      "2024-11-01",
+      "2024-12-01",
+      "2024-01-01",
+      "2024-02-01",
+      "2024-03-01",
+      "2024-04-01",
+      "2024-05-01",
+      "2024-06-01",
+      "2024-07-01",
+      "2024-08-01",
+      "2024-09-01",
+      "2024-10-01",
+      "2024-11-01",
+      "2024-12-01"
+    ],
+    "s": [
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2",
+      "S2"
+    ],
+    "v": [
+      3,
+      5,
+      2,
+      4,
+      1,
+      6,
+      8,
+      7,
+      9,
+      4,
+      3,
+      5,
+      4,
+      1,
+      5,
+      2,
+      6,
+      3,
+      2,
+      5,
+      4,
+      7,
+      1,
+      2
+    ]
+  },
+  "types": {
+    "a": "DATE",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

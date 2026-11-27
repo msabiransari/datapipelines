@@ -29,9 +29,13 @@ types/line.js
 types/area.js
 types/scatter.js
 types/pie.js
+types/combo.js
 types/heatmap.js
+types/histogram.js
 types/box.js
 types/waterfall.js
 types/funnel.js
 types/gauge.js
+types/sparkline.js
+types/radar.js
 types/treemap.js

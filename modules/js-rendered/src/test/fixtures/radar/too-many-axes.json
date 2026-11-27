@@ -1,0 +1,108 @@
+{
+  "source": [
+    "design record \u00a74.5 radar; brief #1077 D11"
+  ],
+  "note": "thirteen axes refuse the chart",
+  "document": {
+    "display_name": "too-many-axes",
+    "renderer": {
+      "kind": "chart",
+      "version": "1"
+    },
+    "inputs": {
+      "result": {
+        "columns": [
+          {
+            "name": "a",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "s",
+            "type": "STRING",
+            "nullable": false
+          },
+          {
+            "name": "v",
+            "type": "INTEGER",
+            "nullable": true
+          }
+        ]
+      }
+    },
+    "config": {
+      "mark": {
+        "type": "radar"
+      },
+      "encoding": {
+        "theta": {
+          "field": "a",
+          "type": "nominal",
+          "sort": null
+        },
+        "r": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "sum"
+        },
+        "color": {
+          "field": "s",
+          "type": "nominal",
+          "sort": null
+        }
+      }
+    }
+  },
+  "columns": {
+    "a": [
+      "Speed",
+      "Cost",
+      "Freshness",
+      "Coverage",
+      "Quality",
+      "Uptime",
+      "Safety",
+      "Scale",
+      "Support",
+      "Docs",
+      "Price",
+      "Reach",
+      "Extra"
+    ],
+    "s": [
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1",
+      "S1"
+    ],
+    "v": [
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  "types": {
+    "a": "STRING",
+    "s": "STRING",
+    "v": "INTEGER"
+  }
+}

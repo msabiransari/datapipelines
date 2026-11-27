@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://datapipelines.co/schemas/chart/1/radar.schema.json",
+  "$comment": "Lane #1077; record \u00a74.5 radar.",
+  "title": "datapipelines chart document, version 1, family radar",
+  "description": "Three to twelve category axes, one shared scale from zero and at most six series.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "skeleton.schema.json"
+    }
+  ],
+  "properties": {
+    "config": {
+      "$ref": "#/$defs/config"
+    }
+  },
+  "$defs": {
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mark",
+        "encoding"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "skeleton.schema.json#/$defs/title"
+        },
+        "mark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "radar"
+            },
+            "fill": {
+              "type": "boolean"
+            }
+          }
+        },
+        "encoding": {
+          "$ref": "#/$defs/encoding"
+        }
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "theta",
+        "r"
+      ],
+      "properties": {
+        "theta": {
+          "$ref": "#/$defs/theta"
+        },
+        "r": {
+          "$ref": "#/$defs/value"
+        },
+        "color": {
+          "$ref": "#/$defs/series"
+        }
+      }
+    },
+    "theta": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/band"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "title"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "sort": {
+          "$ref": "skeleton.schema.json#/$defs/orderSort"
+        }
+      }
+    },
+    "value": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/value"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "fields"
+            ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
+          },
+          {
+            "required": [
+              "scale"
+            ]
+          },
+          {
+            "required": [
+              "axis"
+            ]
+          },
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      }
+    },
+    "series": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "skeleton.schema.json#/$defs/series"
+        }
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "title"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "legend": {
+          "$ref": "skeleton.schema.json#/$defs/legend"
+        }
+      }
+    }
+  }
+}
