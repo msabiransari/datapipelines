@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { engine, inputOf, chartFixtures, MODULE } from "./engine.mjs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-
+import { expectedRadarMarks } from "./geometry.mjs";
 const R = engine();
 test("radar registers band, value and series channels", () => {
   const entry = R.types().find((t) => t.name === "radar");
@@ -15,7 +15,6 @@ test("radar registers band, value and series channels", () => {
     { key: "color", required: false, node: { node: "shape", name: "series" } },
   ]);
 });
-
 const FX = Object.fromEntries(chartFixtures().filter(f => f.wire === "radar").map(f => [f.name, f.fixture]));
 const I = createRequire(import.meta.url)(join(MODULE, "../web/src/main/resources/static/js/datapipelines-chart-interactions.js"))._internal;
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -69,6 +68,8 @@ test("D4: aggregate cells, count without field, all-null axes retained and all s
     const f = variant("three-axes", (f, e) => { f.columns = { a: ["A", "A", "B", "C"], s: ["S1", "S1", "S1", "S1"], v: [3, 5, 2, 1] }; e.r.aggregate = aggregate; if (aggregate === "count") delete e.r.field; });
     assert.equal(draw(f).m.cells[0][0].num, want);
   }
+  const large = "1" + "0".repeat(400), exact = variant("one-series", f => { f.columns = { a: ["A", "A", "A", "B", "C"], v: [large, "-" + large, "1", "2", "3"] }; f.types.v = "BIGDECIMAL"; });
+  assert.equal(draw(exact).r.summary.marks, 3); assert.equal(expectedRadarMarks(exact), 3);
   for (const [sort, want] of [[null, ["A", "B", "C"]], ["ascending", ["A", "B", "C"]], ["descending", ["C", "B", "A"]], [["B", "A", "C"], ["B", "A", "C"]]]) {
     const f = variant("three-axes", (f, e) => { e.theta.sort = sort; f.columns.v[1] = null; f.columns.v[4] = null; });
     same(draw(f).m.categories.map(c => c.raw), want);

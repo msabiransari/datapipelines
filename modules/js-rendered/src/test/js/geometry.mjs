@@ -249,9 +249,9 @@ export function expectedRadarMarks(fx, hiddenIds = []) {
   }
   let count = 0;
   for (const [key, values] of groups) {
-    const xs = values.filter(x => x != null).map(Number);
+    const present = values.filter(x => x != null), xs = present.map(Number);
     if (e.r.aggregate !== "count" && !xs.length) continue;
-    const a = e.r.aggregate === "count" ? values.length : e.r.aggregate === "min" ? Math.min(...xs) : e.r.aggregate === "max" ? Math.max(...xs) : xs.reduce((a, b) => a + b, 0) / (e.r.aggregate === "mean" ? xs.length : 1);
+    const a = e.r.aggregate === "count" ? values.length : present.some(x => typeof x === "string") ? heatmapExact(present, e.r.aggregate) : e.r.aggregate === "min" ? Math.min(...xs) : e.r.aggregate === "max" ? Math.max(...xs) : xs.reduce((a, b) => a + b, 0) / (e.r.aggregate === "mean" ? xs.length : 1);
     if (!Number.isFinite(a)) continue;
     if (a < 0) return 0;
     if (!hiddenIds.includes(JSON.parse(key)[1])) count++;
