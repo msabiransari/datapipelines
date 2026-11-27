@@ -45,6 +45,7 @@ class ChartMarkPolicyTest {
                 "pie" to ChartMarkPolicy.AREA,
                 "combo" to ChartMarkPolicy.LINE,
                 "heatmap" to ChartMarkPolicy.BAR,
+                "histogram" to ChartMarkPolicy.AREA,
                 "box" to ChartMarkPolicy.POINT,
                 "waterfall" to ChartMarkPolicy.AREA,
                 "funnel" to ChartMarkPolicy.AREA,

@@ -180,6 +180,7 @@
     "combo.layers": { kind: "semantic", limit: 4, basis: "fixed", unit: "layers", note: "Record §4.5 combo: two to four layers; fixed, not measured." },
     "combo.rows": { kind: "row", limit: 10000, basis: "inherited", unit: "rows", note: "Brief 1069 D11; record §4.9: inherited from line.rows, each layer retains its own type cap; not measured for combo." },
     "pie.marks": { kind: "semantic", limit: 8, basis: "fixed", unit: "slices", note: "Record §4.5 pie: eight slices, not measured (R19); marks are series, so the series cap refuses first." },
+    "histogram.marks": { kind: "semantic", limit: 50, basis: "fixed", unit: "bins", note: "record §4.5 histogram and §4.9: 50 bins is a semantic limit, not a measured cap (R19)" },
     "heatmap.marks": { kind: "mark", limit: 1000, basis: "inherited", unit: "non-null cells", note: "record §4.9 heatmap row: min(2,500, 1,000) = 1,000 cells, inherited and not measured here (R19)" },
     "box.marks": { kind: "mark", limit: 50, basis: "inherited", unit: "boxes", note: "record §4.5 box cap and §4.9 box row: 50 boxes; inherited, not measured for box (R19)" },
     "box.outliers": { kind: "mark", limit: 1000, basis: "inherited", unit: "outside points drawn, over all boxes", note: "record §4.9 box row: 1,000 outlier points; inherited, not measured for box (R19)" },

@@ -51,6 +51,7 @@ class ChartSchemaValidatorTest {
             "valid/box-plain.json",
             "valid/pie-plain.json",
             "valid/heatmap-plain.json",
+            "valid/histogram-plain.json",
             "valid/funnel-plain.json",
             "valid/gauge-plain.json",
             "valid/treemap-plain.json",

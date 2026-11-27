@@ -12,6 +12,34 @@ const ctx = vm.createContext({ PRISTINE: engine() });
 vm.runInContext(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "geometry.js"), "utf8") + "\nthis.G = JsRenderedInvariants(PRISTINE);", ctx, { filename: "geometry.js" });
 const G = ctx.G;
 
+/** Histogram I3: count occupied series/bin cells from the rows, using a linear interval scan. */
+export function expectedHistogram(fixture, hiddenIds = []) {
+  const e = fixture.document.config.encoding, x = fixture.columns[e.x.field];
+  const c = e.color ? fixture.columns[e.color.field] : null, R = engine(), rows = [];
+  for (let i = 0; i < x.length; i++) {
+    if ((c && (c[i] === null || c[i] === undefined)) || x[i] === null || x[i] === undefined) continue;
+    const v = Number(x[i]);
+    if (!Number.isFinite(v)) continue;
+    rows.push({ v, id: c ? R.data.keyOf(c[i]) : "measure" });
+  }
+  if (!rows.length) return 0;
+  let k = 1, p = 1;
+  while (p < rows.length) { p *= 2; k++; }
+  const asked = fixture.document.config.mark.bins ?? Math.min(50, Math.max(5, k));
+  const edges = R.scales.nice(Math.min(...rows.map(r => r.v)), Math.max(...rows.map(r => r.v)), asked).ticks;
+  const occupied = new Set();
+  for (const row of rows) {
+    if (hiddenIds.includes(row.id)) continue;
+    for (let b = 0; b < edges.length - 1; b++) {
+      if (row.v >= edges[b] && (row.v < edges[b + 1] || b === edges.length - 2 && row.v === edges[b + 1])) {
+        occupied.add(JSON.stringify([row.id, b]));
+        break;
+      }
+    }
+  }
+  return occupied.size;
+}
+
 /** Overlap below this many px is not a meeting (rounding to two decimals moves an edge by at most 0.005). */
 export const TOL = G.TOL;
 export const { width, drawn, textBox, meet, markBox, arcExtremes, texts } = G;

@@ -88,7 +88,17 @@ class ChartTypeTest {
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
         ChartType.WIRE_VALUES shouldBe
-            listOf("bar", "line", "area", "scatter", "pie", "combo", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+            listOf("bar", "line", "area", "scatter", "pie", "combo", "heatmap", "histogram", "box", "waterfall", "funnel", "gauge", "treemap")
+    }
+
+    @Test
+    fun `histogram has a position, a fieldless count and an optional series under the area policy`() {
+        val channels = ChartType.HISTOGRAM.channels
+        channels.map { it.key } shouldBe listOf("x", "y", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels.map { it.node } shouldBe
+            listOf(ChannelNode.Shape("position"), ChannelNode.Shape("count"), ChannelNode.Shape("series"))
+        ChartType.HISTOGRAM.policy shouldBe ChartMarkPolicy.AREA
     }
 
     @Test
