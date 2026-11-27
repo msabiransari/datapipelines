@@ -1,0 +1,93 @@
+{
+  "display_name": "c",
+  "renderer": {
+    "kind": "chart",
+    "version": "1"
+  },
+  "inputs": {
+    "result": {
+      "columns": [
+        {
+          "name": "m",
+          "type": "STRING",
+          "nullable": false
+        },
+        {
+          "name": "rev",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "rate",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "cost",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "a",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "b",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "c",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "d",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "e",
+          "type": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "region",
+          "type": "STRING",
+          "nullable": false
+        }
+      ]
+    }
+  },
+  "config": {
+    "mark": {
+      "type": "combo"
+    },
+    "encoding": {
+      "x": {
+        "field": "m",
+        "type": "nominal",
+        "sort": null
+      },
+      "layers": [
+        {
+          "mark": "pie",
+          "y": {
+            "field": "rev",
+            "type": "quantitative",
+            "aggregate": "sum"
+          }
+        },
+        {
+          "mark": "line",
+          "y": {
+            "field": "c",
+            "type": "quantitative",
+            "aggregate": "sum"
+          }
+        }
+      ]
+    }
+  }
+}
