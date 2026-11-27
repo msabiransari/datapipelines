@@ -88,7 +88,21 @@ class ChartTypeTest {
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
         ChartType.WIRE_VALUES shouldBe
-            listOf("bar", "line", "area", "scatter", "pie", "combo", "heatmap", "histogram", "box", "waterfall", "funnel", "gauge", "treemap")
+            listOf(
+                "bar",
+                "line",
+                "area",
+                "scatter",
+                "pie",
+                "combo",
+                "heatmap",
+                "histogram",
+                "box",
+                "waterfall",
+                "funnel",
+                "gauge",
+                "treemap",
+            )
     }
 
     @Test

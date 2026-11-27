@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Look reference — bar, line, area, scatter, pie, combo, heatmap, box, waterfall, funnel, gauge and treemap at look v1</title>
+  <title>Look reference — bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge and treemap at look v1</title>
   <link rel="stylesheet" href="vendor/design-system/tokens.css">
   <link rel="stylesheet" id="theme-link" href="vendor/design-system/themes/light.css">
   <link rel="stylesheet" href="vendor/design-system/base.css">
@@ -15,7 +15,7 @@
 </head>
 <body class="ref-page" data-page="reference">
   <header class="ref-header">
-    <h1>Look reference: bar, line, area, scatter, pie, combo, heatmap, box, waterfall, funnel, gauge and treemap at look v1</h1>
+    <h1>Look reference: bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge and treemap at look v1</h1>
     <p class="ref-lede">The js-rendered engine draws every tile below directly (<code>JsRendered.render</code>, then <code>JsRendered.writeDom</code>), with the product's interaction layer over it and the product's own stylesheets around it. Each tile's expectation is written by hand from the look contract and the design record; the browser test checks every tile against it. Spec 1 ends when the owner confirms this page.</p>
     <p class="ref-line">The owner's pick: <code>look v1 | start=quiet | colours=jewel | grid=both | axis=frame | corners=round | bars=full | gaps=gap | line=smooth | weight=2 | points=end | area=fade | legend=direct | labels=on | donut=ring | density=roomy | tooltip=card</code></p>
     <div class="ref-actions">
@@ -112,6 +112,10 @@
       <h2 id="heatmap-title">Heatmap: one shade per pair of categories</h2>
       <p class="ref-text">Rows run top to bottom; missing cells stay empty. Each occupied slot opens its value card and colour ring. Arrow keys walk the grid; values are labelled where they fit.</p>
       <div id="tiles-heatmap" class="ref-grid"></div>
+    </section>
+    <section id="histogram" class="ref-section" aria-labelledby="histogram-title">
+      <h2 id="histogram-title">Histogram</h2>
+      <div id="tiles-histogram" class="ref-grid"></div>
     </section>
     <section id="box" class="ref-section" aria-labelledby="box-title">
       <h2 id="box-title">Box</h2>

@@ -15,7 +15,7 @@ const G = ctx.G;
 /** Histogram I3: count occupied series/bin cells from the rows, using a linear interval scan. */
 export function expectedHistogram(fixture, hiddenIds = []) {
   const e = fixture.document.config.encoding, x = fixture.columns[e.x.field];
-  const c = e.color ? fixture.columns[e.color.field] : null, R = engine(), rows = [];
+  const c = e.color ? fixture.columns[e.color.field] : null, R = ctx.PRISTINE, rows = [];
   for (let i = 0; i < x.length; i++) {
     if ((c && (c[i] === null || c[i] === undefined)) || x[i] === null || x[i] === undefined) continue;
     const v = Number(x[i]);

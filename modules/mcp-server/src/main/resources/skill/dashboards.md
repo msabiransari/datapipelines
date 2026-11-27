@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -227,6 +227,16 @@ The category heads the card; visible layer rows retain layer order; pointing ins
 }}
 ```
 
+**Histogram?** Choose one numeric column's distribution; add a series to compare groups, or `share` for unequal groups. Aggregate nothing in the query: the engine bins the rows. `bins` is a target (5–50, default Sturges); nice edges may give fewer bins. The last bin includes its upper edge. Options: dashboards §2.1.2.
+
+```json
+"config": {"mark": {"type": "histogram", "bins": 10}, "encoding": {
+  "x": {"field": "duration", "type": "quantitative", "unit": "ms"},
+  "y": {"aggregate": "count"},
+  "color": {"field": "site", "type": "nominal", "sort": null}
+}}
+```
+
 **Box?** Use `box` for a number's spread in each category; use a bar for a total or one number per category.
 The median, interpolated quartiles and whiskers are fixed; `outliers` is `points` (default) or `none`.
 At most 50 boxes, 200 outside points per box and 1,000 drawn overall; the card counts every outside point.
@@ -270,8 +280,8 @@ Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
   scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail. On an axis the unit also follows the title
   (`Distance (km)`; `title: null` writes neither title nor unit), never a tick.
-- **`encoding.tooltip` ( a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
-- **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
+- **`encoding.tooltip` (bar, line, area, scatter and combo only):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
+- **`scale` (on a value or a number axis; not on a pie or a histogram's x):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 

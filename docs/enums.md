@@ -1440,6 +1440,7 @@ The `floor` of a cleanup part's `parts_json` entry and of `lake.cleanup.stopped`
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v1.NEXT | 1071 (#1071) | **§63:** Add histogram with a quantitative position, fieldless count and optional series. |
 | 2026-11-27 | v1.75 | 1069 (#1069) | **§63:** Combo: two to four bar, line, area or point layers on a category axis. |
 | 2026-11-26 | v1.74 | 1078 (#1078) | **§63:** Add treemap nested leaf rectangles, labels and a key-only legend. |
 | 2026-11-26 | v1.73 | 1075 (#1075) | **§63:** Add gauge: one aggregate on a required domain, optional target and tone bands. |

@@ -53,7 +53,7 @@
   },
   "encoding": {
    "x": {
-    "field": "units",
+    "field": "day",
     "type": "temporal"
    },
    "y": {

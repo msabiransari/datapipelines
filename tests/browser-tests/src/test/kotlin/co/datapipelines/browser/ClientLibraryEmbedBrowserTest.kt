@@ -518,6 +518,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(HEATMAP_CONFIG))
                     body.toString()
                 },
+                "histogram" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Histogram")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(HISTOGRAM_CONFIG))
+                    body.toString()
+                },
                 "box" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Box")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -573,6 +579,10 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
             """{"mark":{"type":"heatmap"},"encoding":{"x":{"field":"x","type":"nominal","sort":null},""" +
                 """"y":{"field":"y","type":"nominal","sort":null},""" +
                 """"color":{"field":"y","type":"quantitative","aggregate":"sum","scale":"sequential"}}}"""
+
+        /** Histogram over the board’s INTEGER x column (#1071). */
+        const val HISTOGRAM_CONFIG =
+            """{"mark":{"type":"histogram"},"encoding":{"x":{"field":"x","type":"quantitative"},"y":{"aggregate":"count"}}}"""
 
         /** Box over the same INTEGER columns, one distribution per x category (brief 1072 A.7). */
         const val BOX_CONFIG =
