@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline` and `treemap` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline`, `radar` and `treemap` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline and treemap families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline, radar and treemap families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -316,6 +316,28 @@ each as `{field: [values]}` (§2.1.2).
   units once per value; a reduced card keeps Now. The pointer finds it over the arc's picture box and the
   full drawn end labels, bounded by the plot. One semantic mark, not a measured cap.
 
+  **Radar (#1077).** Compare series on 3 to 12 category axes, clockwise from 12 o'clock, using one
+  radial scale from zero: `{title?, mark: {type: "radar", fill?: boolean}, encoding: {theta, r, color?}}`.
+  `theta` is a band (`field`, nominal/ordinal/temporal `type`, required `sort`: null, ascending,
+  descending or explicit list; optional temporal `format`). `r` is one value (`aggregate`, `field`
+  except with count, optional `format` and `unit`). `color` is an optional series with required `sort`
+  and optional `legend` (top, bottom, left, right, or null). No channel title, axis, wide `fields`,
+  stack, authored scale or tooltip. Use a bar for more axes or series, or negative values.
+  Rows aggregate per (axis, series). Null axes or series are skipped with one `chart.rule.null-category`;
+  null cells have no point, and non-finite aggregates are omitted with one `chart.rule.non-finite`.
+  An all-null axis remains a spoke. Missing points join their neighbours. Three or more points have
+  a polygon fill at 14% and an outline; two have a line; one has its dot. `fill: false` removes fills.
+  The model refuses, in order: a negative aggregate (including hidden series), `chart.rule.negative-part`
+  — “This chart cannot show negative values.”; over six series, `chart.too_many_series`
+  — “Too many series to draw (N, the limit is 6). Group the smaller ones in the query.”; fewer than
+  three or over twelve axes, `chart.rule.radar-axes` — “A radar needs 3 to 12 axes, and this one has N.”
+  No axes or no non-null cells is no data. The semantic cap is 72 points (not measured), unreachable
+  beyond those earlier refusals; the shared 20,000-row cap applies before aggregation.
+  A switch legend appears for multiple series. Hidden series keep their colours and entries; the rings
+  refit to visible values. At minimal, all series draw without a legend. The card heads with the axis
+  and lists visible series with a value there, in data order; the hovered row is bold and kept when
+  space is short. There are no value labels.
+
   **Treemap (#1078).** A whole broken into nested parts by size: `{title?, mark: {type: "treemap",
   labels?: "none" | "names" | "names_values"}, encoding: {path, size, color?}}`. `path` is one to three
   `{field}` levels, each a non-null column; numeric levels use their plain string as the name. `size` is
@@ -371,11 +393,11 @@ each as `{field: [values]}` (§2.1.2).
     With `aggregate: "count"` neither is written. Scatter's and a box's `y` are positions: one `field`, no `fields`, no
     `aggregate`.
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
-    quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
+    quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, on a radar's `r`, and on a tooltip detail.
     On a sparkline it follows only values and the card's number x. On a value axis or a number axis it also follows that axis's title, never a tick.
   - `encoding.tooltip` (bar, line, area, scatter and combo only): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
-    show (not on a funnel or gauge; not on a treemap: its card is the type's own).
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie, a histogram's x or a sparkline's x) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
+    show (not on a funnel or gauge; not on a treemap or radar: their cards are the type's own).
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie, a histogram's x, a sparkline's x or a radar's r) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
     on a line or a sparkline's value, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
@@ -1564,6 +1586,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v0.97 | 1077 (#1077) | Radar: category spokes, shared radial scale, polygons and selected-point cards. |
 | 2026-11-27 | v0.96 | 1076 (#1076) | Sparkline: one measure, bare frame, last-value fit and selected-point card. |
 | 2026-11-27 | v0.95 | 1071 (#1071) | **§2.1.2:** Histogram distributions, nice target bins, whole count ticks, share, cards and keyboard navigation. |
 | 2026-11-27 | v0.94 | 1069 (#1069) | **§2.1.2:** Combo layers, shared axis scales, per-layer caps, card and bar hover. |

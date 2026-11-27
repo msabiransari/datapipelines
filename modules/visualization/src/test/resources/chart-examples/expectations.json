@@ -2694,12 +2694,14 @@
   "invalid/radar-text-measure.json": {
    "valid": false,
    "layer": "save",
-   "code": "chart.measure.not_numeric"
+   "code": "chart.measure.not_numeric",
+   "pointer": "/config/encoding/r/field"
   },
   "invalid/radar-nullable-color.json": {
    "valid": false,
    "layer": "save",
-   "code": "chart.color.nullable"
+   "code": "chart.color.nullable",
+   "pointer": "/config/encoding/color/field"
   }
  }
 }

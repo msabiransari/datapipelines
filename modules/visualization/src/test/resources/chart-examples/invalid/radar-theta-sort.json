@@ -33,10 +33,7 @@
       "theta": {
         "field": "a",
         "type": "nominal",
-        "sort": {
-          "by": "value",
-          "order": "ascending"
-        }
+        "sort": "-y"
       },
       "r": {
         "field": "v",

@@ -102,6 +102,7 @@ class ChartTypeTest {
                 "funnel",
                 "gauge",
                 "sparkline",
+                "radar",
                 "treemap",
             )
     }
@@ -110,6 +111,16 @@ class ChartTypeTest {
     fun `sparkline has only the line x and a value under the line policy`() {
         ChartType.SPARKLINE.channels shouldBe ChartType.LINE.channels.filter { it.key == "x" || it.key == "y" }
         ChartType.SPARKLINE.policy shouldBe ChartMarkPolicy.LINE
+    }
+
+    @Test
+    fun `radar has band and value with optional series under the area policy`() {
+        val channels = ChartType.RADAR.channels
+        channels.map { it.key } shouldBe listOf("theta", "r", "color")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels.map { it.node } shouldBe
+            listOf(ChannelNode.Shape("band"), ChannelNode.Shape("value"), ChannelNode.Shape("series"))
+        ChartType.RADAR.policy shouldBe ChartMarkPolicy.AREA
     }
 
     @Test

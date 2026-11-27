@@ -154,6 +154,7 @@ class LookReferencePageBrowserTest {
                     "funnel",
                     "gauge",
                     "sparkline",
+                    "radar",
                     "treemap",
                 )) {
                     @Suppress("UNCHECKED_CAST")
@@ -266,6 +267,7 @@ class LookReferencePageBrowserTest {
                 counts.getValue("$theme/cells") shouldBeGreaterThanOrEqual MIN_CELLS
                 counts.getValue("$theme/pie") shouldBeGreaterThanOrEqual MIN_PIE_TILES
                 counts.getValue("$theme/slices") shouldBeGreaterThanOrEqual MIN_SLICES
+                counts.getValue("$theme/radar") shouldBeGreaterThanOrEqual MIN_RADAR_TILES
                 (counts["$theme/points"] ?: 0) shouldBeGreaterThanOrEqual MIN_POINTS
                 (counts["$theme/texts"] ?: 0) shouldBeGreaterThanOrEqual MIN_TEXTS
                 (counts["$theme/values"] ?: 0) shouldBeGreaterThanOrEqual MIN_VALUES
@@ -565,7 +567,8 @@ class LookReferencePageBrowserTest {
 
         /** Brief 1062: scatter's seven tiles, and the 53 points of its five tiles that draw points (12 + 8 + 12 + 12 + 9). */
         private const val MIN_SCATTER_TILES = 7
-        private const val MIN_POINTS = 53
+        private const val MIN_RADAR_TILES = 8
+        private const val MIN_POINTS = 187
 
         /** Brief 1071: seven tiles; segments counted from each rendered histogram's mark primitives, per theme. */
         private const val MIN_HISTOGRAM_TILES = 7
@@ -842,6 +845,7 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        const radar = s.wire === "radar";
         // Sparkline end dot: look contract §4.7, radius --chart-point minus 0.5.
         const sparkline = s.wire === "sparkline";
         const treemap = s.wire === "treemap";
@@ -856,7 +860,7 @@ private object LookReferenceChecks {
         const heatmap = s.wire === "heatmap";
         const pie = s.wire === "pie";
         const sizeEnc = scatter ? s.document.config.encoding.size || null : null;
-        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []).concat(isBox ? [R.tables.look("boxOutsideRing") * t.n("--chart-gap")] : []);
+        const widths = [t.n("--chart-line"), t.n("--chart-stroke"), t.n("--chart-gap")].concat(scatter ? [0.75 * t.n("--chart-gap")] : []).concat(radar ? [R.tables.look("radarRingShare") * t.n("--chart-gap")] : []).concat(isBox ? [R.tables.look("boxOutsideRing") * t.n("--chart-gap")] : []);
         const radius = t.n("--chart-bar-radius");
         const has = (list, v) => list.some((x) => Math.abs(x - v) < 1e-6);
         svg.querySelectorAll("*").forEach((el) => {
@@ -876,9 +880,9 @@ private object LookReferenceChecks {
               case "font-weight": ok = has(weights, Number(v)); break;
               case "font-family": ok = v.replace(/["']/g, "").split(",")[0].trim() === t.font; break;
               case "stroke-width": ok = has(widths, Number(v)) || (gauge && has([R.tables.look("gaugeRingWidth"), R.tables.look("gaugeTargetBack"), gaugeWidth], Number(v))); break;
-              case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
+              case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (radar && has([R.tables.look("radarFillShare")], Number(v))) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
               case "stop-opacity": ok = has([t.n("--chart-area-top"), t.n("--chart-area-bottom")], Number(v)); break;
-              case "r": ok = has([t.n("--chart-point")], Number(v)) || (sparkline && has([t.n("--chart-point") - 0.5], Number(v))) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
+              case "r": ok = has([t.n("--chart-point")], Number(v)) || (radar && has([t.n("--chart-point") - R.tables.look("radarDotLess")], Number(v))) || (sparkline && has([t.n("--chart-point") - 0.5], Number(v))) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
               case "rx":
               case "ry": {
                 // Heatmap corners use the cell token, capped by half either side.
@@ -926,8 +930,8 @@ private object LookReferenceChecks {
         const marks = of("mark").filter((p) => p.k !== "group");
         const legend = of("legend").filter((p) => p.k !== "group");
         const labels = of("guide", "text");
-        const dots = scatter || isBox ? [] : of("mark", "circle");
-        const points = scatter || isBox ? of("mark", "circle") : [];
+        const dots = scatter || radar || isBox ? [] : of("mark", "circle");
+        const points = scatter || radar || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
         if (sparkline) counts.sparklineDots += dots.length;
         if (s.wire === "combo") counts.comboDots += dots.length;
@@ -993,7 +997,7 @@ private object LookReferenceChecks {
         if (treemap && e.cells !== undefined && cells.length !== e.cells) bad(cells.length + " treemap cells, the expect says " + e.cells);
         if (pie && e.slices !== undefined && slices.length !== e.slices) bad(slices.length + " slices, the expect says " + e.slices);
         if (gauge && e.arcs !== undefined && gaugeArcs.length !== e.arcs) bad("gauge arc count differs from expect");
-        if ((scatter || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
+        if ((scatter || radar || isBox) && e.points !== undefined && points.length !== e.points) bad(points.length + " points, the expect says " + e.points);
         if (funnel) {
           if (stages.length !== s.summary.marks) bad("funnel count differs from summary.marks");
           if (of("mark", "circle").length) bad("funnel draws a circle");
@@ -1011,6 +1015,14 @@ private object LookReferenceChecks {
             if (p.x < plot.x - TOL || p.y < plot.y - TOL || p.x + p.w > plot.x + plot.w + TOL || p.y + p.h > plot.y + plot.h + TOL) bad("heatmap cell crosses the plot edge");
           });
         }
+        if (radar) points.forEach((p) => {
+          const line = of("mark", "path").find(q => q.series === p.series && q.stroke);
+          let onVertex = false;
+          if (line) for (let i = 0; i + 2 < line.d.length; i += 3) {
+            if (Math.abs(line.d[i+1] - p.cx) < 0.02 && Math.abs(line.d[i+2] - p.cy) < 0.02) onVertex = true;
+          }
+          if (!onVertex) bad("radar point is not on its series polygon vertex");
+        });
         points.forEach((p) => {
           if (p.cx - p.r < plot.x - TOL || p.cx + p.r > plot.x + plot.w + TOL || p.cy - p.r < plot.y - TOL || p.cy + p.r > plot.y + plot.h + TOL) bad("the point " + p.series + "/" + p.datum + " crosses the plot's edge");
         });

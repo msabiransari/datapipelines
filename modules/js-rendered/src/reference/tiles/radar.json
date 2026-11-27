@@ -1,0 +1,1062 @@
+[
+ {
+  "document": {
+   "display_name": "two-series",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    },
+    "title": {
+     "text": "Scorecard",
+     "subtitle": "Six measures, two quarters"
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime"
+   ],
+   "s": [
+    "This quarter",
+    "This quarter",
+    "This quarter",
+    "This quarter",
+    "This quarter",
+    "This quarter",
+    "Last quarter",
+    "Last quarter",
+    "Last quarter",
+    "Last quarter",
+    "Last quarter",
+    "Last quarter"
+   ],
+   "v": [
+    82,
+    64,
+    91,
+    73,
+    88,
+    96,
+    70,
+    71,
+    78,
+    60,
+    81,
+    93
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "two-series",
+  "title": "Two quarters across six measures",
+  "frame": {
+   "w": 480,
+   "h": 360
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 12,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "one-series",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar",
+     "fill": false
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime"
+   ],
+   "v": [
+    82,
+    64,
+    91,
+    73,
+    88,
+    96
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "no-fill",
+  "title": "One series, outline only",
+  "frame": {
+   "w": 480,
+   "h": 360
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 6,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "six-series-twelve-axes",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach",
+    "Speed",
+    "Cost",
+    "Freshness",
+    "Coverage",
+    "Quality",
+    "Uptime",
+    "Safety",
+    "Scale",
+    "Support",
+    "Docs",
+    "Price",
+    "Reach"
+   ],
+   "s": [
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S3",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S4",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S5",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6",
+    "S6"
+   ],
+   "v": [
+    20,
+    31,
+    42,
+    53,
+    64,
+    75,
+    86,
+    27,
+    38,
+    49,
+    60,
+    71,
+    37,
+    48,
+    59,
+    70,
+    81,
+    22,
+    33,
+    44,
+    55,
+    66,
+    77,
+    88,
+    54,
+    65,
+    76,
+    87,
+    28,
+    39,
+    50,
+    61,
+    72,
+    83,
+    24,
+    35,
+    71,
+    82,
+    23,
+    34,
+    45,
+    56,
+    67,
+    78,
+    89,
+    30,
+    41,
+    52,
+    88,
+    29,
+    40,
+    51,
+    62,
+    73,
+    84,
+    25,
+    36,
+    47,
+    58,
+    69,
+    35,
+    46,
+    57,
+    68,
+    79,
+    20,
+    31,
+    42,
+    53,
+    64,
+    75,
+    86
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "six-series",
+  "title": "Six series on twelve axes",
+  "frame": {
+   "w": 960,
+   "h": 540
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 72,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "months",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "DATE",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "temporal",
+      "sort": null,
+      "format": "month"
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01",
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "s": [
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2",
+    "S2"
+   ],
+   "v": [
+    3,
+    5,
+    2,
+    4,
+    1,
+    6,
+    8,
+    7,
+    9,
+    4,
+    3,
+    5,
+    4,
+    1,
+    5,
+    2,
+    6,
+    3,
+    2,
+    5,
+    4,
+    7,
+    1,
+    2
+   ]
+  },
+  "types": {
+   "a": "DATE",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "months",
+  "title": "Twelve temporal axes",
+  "frame": {
+   "w": 480,
+   "h": 360
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 24,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "unit-format",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "DOUBLE",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "USD",
+      "format": "integer"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "A",
+    "B",
+    "C",
+    "D"
+   ],
+   "s": [
+    "S1",
+    "S1",
+    "S1",
+    "S1",
+    "S2",
+    "S2",
+    "S2",
+    "S2"
+   ],
+   "v": [
+    1234.5,
+    99.4,
+    5.5,
+    880.2,
+    20.1,
+    700,
+    40.9,
+    3
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "DOUBLE"
+  },
+  "id": "unit",
+  "title": "Values with a unit",
+  "frame": {
+   "w": 480,
+   "h": 360
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 8,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "empty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [],
+   "s": [],
+   "v": []
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "empty",
+  "title": "No data",
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 0,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "hostile",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    },
+    "title": {
+     "text": "<img src=x onerror=alert(1)>",
+     "subtitle": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "\" onmouseover=\"x",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "onload=alert(1)",
+    "\" onmouseover=\"x",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ],
+   "s": [
+    "</text><script>1</script>",
+    "</text><script>1</script>",
+    "</text><script>1</script>",
+    "</text><script>1</script>",
+    "</text><script>1</script>",
+    "</text><script>1</script>",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+   ],
+   "v": [
+    3,
+    5,
+    2,
+    4,
+    1,
+    6,
+    4,
+    1,
+    5,
+    2,
+    6,
+    3
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "hostile",
+  "title": "Names are plain text",
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "top",
+   "struck": [],
+   "code": null,
+   "dots": 0,
+   "points": 12,
+   "labels": "none"
+  }
+ },
+ {
+  "document": {
+   "display_name": "negative",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "a",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "s",
+       "type": "STRING",
+       "nullable": false
+      },
+      {
+       "name": "v",
+       "type": "INTEGER",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "radar"
+    },
+    "encoding": {
+     "theta": {
+      "field": "a",
+      "type": "nominal",
+      "sort": null
+     },
+     "r": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     },
+     "color": {
+      "field": "s",
+      "type": "nominal",
+      "sort": null
+     }
+    }
+   }
+  },
+  "columns": {
+   "a": [
+    "A",
+    "B",
+    "C",
+    "D"
+   ],
+   "s": [
+    "S1",
+    "S1",
+    "S1",
+    "S1"
+   ],
+   "v": [
+    5,
+    -1,
+    3,
+    4
+   ]
+  },
+  "types": {
+   "a": "STRING",
+   "s": "STRING",
+   "v": "INTEGER"
+  },
+  "id": "refused",
+  "title": "A negative aggregate is refused",
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "refused",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "code": "chart.rule.negative-part",
+   "dots": 0,
+   "points": 0,
+   "labels": "none"
+  }
+ }
+]
