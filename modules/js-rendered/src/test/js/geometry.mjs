@@ -99,6 +99,11 @@ export function expectedBarMarks(fx, hiddenIds) {
   return n;
 }
 
+/** Sparkline uses the line aggregation count, including its log exclusion, without mutating the fixture. */
+export function expectedSparklineMarks(fx, hiddenIds) {
+  return expectedLineMarks({ ...fx, document: { ...fx.document, config: { ...fx.document.config, mark: { type: "line" } } } }, hiddenIds);
+}
+
 /**
  * I3's expected count for a line or area fixture (brief 989 D8: mark_count counts the data's non-null points), computed
  * by this test from the delivered columns, never by the engine: rows sharing x and series are one point, aggregated; a

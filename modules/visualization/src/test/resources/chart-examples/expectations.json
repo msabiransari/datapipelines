@@ -2474,6 +2474,117 @@
    "valid": false,
    "layer": "save",
    "code": "chart.field.unknown"
+  },
+  "valid/sparkline-plain.json": {
+   "valid": true
+  },
+  "valid/sparkline-last-dot.json": {
+   "valid": true
+  },
+  "valid/sparkline-fill-false.json": {
+   "valid": true
+  },
+  "valid/sparkline-nominal.json": {
+   "valid": true
+  },
+  "valid/sparkline-unit-domain.json": {
+   "valid": true
+  },
+  "valid/sparkline-log.json": {
+   "valid": true
+  },
+  "invalid/sparkline-last-label.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "enum",
+   "path": "/config/mark/last"
+  },
+  "invalid/sparkline-fill-text.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "type",
+   "path": "/config/mark/fill"
+  },
+  "invalid/sparkline-curve.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/mark"
+  },
+  "invalid/sparkline-color.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-tooltip.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "additionalProperties",
+   "path": "/config"
+  },
+  "invalid/sparkline-y-fields.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-y-stack.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-y-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/y"
+  },
+  "invalid/sparkline-x-title.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x"
+  },
+  "invalid/sparkline-x-scale.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "not",
+   "path": "/config/encoding/x"
+  },
+  "invalid/sparkline-missing-x.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-missing-y.json": {
+   "valid": false,
+   "layer": "schema",
+   "keyword": "required",
+   "path": "/config/encoding"
+  },
+  "invalid/sparkline-y-text.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.measure.not_numeric"
+  },
+  "invalid/sparkline-log-zero.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.log_unsupported"
+  },
+  "invalid/sparkline-domain-reversed.json": {
+   "valid": false,
+   "layer": "save",
+   "code": "chart.scale.domain_invalid"
   }
  }
 }

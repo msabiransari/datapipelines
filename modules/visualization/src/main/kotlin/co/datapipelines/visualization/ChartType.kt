@@ -75,6 +75,9 @@ enum class ChartType(
     /** One aggregate on an authored range, drawn as an open arc (§4.5; #1075). */
     GAUGE("gauge", listOf(ChartChannel("value", required = true, node = ChannelNode.Shape("value"))), ChartMarkPolicy.LINE),
 
+    /** One measure over an ordered axis, without axes, title or legend (§4.5; #1076). */
+    SPARKLINE("sparkline", ChartChannelNodes.sparkline, ChartMarkPolicy.LINE),
+
     /** Nested leaf rectangles, with a key-only legend (§4.5 treemap; #1078). */
     TREEMAP("treemap", ChartChannelNodes.treemap, ChartMarkPolicy.AREA),
     ;
@@ -185,6 +188,8 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val sparkline: List<ChartChannel> get() = lineFamily.filter { it.key == "x" || it.key == "y" }
+
     val histogram: List<ChartChannel> =
         listOf(
             ChartChannel("x", required = true, node = ChannelNode.Shape("position")),

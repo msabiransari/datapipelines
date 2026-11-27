@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline` or `treemap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -261,6 +261,15 @@ when the arc clamps to an end. Bands and Target have keys, never switches. Optio
 ```
 
 
+**Sparkline?** Choose `sparkline` for one measure over ordered x in a table row or card only a few
+lines high. Choose a line chart when axes help. No axes, title or legend. The end dot remains at every
+size; the last value follows it where it fits. The value's unit follows the value; a number x's unit follows x only in
+its card heading. Options: `docs/dashboards.md`.
+
+```json
+{"mark":{"type":"sparkline"},"encoding":{"x":{"field":"day","type":"temporal"},"y":{"field":"visits","type":"quantitative","aggregate":"sum"}}}
+```
+
 **Treemap?** Choose `treemap` for a whole split into nested parts by size: one to three levels, at most
 500 positive leaves. Use a bar for exact comparisons; negative aggregates refuse the chart.
 Without `color`, the first path level supplies colours; a series field splits paths by its values.
@@ -278,11 +287,11 @@ Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
   "aggregate": "sum"}` draws one series per field, in the list's order (2 to 8 fields;
   `field` and `color` are then left out).
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
-  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail. On an axis the unit also follows the title
+  scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail. On a sparkline only values and the card's number x carry it. On an axis the unit also follows the title
   (`Distance (km)`; `title: null` writes neither title nor unit), never a tick.
 - **`encoding.tooltip` (bar, line, area, scatter and combo only):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
-- **`scale` (on a value or a number axis; not on a pie or a histogram's x):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
-  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
+- **`scale` (on a value or a number axis; not on a pie, a histogram's x or a sparkline's x):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
+  always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a sparkline, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.
 
 A chart refusal is `visualization.validation.config_schema_invalid` with `details.renderer: "chart"`; each

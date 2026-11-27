@@ -50,6 +50,7 @@ class ChartMarkPolicyTest {
                 "waterfall" to ChartMarkPolicy.AREA,
                 "funnel" to ChartMarkPolicy.AREA,
                 "gauge" to ChartMarkPolicy.LINE,
+                "sparkline" to ChartMarkPolicy.LINE,
                 "treemap" to ChartMarkPolicy.AREA,
             )
     }

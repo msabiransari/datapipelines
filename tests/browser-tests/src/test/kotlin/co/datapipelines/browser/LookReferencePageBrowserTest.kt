@@ -153,6 +153,7 @@ class LookReferencePageBrowserTest {
                     "waterfall",
                     "funnel",
                     "gauge",
+                    "sparkline",
                     "treemap",
                 )) {
                     @Suppress("UNCHECKED_CAST")
@@ -250,6 +251,8 @@ class LookReferencePageBrowserTest {
                 counts.getValue("$theme/histogramSegments") shouldBeGreaterThanOrEqual MIN_HISTOGRAM_SEGMENTS
                 counts.getValue("$theme/combo") shouldBeGreaterThanOrEqual MIN_COMBO_TILES
                 counts.getValue("$theme/comboDots") shouldBeGreaterThanOrEqual MIN_COMBO_DOTS
+                counts.getValue("$theme/sparkline") shouldBeGreaterThanOrEqual MIN_SPARKLINE_TILES
+                counts.getValue("$theme/sparklineDots") shouldBeGreaterThanOrEqual MIN_SPARKLINE_DOTS
                 counts.getValue("$theme/treemap") shouldBeGreaterThanOrEqual MIN_TREEMAP_TILES
                 counts.getValue("$theme/gauge") shouldBeGreaterThanOrEqual MIN_GAUGE_TILES
                 counts.getValue("$theme/arcs") shouldBeGreaterThanOrEqual MIN_ARCS
@@ -583,6 +586,10 @@ class LookReferencePageBrowserTest {
         /** Brief 1070: nine heatmap tiles, 145 cells across the seven rendered tiles. */
         private const val MIN_HEATMAP_TILES = 8
         private const val MIN_CELLS = 241
+
+        /** The ten tiles of tiles/sparkline.json and their end dots under one theme (#1076). */
+        private const val MIN_SPARKLINE_TILES = 10
+        private const val MIN_SPARKLINE_DOTS = 8
         private const val MIN_TREEMAP_TILES = 10
         private const val MIN_TEXTS = 850
         private const val MIN_VALUES = 5500
@@ -766,7 +773,7 @@ private object LookReferenceChecks {
         """
         const s = DatapipelinesReference.snapshot(a.key);
         const problems = [];
-        const counts = { texts: 0, values: 0, elements: 0, dots: 0, comboDots: 0, arcs: 0, points: 0, histogramSegments: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
+        const counts = { texts: 0, values: 0, elements: 0, dots: 0, sparklineDots: 0, comboDots: 0, arcs: 0, points: 0, histogramSegments: 0, stages: 0, waterfallBars: 0, boxPoints: 0, cells: 0, slices: 0, labels: 0, bars: 0, legends: 0 };
         const bad = (m) => problems.push(a.key + " (" + themeName(s) + ", " + s.frame.w + " x " + s.frame.h + "): " + m);
         const t = R.theme.resolve(s.theme);
         const f = s.frame;
@@ -835,6 +842,8 @@ private object LookReferenceChecks {
         // §3.8 "spacing at rest": the scatter's ring is 0.75 × --chart-gap; with a size channel, a point's radius is the
         // document's (§2 --chart-point, the record's §4.4: at most half the range's largest diameter, default 40).
         const scatter = s.wire === "scatter";
+        // Sparkline end dot: look contract §4.7, radius --chart-point minus 0.5.
+        const sparkline = s.wire === "sparkline";
         const treemap = s.wire === "treemap";
         const gauge = s.wire === "gauge";
         const track = gauge ? prims.find(p => p.k === "path" && p.role === "grid") : null;
@@ -869,7 +878,7 @@ private object LookReferenceChecks {
               case "stroke-width": ok = has(widths, Number(v)) || (gauge && has([R.tables.look("gaugeRingWidth"), R.tables.look("gaugeTargetBack"), gaugeWidth], Number(v))); break;
               case "opacity": ok = has([t.n("--chart-dim")], Number(v)) || (isBox && el.localName === "circle" && has([R.tables.look("boxOutsideOpacity")], Number(v))); break;
               case "stop-opacity": ok = has([t.n("--chart-area-top"), t.n("--chart-area-bottom")], Number(v)); break;
-              case "r": ok = has([t.n("--chart-point")], Number(v)) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
+              case "r": ok = has([t.n("--chart-point")], Number(v)) || (sparkline && has([t.n("--chart-point") - 0.5], Number(v))) || (isBox && has([Math.max(0, t.n("--chart-point") - R.tables.look("boxOutsideLess"))], Number(v))) || (sizeEnc !== null && Number(v) > 0 && Number(v) <= ((sizeEnc.range || [6, 40])[1]) / 2 + 1e-6); break;
               case "rx":
               case "ry": {
                 // Heatmap corners use the cell token, capped by half either side.
@@ -920,6 +929,7 @@ private object LookReferenceChecks {
         const dots = scatter || isBox ? [] : of("mark", "circle");
         const points = scatter || isBox ? of("mark", "circle") : [];
         counts.dots += dots.length;
+        if (sparkline) counts.sparklineDots += dots.length;
         if (s.wire === "combo") counts.comboDots += dots.length;
         counts.points += points.length;
         const gaugeArcs = gauge ? of("mark", "path") : [];
@@ -1270,7 +1280,7 @@ private object LookReferenceChecks {
         });
         const texts = Array.from(svg.querySelectorAll("text")).map((el) => el.textContent);
         const title = fig.querySelector(".dp-dashboard-card-title").textContent;
-        const literal = title === s.document.display_name && texts.some((x) => x.indexOf("<b>bold?") === 0);
+        const literal = title === s.document.display_name && texts.some((x) => s.wire === "sparkline" ? x.includes(" <b>bold?</b>") : x.indexOf("<b>bold?") === 0);
         return { scripts: fig.querySelectorAll("script").length, foreign: foreign, literal: literal, texts: texts.length };
         """.trimIndent()
 

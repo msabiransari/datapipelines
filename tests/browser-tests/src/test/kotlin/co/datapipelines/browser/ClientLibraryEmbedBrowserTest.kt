@@ -548,6 +548,12 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
                     body.add("config", JsonParser.parseString(GAUGE_CONFIG))
                     body.toString()
                 },
+                "sparkline" to {
+                    val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Sparkline")
+                    val body = JsonParser.parseString(bar).asJsonObject
+                    body.add("config", JsonParser.parseString(SPARKLINE_CONFIG))
+                    body.toString()
+                },
                 "treemap" to {
                     val bar = ChartBrowserFixtures.barBody("x", "INTEGER", "y", displayName = "Treemap")
                     val body = JsonParser.parseString(bar).asJsonObject
@@ -612,6 +618,9 @@ class ClientLibraryEmbedBrowserTest : DashboardBrowserSuite() {
           }}
         """
 
+        const val SPARKLINE_CONFIG =
+            """{"mark":{"type":"sparkline"},"encoding":{"x":{"field":"x","type":"quantitative"},""" +
+                """"y":{"field":"y","type":"quantitative","aggregate":"sum"}}}"""
         const val SCATTER_CONFIG =
             """{"mark":{"type":"scatter"},"encoding":{"x":{"field":"x","type":"quantitative","format":"integer"},""" +
                 """"y":{"field":"y","type":"quantitative","format":"integer"}}}"""

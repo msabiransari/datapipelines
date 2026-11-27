@@ -101,8 +101,15 @@ class ChartTypeTest {
                 "waterfall",
                 "funnel",
                 "gauge",
+                "sparkline",
                 "treemap",
             )
+    }
+
+    @Test
+    fun `sparkline has only the line x and a value under the line policy`() {
+        ChartType.SPARKLINE.channels shouldBe ChartType.LINE.channels.filter { it.key == "x" || it.key == "y" }
+        ChartType.SPARKLINE.policy shouldBe ChartMarkPolicy.LINE
     }
 
     @Test
