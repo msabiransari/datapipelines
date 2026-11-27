@@ -202,13 +202,17 @@
     return max > min && niceTicks(min, max, 1) === SAME;
   }
 
-  /** The ticks of a fixed domain [lo, hi] (an author's scale.domain): the nice values inside it, the ends kept. */
+  /**
+   * The ticks of a fixed domain [lo, hi] (an author's scale.domain): the nice values inside it, the ends kept. Fewer than
+   * two nice values inside (a plot of one tick spacing or less: the one step is wider than the domain) gives the two ends:
+   * an axis of one tick says nothing about the scale (#1104). A domain that is no range (hi not above lo) keeps its one tick.
+   */
   function within(lo, hi, intervals) {
     var n = nice(lo, hi, intervals), eps = (hi - lo) * 1e-9;
     var ticks = n.ticks.filter(function (t) {
       return t >= lo - eps && t <= hi + eps;
     });
-    if (ticks.length === 0) ticks = [lo, hi];
+    if (ticks.length === 0 || (ticks.length === 1 && hi > lo)) ticks = [lo, hi];
     return { lo: lo, hi: hi, step: n.step, ticks: ticks };
   }
 
