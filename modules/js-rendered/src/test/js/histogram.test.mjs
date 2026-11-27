@@ -91,19 +91,24 @@ test("A2/A5/G8/G13: visible extents, share denominator, count ticks and one-seri
   };
   whole(E); reject(() => whole(make('whole: !share', 'whole: false')));
 });
+// Linear scan from fixture rows, independent of the model's bin search and cell counts.
+function cellsFromRows(f, m) {
+  const enc = f.document.config.encoding, X = f.columns[enc.x.field], C = enc.color ? f.columns[enc.color.field] : null;
+  return m.series.map(s => m.edges.slice(1).map((hi, b) => X.reduce((n, v, i) => n + (v !== null && v !== undefined && Number.isFinite(Number(v)) && (!C || E.data.keyOf(C[i]) === s.id) && Number(v) >= m.edges[b] && (Number(v) < hi || b === m.edges.length - 2 && Number(v) === hi) ? 1 : 0), 0)));
+}
 /** Derive each segment from row counts and the scales handed to the template, not from its primitives. */
 function geometry(R, gap = 2) {
   R.theme.TOKENS["--chart-gap"][1] = gap;
   let n = 0, thin = 0; const thinByFrame = {};
   for (const [w, h] of [...WIDTHS.flatMap(w => HEIGHTS.map(h => [w, h])), [80, 24], [480, 300], [960, 540]]) {
     for (const name of ["bins-50", "many-series"]) {
-      const { r, m, hand } = draw(name, w, h, [], R), ps = segs(r);
+      const { r, m, hand } = draw(name, w, h, [], R), ps = segs(r), cells = cellsFromRows(FX[name], m); same(m.cells, cells);
       for (let b = 0; b < m.edges.length - 1; b++) {
         const x = hand.x.scale(m.edges[b]), wide = hand.x.scale(m.edges[b + 1]) - x;
         const g = Math.min(gap, wide / 2), bw = E.scales.r2(wide - g);
-        const occupied = m.series.map((_, s) => s).filter(s => m.cells[s][b] > 0); let acc = 0;
+        const occupied = m.series.map((_, s) => s).filter(s => cells[s][b] > 0); let acc = 0;
         for (const s of occupied) {
-          const from = acc; acc += m.cells[s][b];
+          const from = acc; acc += cells[s][b];
           const y = hand.value.scale(acc), length = Math.abs(hand.value.scale(from) - y), shift = from > 0 ? Math.min(gap, length) : 0;
           const p = ps.find(p => p.datum === b && p.series === m.series[s].id), entry = r.index.marks.find(e => e.datum === b && e.series === m.series[s].id);
           const box = p.k === "rect" ? [p.x, p.y, p.w, p.h] : [p.d[1], p.d[9], p.d[12] - p.d[1] + p.d[7], p.d[2] - p.d[9]];
@@ -155,7 +160,6 @@ test("A4/G6/G14: full-bin hit shape, unique cells, card counts and edge texts", 
   const heads = R => draw(f, 960, 540, [], R).r.index.marks.map(e => e.card.heading);
   assert.notDeepEqual(plain(heads(E)), plain(heads(make('m.edgeTexts[i], m.enc.x.unit', 'T.value(m.edges[i], m.enc.x.format), m.enc.x.unit'))));
 });
-
 test("A4/G7: keys by series, entry, all directions, hidden series and last-bin switch", () => {
   const check = R => {
     for (const [w, h] of [[80, 24], [960, 540]]) {
@@ -177,7 +181,6 @@ test("A4/G7: keys by series, entry, all directions, hidden series and last-bin s
   check(E);
   for (const [a, b] of [['row: sg.si, key: true', 'row: 0, key: true'], ['row: sg.si, key: true', 'row: b, key: true'], ['rank[a.series] - rank[b.series] || a.datum - b.datum', 'a.datum - b.datum || rank[a.series] - rank[b.series]']]) reject(() => check(make(a, b)));
 });
-
 test("A2/G9: asked-bin refusal on the model, cap row used, 50 draws, row and series caps", () => {
   same(model(FX["bins-51"]).rule, { code: "chart.too_many_marks", details: { marks: 51, limit: 50 } });
   assert.equal(draw("bins-50").r.state, "rendered");
@@ -192,14 +195,12 @@ test("A2/G9: asked-bin refusal on the model, cap row used, 50 draws, row and ser
   const inflated = make('markCount: occupied,', 'markCount: occupied + 100,');
   same(draw(values([0, 1, 2, 3, 4, 5], 5), 960, 540, [], inflated).r.summary.refusal, { code: "chart.too_many_marks", details: { marks: 105, limit: 50 } });
 });
-
 test("A6: fixture counts checked by independent row oracle, both themes", () => {
   for (const [name, fx] of Object.entries(FX)) for (const theme of ["light", "dark"]) {
     const r = E.render(inputOf(fx, 960, 540, { theme }));
     if (r.state === "rendered") assert.equal(r.summary.marks, expectedHistogram(fx, r.summary.series.filter(s => s.hidden).map(s => s.id)), name);
   }
 });
-
 const descendants = el => el.childNodes.flatMap(c => [c, ...descendants(c)]);
 function fakeBrowser() {
   const doc = { createElementNS: (_, tag) => element(tag) };
@@ -221,7 +222,6 @@ function fakeBrowser() {
   }
   return { doc, host: element("div") };
 }
-
 test("A4/A5: fitted card budgets, full legend dimming and hidden-series geometry", () => {
   const { r, m, hand } = draw("many-series"), lm = keyModel(r), lines = I.markLines(lm, 0);
   same(lines.map(l => l.kind === "heading" ? l.text : `${l.name}=${l.value}`), ["from 40 ms to 60 ms", "Delta=5", "Hills=3", "Coast=4", "Central=2", "West=4", "East=1", "South=3", "North=5"]);
