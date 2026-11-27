@@ -42,8 +42,8 @@
     return group.length === 1 ? group[0].m.layout.valueTitle : null;
   }
 
-  function axisFormat(group) {
-    for (var i = 0; i < group.length; i++) if (group[i].y.format !== undefined) return group[i].y.format;
+  function axisFormat(layers, axis) {
+    for (var i = 0; i < layers.length; i++) if (side(layers[i]) === axis && layers[i].y.format !== undefined) return layers[i].y.format;
     return null;
   }
 
@@ -51,11 +51,24 @@
     var e = doc.config.encoding, layers = e.layers, limit = cap("combo.layers");
     if (layers.length > limit) return { rule: { code: "chart.too_many_series", details: { series: layers.length, limit: limit } } };
     var scales = { left: scaleOf(layers, "left"), right: scaleOf(layers, "right") };
+    var formats = { left: axisFormat(layers, "left"), right: axisFormat(layers, "right") };
     var temporal = e.x.type === "temporal", x = Object.assign({}, e.x), subs = [], warnings = [], warned = {}, count = 0;
     // Temporal categories remain evenly spaced bands, using the line family's categorical aggregation.
-    if (temporal) { x.type = "nominal"; delete x.format; }
+    if (temporal) {
+      // Resolve the order while x is still temporal, then hand that list to every categorical submodel.
+      var categories = new Map();
+      R.data.column(columns, x.field).forEach(function (raw) {
+        if (!R.data.isNull(raw)) {
+          var key = R.data.keyOf(raw);
+          if (!categories.has(key)) categories.set(key, { raw: raw, first: categories.size });
+        }
+      });
+      x.sort = R.data.order(Array.from(categories.values()), x.sort, function () { return null; }, (types || {})[x.field], true).map(function (xe) { return xe.raw; });
+      x.type = "nominal"; delete x.format;
+    }
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i], axis = side(layer), area = layer.mark === "area", y = Object.assign({}, layer.y);
+      if (formats[axis] !== null) y.format = formats[axis];
       var scale = Object.assign({}, scales[axis]);
       if (layer.mark === "bar" || area) scale.zero = true;
       if (Object.keys(scale).length > 0) y.scale = scale; else delete y.scale;
@@ -89,7 +102,7 @@
     var layout = {
       vertical: true, bands: subs[0].m.layout.bands, bandTitle: subs[0].m.layout.bandTitle,
       bandGrid: subs[0].m.layout.bandGrid, valueGrid: left.length ? left[0].m.layout.valueGrid : undefined,
-      valueTitle: axisTitle(left), format: axisFormat(left), domain: scales.left.domain || null, log: scales.left.type === "log", endLabels: null,
+      valueTitle: axisTitle(left), format: formats.left, domain: scales.left.domain || null, log: scales.left.type === "log", endLabels: null,
       reach: function (h) {
         return subs.some(function (s) { return s.mark !== "bar"; }) ? h.theme.n("--chart-point") + h.theme.n("--chart-gap") / 2 : 0;
       },
@@ -97,7 +110,7 @@
     };
     if (right.length) layout.second = {
       extent: function (visible) { return extent(right, scales.right.type === "log", visible); },
-      domain: scales.right.domain || null, format: axisFormat(right), log: scales.right.type === "log", title: axisTitle(right),
+      domain: scales.right.domain || null, format: formats.right, log: scales.right.type === "log", title: axisTitle(right),
     };
     return { series: subs.map(function (s) { return s.m.series[0]; }), markCount: count, warnings: warnings,
       direct: false, legendKey: "legendKeyBar", subs: subs, layout: layout };

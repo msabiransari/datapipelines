@@ -30,6 +30,60 @@ function box(p) {
   return {x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys)};
 }
 
+for (const mark of ['bar','line','area','point']) for (const axis of ['left','right']) for (const declarer of [0,1]) for (const hidden of [false,true]) {
+  test(`F1: ${mark} ${axis} axis format, declarer ${declarer}, hidden ${hidden}, reaches sibling values and cards`,()=>{
+    const f=variant('two-lines-two-axes',(f,e)=>{
+      e.layers.forEach(l=>{l.mark=mark;l.axis=axis;l.y.unit=l.y.field==='rev'?'USD':'units';});
+      e.layers[declarer].y.format='percent';
+      if(axis==='right') e.layers.push({mark:'line',title:'Other axis',y:{field:'rate',type:'quantitative',aggregate:'sum',format:'decimal(2)'}});
+      for(const key of ['rev','cost']) {
+        f.types[key]='DOUBLE';
+        f.document.inputs.result.columns.find(c=>c.name===key).type='DOUBLE';
+      }
+      f.columns.rev=[.1,.2,.3,.4,.5,.6];f.columns.cost=[.2,.3,.4,.5,.6,.7];
+    });
+    const {r,m}=draw(f,640,360,{hidden:hidden?['layer:'+declarer]:[]});
+    assert.equal(r.state,'rendered');
+    assert.equal(axis==='left'?m.layout.format:m.layout.second.format,'percent');
+    // Check the sibling first: this is the value-production failure from the review, before the card consumes it.
+    const sibling=1-declarer,id='layer:'+sibling,expected=sibling===0?'10% USD':'20% units';
+    assert.equal(r.index.series.find(s=>s.id===id).tip[0][1],`${sibling===0?'rev':'cost'}: ${expected}`);
+    const card=I.cardLines(interaction(r),id,0);
+    assert.equal(card.find(row=>row.id===id).value,expected);
+    assert.equal(card.some(row=>row.id==='layer:'+declarer),!hidden);
+    if(axis==='right') assert.equal(card.find(row=>row.id==='layer:2').value,'0.10');
+    for(const sub of m.subs.slice(0,2)) assert.equal(sub.m.format,'percent');
+  });
+}
+
+for (const [name,sort,rows] of [
+  ['ascending','ascending',[1,3,2,0]], ['descending','descending',[0,2,3,1]],
+  ['input',null,[0,1,2,3]], ['explicit',['2024-01-01T00:00:00.01Z'],[2,0,1,3]],
+]) test(`F2: temporal bands ${name} preserve chronology, aligned layers, datum indexes and card values`,()=>{
+  const stamps=['2024-01-01T00:00:00.1Z','2024-01-01T00:00:00Z','2024-01-01T00:00:00.01Z','2024-01-01T00:00:00.001Z'];
+  const f=variant('four-layers',(f,e)=>{
+    e.x={field:'m',type:'temporal',sort};
+    f.types.m='TIMESTAMP';f.document.inputs.result.columns.find(c=>c.name==='m').type='TIMESTAMP';
+    f.columns={m:stamps,rev:[200,100,150,125],cost:[20,10,15,12],rate:[.2,.1,.15,.12],n:[4,1,3,2]};
+    e.layers.forEach(l=>{delete l.y.format;delete l.y.unit;});
+  });
+  const {r,m}=draw(f),model=interaction(r);
+  assert.equal(r.state,'rendered');
+  for(const [i,sub] of m.subs.entries()) {
+    same(sub.m.xs.map(x=>x.raw),rows.map(j=>stamps[j]));
+    same(sub.m.cells[0].map(c=>c.row),rows);
+    const ix=r.index.series[i],field=f.document.config.encoding.layers[i].y.field;
+    same(ix.datum,[0,1,2,3]);same(ix.at,r.index.series[0].at);
+    near(ix.at[1]-ix.at[0],ix.at[3]-ix.at[2]);
+    for(const [datum,row] of rows.entries()) {
+      const value=String(f.columns[field][row]),card=I.cardLines(model,ix.id,datum);
+      assert.equal(ix.tip[datum][1],`${sub.m.series[0].title}: ${value}`);
+      assert.equal(card.find(c=>c.id===ix.id).value,value);
+      assert.equal(card[0].text,E.text.temporalFull(stamps[row]));
+    }
+  }
+});
+
 test('A.2: layer ids, authored titles, palette and legend keys; one warning per code', () => {
   const {m}=draw(FX['four-layers']);
   same(m.series.map(s=>s.id), ['layer:0','layer:1','layer:2','layer:3']);
