@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, heatmap, box, waterfall, funnel, gauge and treemap families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, box, waterfall, funnel, gauge and treemap families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -296,6 +296,20 @@ each as `{field: [values]}` (§2.1.2).
   units once per value; a reduced card keeps Now. The pointer finds it over the arc's picture box and the
   full drawn end labels, bounded by the plot. One semantic mark, not a measured cap.
 
+  **Combo (#1069).** Use an amount beside a rate on one category band: `{mark: {type: "combo"},
+  encoding: {x, layers, tooltip?}}`. Required `x` is a band; `layers` holds two to four closed objects
+  `{mark: "bar" | "line" | "area" | "point", y, axis?: "left" | "right", title?}`. Each `y` is one
+  numeric value with an aggregate, optional title, unit, format and scale; no `fields`, stacking or colour channel.
+  At least one layer uses the left axis (the default). Each axis has at most one authored scale and one format,
+  inherited by all its layers, including when the declaring layer is hidden. An axis with a bar or area is linear,
+  includes zero, refuses `zero: false` and requires an authored domain to contain zero. Line/point-only axes may
+  use log or a raised domain. The first explicit y title names its axis. Empty layers do not extend the axis;
+  hiding the last populated layer retains its range. Bars draw behind areas, lines and points; layer order sets
+  colours, legend keys and card rows. Every line point has a dot; an area has its end dot. A legend switch hides
+  that layer. The crosshair card heads with the category, then each visible non-null layer and its unit; a pointer
+  inside a bar selects the bar layer (unless within a dot's reach) and its row is kept when space is short.
+  Limits: 10,000 input rows, 1,000 bars or points per layer; line and area layers are thinned by their own caps.
+
   **Treemap (#1078).** A whole broken into nested parts by size: `{title?, mark: {type: "treemap",
   labels?: "none" | "names" | "names_values"}, encoding: {path, size, color?}}`. `path` is one to three
   `{field}` levels, each a non-null column; numeric levels use their plain string as the name. `size` is
@@ -334,7 +348,7 @@ each as `{field: [values]}` (§2.1.2).
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
     quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
     On a value axis or a number axis it also follows that axis's title, never a tick.
-  - `encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
+  - `encoding.tooltip` ( a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
     show (not on a funnel or gauge; not on a treemap: its card is the type's own).
   - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their

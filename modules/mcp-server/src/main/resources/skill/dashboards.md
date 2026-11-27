@@ -71,7 +71,7 @@ Build in this order — each step's refusal names the path to fix.
 
 A chart is ONE document. The product's own chart engine draws it — on the page and in the server's check, from the
 same files — so you never write a charting library's configuration, and one document serves every host. Its contract is the JSON Schema served without a key at
-`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
+`/schemas/chart/1/<type>.schema.json` for the type in `config.mark.type` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` or `treemap` (each includes
 `/schemas/chart/1/skeleton.schema.json`): check your document against it before you write. Where this page and the schema disagree, the schema wins.
 
 ```json
@@ -241,6 +241,16 @@ when the arc clamps to an end. Bands and Target have keys, never switches. Optio
 ```
 
 
+**Combo?** Choose `combo` for an amount beside a rate on one category band, two to four layers; for one measure use
+bar or line. Each layer is `{mark: "bar"|"line"|"area"|"point", y, axis?: "left"|"right", title?}`, with one
+aggregated value, no fields/stack/colour. At least one layer is left (default). One scale and format per axis,
+inherited even from hidden layers; any bar/area makes that axis linear with zero in its domain, never zero:false.
+The category heads the card; visible layer rows retain layer order; pointing inside a bar selects it and keeps its row.
+
+```json
+{"mark":{"type":"combo"},"encoding":{"x":{"field":"month","type":"nominal","sort":null},"layers":[{"mark":"bar","y":{"field":"amount","type":"quantitative","aggregate":"sum"}},{"mark":"line","axis":"right","y":{"field":"rate","type":"quantitative","aggregate":"mean","format":"percent"}}]}}
+```
+
 **Treemap?** Choose `treemap` for a whole split into nested parts by size: one to three levels, at most
 500 positive leaves. Use a bar for exact comparisons; negative aggregates refuse the chart.
 Without `color`, the first path level supplies colours; a series field splits paths by its values.
@@ -260,7 +270,7 @@ Options, omitted labels and tiny-cell behaviour: `docs/dashboards.md`.
 - **`unit`** (at most 16 characters) is written after each value: on the value, a field entry, a number `x`, a
   scatter's `y`, a box's `y`, a pie's `theta`, a tooltip detail. On an axis the unit also follows the title
   (`Distance (km)`; `title: null` writes neither title nor unit), never a tick.
-- **`encoding.tooltip` (bar, line, area and scatter only; a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
+- **`encoding.tooltip` ( a heatmap's, a box's or a waterfall's card is fixed):** up to 6 details `{field, title?, format?, unit?}` to show beside each point or bar (not on a funnel or gauge; not on a treemap: its card is the type's own).
 - **`scale` (on a value or a number axis; not on a pie):** `{domain?: [lo, hi], type?: "linear" | "log", zero?: true | false}` (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). A bar's, an area's and a waterfall's value
   always start at zero (`zero: false` is refused). A log scale is for an unstacked bar, a line, a scatter or a box only, with no
   `zero`; a value at or below zero is then not drawn.

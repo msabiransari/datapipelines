@@ -88,7 +88,19 @@ class ChartTypeTest {
         ChartType.LINE.channels.map { it.wire() } shouldBe expected
         ChartType.AREA.channels.map { it.wire() } shouldBe expected
         ChartType.WIRE_VALUES shouldBe
-            listOf("bar", "line", "area", "scatter", "pie", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+            listOf("bar", "line", "area", "scatter", "pie", "combo", "heatmap", "box", "waterfall", "funnel", "gauge", "treemap")
+    }
+
+    @Test
+    fun `combo has two to four layer objects with one value each under the line policy`() {
+        val channels = ChartType.COMBO.channels
+        channels.map { it.key } shouldBe listOf("x", "layers", "tooltip")
+        channels.map { it.required } shouldBe listOf(true, true, false)
+        channels[0].node shouldBe ChannelNode.Shape("band")
+        channels[1].node shouldBe
+            ChannelNode.ListOf(2, 4, ChannelNode.ObjectOf(mapOf("y" to ChannelNode.Shape("value")), layer = "mark"))
+        channels[2].node shouldBe ChannelNode.ListOf(0, 6, ChannelNode.Shape("detail"))
+        ChartType.COMBO.policy shouldBe ChartMarkPolicy.LINE
     }
 
     @Test

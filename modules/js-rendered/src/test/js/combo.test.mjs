@@ -171,11 +171,13 @@ test('A.5: 2400 interior bar positions select the bar except a nearby line dot; 
   const card=I.cardLines(model,'layer:0',2); assert.ok(JSON.stringify(card).includes('120'));
 });
 
-test('A.5 D20: Enter, arrows, Home, End follow layer order; last mark takes its own switch, or stays without one',()=>{
+test('A.5 D20: entry, arrows, Home, End follow layer order; last mark takes its own switch, or stays without one',()=>{
   for(const [w,h] of [[640,360],[240,140],[80,24]]) {
     const {r}=draw(FX['four-layers'],w,h), model=interaction(r);
-    let t=I.keyTarget(model,null,'Enter').target;
-    assert.deepEqual(t, {kind:'mark',id:'layer:0',datum:0}, 'D20 requires Enter from no target to select the first layer mark');
+    for (const key of ['Enter', ' ']) same(I.keyTarget(model,null,key), {target:null,toggle:null,handled:false});
+    for (const key of ['ArrowRight','ArrowDown','Home','End']) same(I.keyTarget(model,null,key).target,{kind:'mark',id:'layer:0',datum:0});
+    let t=I.keyTarget(model,null,'ArrowRight').target;
+    assert.deepEqual(t, {kind:'mark',id:'layer:0',datum:0}, 'D20 requires navigation entry from no target to select the first layer mark');
     for(let i=1;i<4;i++){t=I.keyTarget(model,t,'ArrowDown').target;assert.equal(t.id,'layer:'+i);}
     assert.equal(I.keyTarget(model,t,'ArrowDown').target.id,'layer:3');
     t=I.keyTarget(model,t,'ArrowUp').target;assert.equal(t.id,'layer:2');
