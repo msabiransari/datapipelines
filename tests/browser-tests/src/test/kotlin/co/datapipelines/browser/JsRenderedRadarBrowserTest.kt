@@ -152,11 +152,13 @@ class JsRenderedRadarBrowserTest {
             }
             """.trimIndent()
         private const val POINT_JS = """dx => {
-          const p=ChartRadar.last().index.marks[0].shape,b=document.getElementById('chart').getBoundingClientRect();return [b.left+p.x+dx,b.top+p.y];}"""
+          const p=ChartRadar.last().index.marks[0].shape,b=document.getElementById('chart').getBoundingClientRect();
+          return [b.left+p.x+dx,b.top+p.y];}"""
         private const val RING_JS = """() => {
           const e=ChartRadar.last().index.marks[0],g=document.querySelector('circle.dp-guide'),t=JsRendered.theme.resolve('light'),bad=[];
           if(!g)return ['missing ring'];
-          for(const [k,v] of Object.entries({cx:e.shape.x,cy:e.shape.y,r:e.shape.r+0.25*t.n('--chart-text')}))if(Math.abs(Number(g.getAttribute(k))-v)>.011)bad.push(k);
+          for(const [k,v] of Object.entries({cx:e.shape.x,cy:e.shape.y,r:e.shape.r+0.25*t.n('--chart-text')}))
+            if(Math.abs(Number(g.getAttribute(k))-v)>.011)bad.push(k);
           if(g.getAttribute('stroke')!==t.css('--chart-series-1'))bad.push('colour');
           const texts=[...document.querySelectorAll('.dp-tooltip text')];
           if(!texts.some(e=>e.textContent==='82'&&Number(e.getAttribute('font-weight'))===t.n('--chart-title-weight')))bad.push('hovered row not bold');
