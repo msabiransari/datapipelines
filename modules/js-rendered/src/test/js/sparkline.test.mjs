@@ -43,7 +43,7 @@ test("A.2 rows, warnings, gaps, aggregates and domains",()=>{
   }
   assert.equal(draw(FX.flat).m.layout.domain,null);assert.equal(draw(FX["one-point"]).m.layout.domain,null);
   assert.equal(draw(FX["log-zero"]).m.layout.log,true);
-  for(const last of ["none","dot","value"]) {const d=draw(fixture([1,2],undefined,{}, {last}));assert.equal(d.m.layout.last,last==="value"?"2":null);}
+  for(const last of ["none","dot","value"]) {const d=draw(fixture([1,2],undefined,{}, {last}));assert.equal(d.m.layout.last,last==="value"?"2":null);assert.equal(d.m.layout.reach({theme:E.theme.resolve("light")}),last==="none"?1:4.5);}
 });
 function checkSpan(R=E) {
   for(const name of ["rising","nominal-x","quantitative-x","null-gap"]) {
@@ -100,6 +100,7 @@ function dotSweep(R=E) {
     near(dot.r,r2((point-.5)*share));near(dot.strokeWidth,r2(gap*share));
     for(const edge of [dot.cx,dot.cy,w-dot.cx,h-dot.cy])assert.ok(edge+.02>=dot.r+dot.strokeWidth/2);
     for(const t of labels(r))assert.ok(t.x+.02>=dot.cx+dot.r+dot.strokeWidth/2);
+    f.document.config.mark.last="none";assert.equal(dots(draw(f,w,h,theme(point,gap,text),R).r).length,0);
     clean(r,w,h);pictures++;if(share<1)smaller++;else whole++;
   }
   console.log(`A.4 kept reach: ${pictures} pictures, ${whole} whole, ${smaller} smaller`);assert.ok(smaller>400);assert.ok(whole>600);
@@ -275,4 +276,12 @@ test("G3/G7 look-field, interaction-field, dot and cap plants go red",()=>{
     const check=key==="points"?R=>assert.ok(R.tables.CAPS['sparkline.points'],'sparkline.points'):R=>assert.equal(draw(fixture(Array.from({length:10001},(_,i)=>i)),160,32,{},R).r.state,'refused');
     check(makeEngine());assert.throws(()=>check(R));
   }
+});
+
+test("A.5 the full keyboard plan and nearest-point plot boundaries",()=>{
+  const {model,hand}=scene(FX.rising,160,32,0);let t=null;
+  for(const [key,datum] of [["ArrowRight",0],["ArrowRight",1],["ArrowRight",2],["ArrowLeft",1],["Home",0],["End",11],["ArrowRight",11],["ArrowDown",11],["ArrowUp",11]]){t=I.keyTarget(model,t,key).target;assert.equal(t.datum,datum);}
+  const p=hand.plot,y=p.y+p.h/2;
+  for(const [x,datum] of [[p.x,0],[p.x+p.w,11],[p.x-3,null],[p.x+p.w+3,null]]){const hit=I.lookup(E,model,{x,y});assert.equal(hit.mark?hit.mark.datum:null,datum);}
+  for(const y of [p.y-1,p.y+p.h+1])assert.equal(I.lookup(E,model,{x:p.x+10,y}).mark,null);
 });
