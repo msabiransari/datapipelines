@@ -4,6 +4,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.microsoft.playwright.BrowserContext
 import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -185,6 +186,140 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
     }
 
     /**
+     * A.1 of issue 1132, on a real page — the crosshair dot over the line/one-series first point at 80 × 24 with
+     * --chart-point 16 and --chart-gap 2 stays inside the frame, read off the SVG in the picture's own coordinates
+     * (the viewBox), by the keyboard and by the pointer, under the light and the dark theme; the card still names the
+     * activated datum. The host is resized and the two tokens set on the page, then the picture redrawn through the
+     * adapter's own ResizeObserver, so the dot the interaction layer writes is the one the page actually shows. Each
+     * reading records the theme the PAGE applied (`data-theme` on the document element, never echoed from the argument)
+     * and the adapter's own resolver (`resolveTheme(svg)`: `theme.base`, `theme.tokens`, `refused`), whole in the
+     * report. The two pages are told apart by the resolved `--chart-grid`, asserted to differ between the readings.
+     */
+    @Test
+    fun `A4-4 - the hover dot's ink stays inside the frame under both themes, keyboard and pointer`() {
+        startTrace()
+        val root = ready("jsla4")
+        val agent = chartContext()
+        val log = mutableListOf<String>()
+        try {
+            val (readings, firsts) = readBothThemes(agent, root)
+            for ((mode, r) in readings) {
+                log += "$mode $r"
+                val dot = r["dot"] as Map<*, *>?
+                if (dot != null) log += inkBoundsLine(mode, dot)
+            }
+            val grid = mutableMapOf<String, Any?>()
+            for ((mode, r) in readings) assertReading(mode, r, firsts.getValue(mode.substringBefore(" ")), grid)
+            val grids = "light ${grid["light"]}, dark ${grid["dark"]}"
+            withClue("the two themes resolve different --chart-grid colours ($grids)") {
+                (grid["light"] != grid["dark"]) shouldBe true
+            }
+        } finally {
+            agent.close()
+            report("a4-4.txt", log)
+        }
+        drainCspViolations().shouldBeEmpty()
+    }
+
+    /** The four A4-4 readings (light/dark × keyboard/pointer) and each page's first point, taken before any assertion. */
+    private fun readBothThemes(
+        agent: BrowserContext,
+        root: String,
+    ): Pair<Map<String, Map<*, *>>, Map<String, Map<*, *>>> {
+        val readings = mutableMapOf<String, Map<*, *>>()
+        val firsts = mutableMapOf<String, Map<*, *>>()
+        for (theme in listOf("light", "dark")) {
+            val doc = document("$root/charts/line_one_series_dot_$theme", "line", "one-series")
+            val page = preview(agent, doc, theme = theme)
+            try {
+                val setup = page.evaluate(SET_FRAME_AND_TOKENS, CASE) as Map<*, *>
+                withClue("$theme: the host is resized to the 80 x 24 frame and the picture redraws at it: $setup") {
+                    (setup["w"] as Number).toDouble() shouldBe 80.0
+                    (setup["h"] as Number).toDouble() shouldBe 24.0
+                    setup["state"] shouldBe "rendered"
+                }
+                val first = page.evaluate(FIRST_POINT, CASE) as Map<*, *>
+                firsts[theme] = first
+                page.evaluate("sel => { document.querySelector(sel + ' svg.dp-chart').focus(); return true; }", CASE)
+                page.keyboard().press("ArrowRight")
+                page.evaluate(FRAME)
+                readings["$theme key"] = page.evaluate(READ_DOT, CASE) as Map<*, *>
+                page.mouse().move((first["x"] as Number).toDouble(), (first["y"] as Number).toDouble())
+                page.evaluate(FRAME)
+                readings["$theme pointer"] = page.evaluate(READ_DOT, CASE) as Map<*, *>
+            } finally {
+                page.close()
+            }
+        }
+        return readings to firsts
+    }
+
+    /** One reading's four outer ink bounds as the report writes them. */
+    private fun inkBoundsLine(
+        mode: String,
+        dot: Map<*, *>,
+    ): String {
+        val cx = (dot["cx"] as Number).toDouble()
+        val cy = (dot["cy"] as Number).toDouble()
+        val e = (dot["r"] as Number).toDouble() + (dot["strokeWidth"] as Number).toDouble() / 2
+        return "$mode ink left=${cx - e} right=${cx + e} top=${cy - e} bottom=${cy + e}"
+    }
+
+    /** One reading's assertions: the page's applied theme, its resolved --chart-grid, the frame, the ink and the card. */
+    private fun assertReading(
+        mode: String,
+        r: Map<*, *>,
+        first: Map<*, *>,
+        grid: MutableMap<String, Any?>,
+    ) {
+        val theme = mode.substringBefore(" ")
+        val dot = r["dot"] as Map<*, *>?
+        withClue("$mode: the crosshair dot is drawn: $r") { (dot != null) shouldBe true }
+        val cx = (dot!!["cx"] as Number).toDouble()
+        val cy = (dot["cy"] as Number).toDouble()
+        val radius = (dot["r"] as Number).toDouble()
+        val stroke = (dot["strokeWidth"] as Number).toDouble()
+        withClue("$mode: the page applied the theme asked for: ${r["dataTheme"]}") {
+            r["dataTheme"] shouldBe theme
+        }
+        val resolved = r["resolved"] as Map<*, *>?
+        val resolvedTheme = resolved?.get("theme") as Map<*, *>?
+        val tokens = resolvedTheme?.get("tokens") as Map<*, *>?
+        val chartGrid = tokens?.get("--chart-grid")
+        grid[theme] = chartGrid
+        withClue("$mode: the resolver named a --chart-grid for the page's theme: $resolved") {
+            (chartGrid != null) shouldBe true
+        }
+        withClue("$mode: the picture is the 80 x 24 frame: ${r["viewBox"]}") { r["viewBox"] shouldBe "0 0 80 24" }
+        requireInside("$mode dot", cx, cy, radius, stroke)
+        withClue("$mode: the dot stays centered on the first datum's point (${first["fx"]}, ${first["fy"]})") {
+            (Math.abs(cx - (first["fx"] as Number).toDouble()) <= 1e-6) shouldBe true
+            (Math.abs(cy - (first["fy"] as Number).toDouble()) <= 1e-6) shouldBe true
+        }
+        withClue("$mode: the card names the first datum's value (${first["value"]}): ${r["card"]}") {
+            val texts = (r["card"] as List<*>).map { it.toString() }
+            texts.any { it.trim() == first["value"].toString() } shouldBe true
+        }
+    }
+
+    /** The dot's four outer ink bounds (its center ± its radius and half its ring) inside the 80 x 24 frame, to 1e-9. */
+    private fun requireInside(
+        label: String,
+        cx: Double,
+        cy: Double,
+        radius: Double,
+        stroke: Double,
+    ) {
+        val e = radius + stroke / 2
+        withClue("$label: the ink stays inside the frame (left ${cx - e}, top ${cy - e}, right ${cx + e}, bottom ${cy + e})") {
+            (cx - e >= -1e-9) shouldBe true
+            (cy - e >= -1e-9) shouldBe true
+            (cx + e <= 80.0 + 1e-9) shouldBe true
+            (cy + e <= 24.0 + 1e-9) shouldBe true
+        }
+    }
+
+    /**
      * The REST create body of the engine module's fixture [wire]/[fixture] at [name], from Node's emitted input at 960 ×
      * 540: its display name, renderer, input contract and config unchanged, except that the band `x` and the series
      * column are declared not nullable (the save refuses a nullable band or series column) and a row with a null there is
@@ -279,6 +414,71 @@ class JsRenderedLineAreaBrowserTest : ChartPageSuite() {
 
         /** Nulls are written: a chart's `sort: null` is a value. */
         val GSON = GsonBuilder().serializeNulls().create()
+
+        /** The next animation frame twice, so the adapter's scheduled redraw and the layer's paint have run. */
+        const val FRAME = "() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))"
+
+        /**
+         * The A4-4 host, resized to the 80 x 24 frame with the two tokens the witness needs, then a redraw waited for by
+         * wrapping `JsRendered.render` (the host's own ResizeObserver redraws it, as it would for a page resize). Resolves
+         * `{w, h, state}` — the host's client size and the captured draw's state — and leaves `window.__drawn` as that draw.
+         */
+        const val SET_FRAME_AND_TOKENS =
+            """(sel) => new Promise(function (resolve) {
+              var svg = document.querySelector(sel + ' svg.dp-chart');
+              var host = svg.parentElement;
+              host.style.position = 'fixed'; host.style.left = '0'; host.style.top = '0';
+              host.style.padding = '0'; host.style.margin = '0'; host.style.border = '0'; host.style.boxSizing = 'content-box';
+              host.style.minWidth = '0'; host.style.minHeight = '0'; host.style.maxWidth = '80px'; host.style.maxHeight = '24px';
+              host.style.width = '80px'; host.style.height = '24px';
+              host.style.setProperty('--chart-point', '16'); host.style.setProperty('--chart-gap', '2');
+              var R = window.JsRendered, original = R.render, last = null, frames = 0;
+              R.render = function () {
+                try { var out = original.apply(this, arguments); last = out; return out; } catch (e) { last = { error: String(e) }; throw e; }
+              };
+              var wait = function () {
+                if (last === null && ++frames > 120) last = { error: 'no draw reached the engine in 120 frames' };
+                if (last === null) { requestAnimationFrame(wait); return; }
+                requestAnimationFrame(function () { R.render = original; window.__drawn = last; resolve({ w: host.clientWidth, h: host.clientHeight, state: last.state }); });
+              };
+              requestAnimationFrame(wait);
+            })"""
+
+        /**
+         * The line/one-series first point: its series id and datum, its card's heading and value (the index's tip), its
+         * anchor in the frame's coordinates (`fx`, `fy`) and on the page (`x`, `y`, through the picture's screen matrix).
+         */
+        const val FIRST_POINT =
+            """(sel) => {
+              var R = window.JsRendered, I = window.DatapipelinesChartInteractions._internal;
+              var svg = document.querySelector(sel + ' svg.dp-chart');
+              var out = window.__drawn, ix = out.index;
+              var m = I.modelOf(R, out, function () { return 0; });
+              var ser = m.series[0], d = ser.marks[0].datum;
+              var a = I.anchorOf(m, ser.id, d);
+              var cm = svg.getScreenCTM();
+              return { id: ser.id, datum: d, heading: ix.series[0].tip[0][0], value: ix.series[0].tip[0][1],
+                fx: a.x, fy: a.y, x: cm.a * a.x + cm.c * a.y + cm.e, y: cm.b * a.x + cm.d * a.y + cm.f };
+            }"""
+
+        /** The crosshair dot the layer wrote, and the card it wrote, in the picture's own coordinates (the viewBox),
+         *  plus the theme the page applied (`data-theme` on the document element) and the adapter's own resolver at
+         *  the chart's svg (`resolveTheme(svg)`: `theme.base`, `theme.tokens`, `refused`). */
+        const val READ_DOT =
+            """(sel) => {
+              var svg = document.querySelector(sel + ' svg.dp-chart');
+              var dot = svg.querySelector('circle.dp-guide');
+              var card = svg.querySelector('g.dp-tooltip');
+              var resolved = window.DatapipelinesDashboardChart._internal.resolveTheme(svg);
+              return {
+                dataTheme: document.documentElement.getAttribute('data-theme'),
+                resolved: resolved,
+                viewBox: svg.getAttribute('viewBox'),
+                dot: dot === null ? null : { cx: parseFloat(dot.getAttribute('cx')), cy: parseFloat(dot.getAttribute('cy')),
+                  r: parseFloat(dot.getAttribute('r')), strokeWidth: parseFloat(dot.getAttribute('stroke-width')) },
+                card: card === null ? null : Array.from(card.querySelectorAll('text')).map(function (t) { return t.textContent; })
+              };
+            }"""
 
         /**
          * Every form the two templates draw that a saved case can carry: curves, points, end labels, log, fields, time,

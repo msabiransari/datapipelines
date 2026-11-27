@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadEngine, fakeBrowser, descendants, STATIC_JS, ENGINE_DIR } from "./support/js-rendered.mjs";
 
@@ -849,4 +849,209 @@ test("the layer's file: 0 getComputedStyle, 0 colour literals, 0 markup sinks (D
     attributes: (src.match(/setAttribute\(\s*"(?:style|href|on\w+)"/g) || []).length,
   };
   assert.deepEqual(counts, { getComputedStyle: 0, hex: 0, rgb: 0, sinks: 0, attributes: 0 });
+});
+
+// ============================================================ issue 1132: the crosshair dot's whole ink fits the frame
+
+/**
+ * The interaction layer loaded a second time from its own source, [edit] changing the text first (a falsification's
+ * copy), so the falsification's copy and the shipped layer are two independent loads of the one file. Each reads the
+ * engine from globalThis.JsRendered (set at the top), the same engine every layer here uses.
+ */
+function layerWith(edit) {
+  const src = readFileSync(path.join(STATIC_JS, "datapipelines-chart-interactions.js"), "utf8");
+  const mod = { exports: {} };
+  const run = new Function("module", "exports", "globalThis", edit ? edit(src) : src);
+  run(mod, mod.exports, globalThis);
+  return mod.exports;
+}
+
+/** The crosshair before issue 1132: the dot's radius and ring exactly as the theme gives them, never fitted. */
+const UNFITTED = ['var fit = dotFit(R, frame, x, y, m.dot, t.n("--chart-gap"));', 'var fit = { r: m.dot, ring: t.n("--chart-gap") };'];
+
+/** The layer with the fit taken back out (the post-issue-1128 behaviour): the same-file control the plants and the
+ * default no-op check compare against. It is not an acceptance base — the acceptance comparison is the store's
+ * two-export harness, which loads the pinned base from its own export. */
+const UNFITTED_LAYER = layerWith((s) => s.replace(UNFITTED[0], UNFITTED[1]))._internal;
+
+/** Every chart fixture (wire, name, fixture), the engine module's own list, read the same way. */
+function allFixtures() {
+  const out = [];
+  for (const wire of readdirSync(FIXTURES).sort()) {
+    const dir = path.join(FIXTURES, wire);
+    if (wire.startsWith("_") || !statSync(dir).isDirectory()) continue;
+    for (const f of readdirSync(dir).sort()) if (f.endsWith(".json")) out.push({ wire, name: f.slice(0, -5), fixture: fixture(wire, f.slice(0, -5)) });
+  }
+  return out;
+}
+
+/** The engine's picture of [fx] at the frame under [theme]; the layer draws none of it, so the shipped layer and the unfitted control share it. */
+function renderAt(fx, w, h, theme) {
+  return R.render(inputOf(fx.document.config.mark.type, fx.document, fx.columns, fx.types, { w, h }, { theme }));
+}
+
+/** The model of [out] under [theme] (the layer's own): the measures the crosshair reads, the theme attached. */
+function modelAt(layer, out, theme) {
+  const m = layer.modelOf(R, out, WIDTH);
+  const measures = layer.measures(R, theme);
+  m.theme = measures.theme;
+  return { m, measures };
+}
+
+/** The first, middle and last distinct datum of every visible series of [model]. */
+function datumPicks(model) {
+  const picks = [];
+  for (const ser of model.series) {
+    const n = ser.marks.length;
+    if (n === 0) continue;
+    for (const i of new Set([0, Math.floor((n - 1) / 2), n - 1])) picks.push({ id: ser.id, datum: ser.marks[i].datum });
+  }
+  return picks;
+}
+
+const guideDots = (scene) => scene.prims.filter((p) => p.k === "circle" && p.role === "guide");
+
+/** A dot's four outer ink bounds: its center ± its radius and half its ring. */
+function inkOf(dot) {
+  const e = dot.r + dot.strokeWidth / 2;
+  return { left: dot.cx - e, right: dot.cx + e, top: dot.cy - e, bottom: dot.cy + e };
+}
+
+/** A dot's whole ink inside the frame, within [tol] of arithmetic noise on each side. */
+function dotInside(dot, w, h, tol) {
+  const b = inkOf(dot);
+  return b.left >= -tol && b.top >= -tol && b.right <= w + tol && b.bottom <= h + tol;
+}
+
+/**
+ * The crosshair over every line and area fixture at the small frames under --chart-point 16 and each gap, both inputs,
+ * the first, middle and last datum of every visible series: each guide dot's whole ink inside the frame and its center
+ * the data point (unchanged from the unfitted control), the guide line, the focus ring and the card drawn. Returns the counts and
+ * the problems; the main test asserts none, a falsification asserts some.
+ */
+function geometry(LAYER, base = "light") {
+  const frames = [[80, 24], [160, 24], [120, 40], [200, 140]];
+  const gaps = [0, 2, 8];
+  const seen = { pictures: 0, scenes: 0, dots: 0, shrunk: 0, whole: 0 };
+  const problems = [];
+  for (const f of allFixtures()) {
+    if (f.wire !== "line" && f.wire !== "area") continue;
+    for (const gap of gaps) for (const [w, h] of frames) {
+      const theme = { base, tokens: { "--chart-point": 16, "--chart-gap": gap } };
+      const out = renderAt(f.fixture, w, h, theme);
+      if (out.state !== "rendered") continue;
+      const { m, measures } = modelAt(I, out, theme);
+      if (m.series.length === 0) continue;
+      seen.pictures++;
+      for (const { id, datum } of datumPicks(m)) {
+        const anchor = I.anchorOf(m, id, datum);
+        for (const [mode, state] of [
+          ["key", { last: "key", target: { kind: "mark", id, datum }, hit: null, pointer: null }],
+          ["pointer", { last: "pointer", target: null, hit: { mark: { id, datum }, entry: null, cut: null }, pointer: anchor }],
+        ]) {
+          const cand = LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          const unfitted = UNFITTED_LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          const at = `${f.wire}/${f.name} ${w}x${h} gap ${gap} ${mode} ${id}@${datum}`;
+          const cdots = guideDots(cand);
+          const bdots = guideDots(unfitted);
+          seen.scenes++;
+          if (cdots.length === 0) {
+            problems.push(`${at}: no guide dot`);
+            continue;
+          }
+          const cen = (ds) => ds.map((d) => [d.cx, d.cy, d.series]);
+          if (JSON.stringify(cen(cdots)) !== JSON.stringify(cen(bdots))) problems.push(`${at}: a center moved`);
+          if (cand.prims.filter((p) => p.k === "line" && p.role === "guide").length !== 1) problems.push(`${at}: no guide line`);
+          if (mode === "key" && cand.prims.filter((p) => p.k === "rect" && p.role === "focus").length !== 1) problems.push(`${at}: no focus ring`);
+          if (cand.prims.filter((p) => p.role === "tooltip").length === 0) problems.push(`${at}: no card`);
+          for (let i = 0; i < cdots.length; i++) {
+            seen.dots++;
+            const d = cdots[i];
+            const b = bdots[i];
+            if (d.r !== b.r || d.strokeWidth !== b.strokeWidth) seen.shrunk++;
+            else seen.whole++;
+            if (!dotInside(d, w, h, 1e-9)) problems.push(`${at}: a dot's ink ${JSON.stringify(inkOf(d))} leaves the frame`);
+          }
+        }
+      }
+    }
+  }
+  return { seen, problems };
+}
+
+test("1132: the fit at its witness and its borders", () => {
+  assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 16.5, 2), { r: 5.65, ring: 0.6857142857142857 }, "the 80x24 point 16 gap 2 witness");
+  assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 4.5, 2), { r: 4.5, ring: 2 }, "the default theme's dot fits and is kept exactly");
+  assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 0, 10, 16.5, 2), { r: 0, ring: 0 }, "zero room leaves both zero");
+  assert.deepEqual(I.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 16.5, 0), { r: 6, ring: 0 }, "without a ring the radius alone fits the 6 px of room");
+  assert.deepEqual(I.dotFit(R, { w: 400, h: 200 }, 100, 50, 16.5, 2), { r: 16.5, ring: 2 }, "a dot the frame already holds is kept exactly");
+});
+
+test("1132: at --chart-point 16 the crosshair dot's whole ink stays inside the frame and its center is the data point", () => {
+  const byBase = {};
+  for (const base of ["light", "dark"]) {
+    const { seen, problems } = geometry(I, base);
+    assert.deepEqual(problems.slice(0, 5), [], `${base}: ${problems.length} problems`);
+    console.log(`1132 point-16 ${base}: ${JSON.stringify(seen)}`);
+    assert.ok(seen.pictures >= 200 && seen.scenes >= 1000 && seen.dots >= 2000 && seen.shrunk >= 1000 && seen.whole >= 50, JSON.stringify(seen));
+    byBase[base] = seen;
+  }
+  assert.deepEqual(byBase.dark, byBase.light, "the fit's counts are the same under light and dark (length tokens only)");
+});
+
+test("1132: at the default light and dark tokens the fit is a no-op, so every hover scene equals the unfitted control", () => {
+  const frames = [[80, 24], [160, 24], [360, 240], [960, 540]];
+  const themes = ["light", "dark"];
+  const visited = { pictures: 0, scenes: 0 };
+  const problems = [];
+  for (const f of allFixtures()) {
+    for (const [w, h] of frames) for (const theme of themes) {
+      const out = renderAt(f.fixture, w, h, theme);
+      if (out.state !== "rendered") continue;
+      visited.pictures++;
+      if (f.wire !== "line" && f.wire !== "area") continue;
+      const { m, measures } = modelAt(I, out, theme);
+      if (m.series.length === 0) continue;
+      for (const { id, datum } of datumPicks(m)) {
+        const anchor = I.anchorOf(m, id, datum);
+        for (const state of [
+          { last: "key", target: { kind: "mark", id, datum }, hit: null, pointer: null },
+          { last: "pointer", target: null, hit: { mark: { id, datum }, entry: null, cut: null }, pointer: anchor },
+        ]) {
+          const cand = I.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          const unfitted = UNFITTED_LAYER.scene(R, m, { frame: { w, h } }, measures, WIDTH, state);
+          visited.scenes++;
+          if (JSON.stringify(cand) !== JSON.stringify(unfitted)) problems.push(`${f.wire}/${f.name} ${w}x${h} ${theme} ${id}@${datum} differs`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(problems.slice(0, 5), [], `${problems.length} hover scenes differ from the unfitted control`);
+  console.log(`1132 default no-op control: visited ${JSON.stringify(visited)}`);
+  assert.ok(visited.pictures >= 1500 && visited.scenes >= 1000, JSON.stringify(visited));
+});
+
+test("1132 plant 1: without the downward rounding the witness dot's ink leaks past the frame", () => {
+  const rounded = layerWith((s) => s.replace("Math.floor(100 *", "Math.round(100 *"))._internal;
+  const fit = rounded.dotFit(R, { w: 80, h: 24 }, 6, 15.12, 16.5, 2);
+  assert.equal(fit.r, 5.66, "the radius rounds up to 5.66 instead of down to 5.65");
+  assert.ok(6 - (fit.r + fit.ring / 2) < 0, `the left ink is ${6 - (fit.r + fit.ring / 2)}`);
+  const { problems } = geometry(rounded);
+  assert.ok(problems.some((p) => /leaves the frame/.test(p)), problems[0] || "no bounds problem");
+});
+
+test("1132 plant 2: the theme-only radius lets the crosshair dot leave the frame at --chart-point 16", () => {
+  const { seen, problems } = geometry(UNFITTED_LAYER);
+  assert.ok(problems.some((p) => /leaves the frame/.test(p)), problems[0] || "no bounds problem");
+  assert.equal(seen.shrunk, 0, "nothing is fitted, so nothing differs from the unfitted control");
+});
+
+test("1132 plant 3: without the half ring in the fit's reach a nonzero-ring dot near the edge is kept and leaks", () => {
+  const noHalfRing = layerWith((s) => s.replace("rr + ring / 2 <= available", "rr <= available"))._internal;
+  // A dot whose radius fits the 17 px of room but whose ring does not: the correct fit scales it, the plant keeps it.
+  const kept = noHalfRing.dotFit(R, { w: 40, h: 40 }, 17, 17, 16.5, 8);
+  assert.deepEqual(kept, { r: 16.5, ring: 8 }, "the reach without the half ring keeps the dot exactly");
+  assert.ok(17 - (kept.r + kept.ring / 2) < 0, `its ink leaves the frame by ${17 - (kept.r + kept.ring / 2)}`);
+  const fit = I.dotFit(R, { w: 40, h: 40 }, 17, 17, 16.5, 8);
+  assert.ok(fit.r < 16.5 && 17 - (fit.r + fit.ring / 2) >= 0, "the shipped fit scales the same dot inside the frame");
 });
