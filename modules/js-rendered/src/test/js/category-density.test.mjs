@@ -112,10 +112,10 @@ function boxInput(n, w = 960, h = 540) {
 }
 
 /** A waterfall over `n` steps and a closing total (`total: "end"` adds one bar). */
-function waterfallInput(n, total = "end", w = 960, h = 540) {
+function waterfallInput(n, total = "end", w = 960, h = 540, tokens = {}) {
   const s = Array.from({ length: n }, (_, i) => "s" + i);
   const v = Array(n).fill(1);
-  return { type: "waterfall", document: { display_name: "w", config: { mark: { type: "waterfall", total }, encoding: { x: { field: "s", type: "nominal", sort: null }, y: { field: "v", type: "quantitative", aggregate: "sum" } } } }, columns: { s, v }, types: { s: "STRING", v: "INTEGER" }, frame: { w, h }, theme: { base: "light", tokens: {} }, measure: null, hidden: [] };
+  return { type: "waterfall", document: { display_name: "w", config: { mark: { type: "waterfall", total }, encoding: { x: { field: "s", type: "nominal", sort: null }, y: { field: "v", type: "quantitative", aggregate: "sum" } } } }, columns: { s, v }, types: { s: "STRING", v: "INTEGER" }, frame: { w, h }, theme: { base: "light", tokens }, measure: null, hidden: [] };
 }
 
 /** The dense inputs of the excluded types: as many categories as the type admits, none of which is a category band. */
@@ -167,18 +167,29 @@ function assertRefusal(r, axis, categories, groups) {
 
 // ---------------------------------------------------------------- the registry inventory
 
-/** One entry per registered type, in R.types() order: how the type allocates a category band, or why it is excluded. */
+// Admitted theme tokens that reach the boundary at a minimal frame (05-theme.js admits --chart-text 8 to 32 and
+// --chart-gap 0 to 8, fractional lengths included). The horizontal edge is half the text size (#1131 keeps it
+// independent of the short frame's vertical inset), so text 30 at 80 × 24 leaves a plot width of 50: a waterfall bar is
+// 50 / bars × 0.74, under one pixel at 38 bars, exactly one at 37. Text 10 at 160 × 24 leaves 150: a three-bar-layer
+// combo split is (150 / n × 0.74 − 2 × gap) / 3, exactly one at 37 categories with gap 0.
+const WATERFALL_TOKENS = { "--chart-text": 30 };
+const COMBO3_TOKENS = { "--chart-text": 10, "--chart-gap": 0 };
+
+/**
+ * One entry per registered type, in R.types() order: how the type allocates a category band, or why it is excluded.
+ * An applicable entry carries its refusing input and the refusal it must report; an excluded entry says why.
+ */
 const INVENTORY = {
-  bar: { applicable: true, axis: "x or y", note: "grouped/stacked category band" },
-  line: { applicable: true, axis: "x (nominal band only)", note: "a continuous position x is excluded" },
-  area: { applicable: true, axis: "x (nominal band only)", note: "a continuous position x is excluded" },
+  bar: { applicable: true, axis: "x or y", note: "grouped/stacked category band", refusing: () => barInput(20000, 1, 1, 80, 24), expect: { axis: "x", categories: 20000, groups: 1 } },
+  line: { applicable: true, axis: "x (nominal band only)", note: "a continuous position x is excluded", refusing: () => lineInput(5000, false, false, 960, 540), expect: { axis: "x", categories: 5000, groups: 1 } },
+  area: { applicable: true, axis: "x (nominal band only)", note: "a continuous position x is excluded", refusing: () => lineInput(5000, true, false, 960, 540), expect: { axis: "x", categories: 5000, groups: 1 } },
   scatter: { applicable: false, why: "continuous x and y positions, no category axis" },
   pie: { applicable: false, why: "sector layout, no cartesian category axis" },
-  combo: { applicable: true, axis: "x (band)", note: "bar layers split the band; a non-bar layer uses the whole slot" },
-  heatmap: { applicable: true, axis: "x and y", note: "each axis checked independently" },
+  combo: { applicable: true, axis: "x (band)", note: "bar layers split the band; a non-bar layer uses the whole slot", refusing: () => comboInput(60, 3, 240, 140), expect: { axis: "x", categories: 60, groups: 3 } },
+  heatmap: { applicable: true, axis: "x and y", note: "each axis checked independently", refusing: () => heatmapInput(20000, 1, 960, 540), expect: { axis: "x", categories: 20000, groups: 1 } },
   histogram: { applicable: false, why: "numeric bins, no category axis" },
-  box: { applicable: true, axis: "x", note: "category band with box statistics" },
-  waterfall: { applicable: true, axis: "x", note: "each step and shown total" },
+  box: { applicable: true, axis: "x", note: "category band with box statistics", refusing: () => boxInput(50, 80, 24), expect: { axis: "x", categories: 50, groups: 1 } },
+  waterfall: { applicable: true, axis: "x", note: "each step and shown total", refusing: () => waterfallInput(37, "end", 80, 24, WATERFALL_TOKENS), expect: { axis: "x", categories: 38, groups: 1 } },
   funnel: { applicable: false, why: "stage layout, no cartesian category axis" },
   gauge: { applicable: false, why: "gauge layout, no cartesian category axis" },
   sparkline: { applicable: false, why: "axis-free point span" },
@@ -186,55 +197,47 @@ const INVENTORY = {
   treemap: { applicable: false, why: "hierarchy layout, no cartesian category axis" },
 };
 
-test("the inventory is one table keyed by every registered type, in registry order", () => {
-  same(Object.keys(INVENTORY), R.types().map((t) => t.name));
-  for (const entry of Object.values(INVENTORY)) {
+/** The inventory's shape: keyed by every registered type in order; an applicable entry has a refusing input and its refusal. */
+function checkInventory(inventory, types) {
+  same(Object.keys(inventory), types.map((t) => t.name));
+  for (const [type, entry] of Object.entries(inventory)) {
     if (entry.applicable) {
-      assert.equal(typeof entry.axis, "string", "an applicable entry names its axis");
+      assert.equal(typeof entry.axis, "string", type + ": an applicable entry names its axis");
+      assert.equal(typeof entry.refusing, "function", type + ": an applicable entry has a refusing input");
+      assert.ok(entry.expect !== null && typeof entry.expect === "object", type + ": an applicable entry states its refusal");
     } else {
-      assert.equal(typeof entry.why, "string", "an excluded entry says why");
+      assert.equal(typeof entry.why, "string", type + ": an excluded entry says why");
     }
   }
+}
+
+test("the inventory is one table keyed by every registered type, in registry order", () => {
+  checkInventory(INVENTORY, R.types());
 });
 
 test("the inventory key-set is red for a stand-in type, green restored (the gate)", () => {
   const E = engine();
   E.type("stand_in", { channels: [], model: () => null, marks: () => [], axes: "cartesian" });
-  assert.throws(() => same(Object.keys(INVENTORY), E.types().map((t) => t.name)), "a stand-in type breaks the key set");
-  same(Object.keys(INVENTORY), R.types().map((t) => t.name), "the real registry still matches");
+  assert.throws(() => checkInventory(INVENTORY, E.types()), "a stand-in type breaks the key set");
+  checkInventory(INVENTORY, R.types());
+});
+
+test("the inventory is red when an applicable entry loses its refusing input, green restored (the gate)", () => {
+  for (const [type, entry] of Object.entries(INVENTORY)) {
+    if (!entry.applicable) continue;
+    assert.throws(() => checkInventory({ ...INVENTORY, [type]: { ...entry, refusing: null } }, R.types()), new RegExp(type + ": an applicable entry has a refusing input"));
+    assert.throws(() => checkInventory({ ...INVENTORY, [type]: { ...entry, expect: null } }, R.types()), new RegExp(type + ": an applicable entry states its refusal"));
+  }
+  checkInventory(INVENTORY, R.types());
 });
 
 test("every inventory entry is driven through a real render", () => {
-  // An applicable type: a dense band input refuses with the family's own counts. An excluded type: a dense input
-  // (as many categories as the type admits) never refuses on density.
-  const applicable = {
-    bar: () => barInput(20000, 1, 1, 80, 24),
-    line: () => lineInput(5000, false, false, 960, 540),
-    area: () => lineInput(5000, true, false, 960, 540),
-    combo: () => comboInput(60, 3, 240, 140),
-    heatmap: () => heatmapInput(20000, 1, 960, 540),
-    box: () => boxInput(50, 80, 24),
-    waterfall: () => waterfallInput(49, "end", 80, 24),
-  };
-  const expect = {
-    bar: { axis: "x", categories: 20000, groups: 1 },
-    line: { axis: "x", categories: 5000, groups: 1 },
-    area: { axis: "x", categories: 5000, groups: 1 },
-    combo: { axis: "x", categories: 60, groups: 3 },
-    heatmap: { axis: "x", categories: 20000, groups: 1 },
-    box: { axis: "x", categories: 50, groups: 1 },
-    // waterfall cannot cross one pixel (see the boundary test): it renders, never refuses on density.
-    waterfall: null,
-  };
+  // An applicable type: its refusing input refuses with the family's own counts. An excluded type: a dense input (as
+  // many categories as the type admits) never refuses on density.
+  checkInventory(INVENTORY, R.types());
   for (const [type, entry] of Object.entries(INVENTORY)) {
     if (entry.applicable) {
-      const r = R.render(applicable[type]());
-      if (expect[type] === null) {
-        assert.equal(r.state, "rendered", type + " renders (the cap and floor keep it above one pixel)");
-        assert.equal(r.summary.refusal, null, type);
-      } else {
-        assertRefusal(r, expect[type].axis, expect[type].categories, expect[type].groups);
-      }
+      assertRefusal(R.render(entry.refusing()), entry.expect.axis, entry.expect.categories, entry.expect.groups);
     } else {
       const r = R.render(excludedInput(type));
       assert.equal(r.state, "rendered", type + " renders its dense input");
@@ -281,6 +284,13 @@ test("combo bar layer: just below, exactly at and just above one pixel (112 × 2
   assert.equal(R.render(comboInput(73, 1, 112, 24)).state, "rendered", "above one pixel passes");
 });
 
+test("combo three bar layers: just below, exactly at and just above one pixel (160 × 24, text 10, gap 0, plot width 150)", () => {
+  // (150 / n × 0.74 − 0) / 3: 0.9737 at 38 categories, exactly 1 at 37, 1.0278 at 36; groups is the three visible layers.
+  assertRefusal(R.render(comboInput(38, 3, 160, 24, { tokens: COMBO3_TOKENS })), "x", 38, 3);
+  assert.equal(R.render(comboInput(37, 3, 160, 24, { tokens: COMBO3_TOKENS })).state, "rendered", "exactly one pixel passes");
+  assert.equal(R.render(comboInput(36, 3, 160, 24, { tokens: COMBO3_TOKENS })).state, "rendered", "above one pixel passes");
+});
+
 test("combo non-bar slot: just below, exactly at and just above one pixel (80 × 24, one line layer)", () => {
   assertRefusal(R.render(comboInput(69, 0, 80, 24, { line: true })), "x", 69, 1);
   assert.equal(R.render(comboInput(68, 0, 80, 24, { line: true })).state, "rendered", "exactly one pixel passes");
@@ -307,13 +317,23 @@ test("box: just below, exactly at and just above one pixel (80 × 24, plot width
   assert.equal(R.render(boxInput(33, 80, 24)).state, "rendered", "above one pixel passes");
 });
 
-test("waterfall: the 50-bar cap and the minimal floor keep every allocation above one pixel", () => {
-  // 49 steps plus the closing total is the 50-bar cap; at the minimal frame each bar is 1.0064 px, so it draws. No
-  // accepted input can push a waterfall under one pixel: the cap and the floor prevent it, so the below/exact values
-  // stay on the shared decision's unit test above and the rendered "above" is pinned here.
-  const r = R.render(waterfallInput(49, "end", 80, 24));
-  assert.equal(r.state, "rendered");
-  assert.equal(r.summary.marks, 50);
+test("waterfall: just below, exactly at and just above one pixel (80 × 24, text 30, plot width 50)", () => {
+  // 50 / bars × 0.74 with the closing total counted: 37 steps + 1 = 38 bars is 0.9737 px, 36 + 1 = 37 is exactly 1,
+  // 35 + 1 = 36 is 1.0278. Every count is under the 50-bar cap.
+  assertRefusal(R.render(waterfallInput(37, "end", 80, 24, WATERFALL_TOKENS)), "x", 38, 1);
+  assert.equal(R.render(waterfallInput(36, "end", 80, 24, WATERFALL_TOKENS)).state, "rendered", "exactly one pixel passes");
+  assert.equal(R.render(waterfallInput(35, "end", 80, 24, WATERFALL_TOKENS)).state, "rendered", "above one pixel passes");
+});
+
+test("waterfall: the 50-bar cap renders at the default text size and refuses at an admitted larger one", () => {
+  // 49 steps plus the closing total is the 50-bar cap: at the default text (12) each bar is 1.0064 px and draws, in the
+  // minimal and a normal frame; at the admitted text 16 the plot narrows and each bar is 0.9472 px, so it refuses.
+  for (const [w, h] of [[80, 24], [960, 540]]) {
+    const r = R.render(waterfallInput(49, "end", w, h));
+    assert.equal(r.state, "rendered", `${w}x${h}`);
+    assert.equal(r.summary.marks, 50, `${w}x${h}`);
+  }
+  assertRefusal(R.render(waterfallInput(49, "end", 80, 24, { "--chart-text": 16 })), "x", 50, 1);
 });
 
 test("each family's refusing input renders in a larger frame", () => {
@@ -326,19 +346,36 @@ test("each family's refusing input renders in a larger frame", () => {
     ["combo non-bar slot", comboInput(69, 0, 80, 24, { line: true }), comboInput(69, 0, 960, 540, { line: true })],
     ["heatmap", heatmapInput(69, 1, 80, 200, { "--chart-gap": 0 }), heatmapInput(69, 1, 960, 540, { "--chart-gap": 0 })],
     ["box", boxInput(35, 80, 24), boxInput(35, 960, 540)],
+    ["box 50", boxInput(50, 80, 24), boxInput(50, 960, 540)],
+    ["combo three bar layers", comboInput(38, 3, 160, 24, { tokens: COMBO3_TOKENS }), comboInput(38, 3, 960, 540, { tokens: COMBO3_TOKENS })],
+    ["combo 60 × 3", comboInput(60, 3, 240, 140), comboInput(60, 3, 960, 540)],
+    ["waterfall", waterfallInput(37, "end", 80, 24, WATERFALL_TOKENS), waterfallInput(37, "end", 960, 540, WATERFALL_TOKENS)],
   ];
   for (const [name, refused, roomy] of cases) {
-    assert.equal(R.render(refused).state, "refused", name + " refuses at the small frame");
+    const r = R.render(refused);
+    assert.equal(r.state, "refused", name + " refuses at the small frame");
+    assert.equal(r.summary.refusal.code, "chart.rule.category-density", name + " refuses on density");
     assert.equal(R.render(roomy).state, "rendered", name + " recovers in a larger frame");
   }
-  // Waterfall never refuses: its 50-bar cap and the minimal floor keep every allocation above one pixel.
-  assert.equal(R.render(waterfallInput(49, "end", 80, 24)).state, "rendered");
+});
+
+test("bar at the mark cap: 1,000 bars refuse at 960 × 540 and the same 1,000 bars draw at 1920 × 540", () => {
+  assertRefusal(R.render(barInput(1000, 1, 1000, 960, 540)), "x", 1000, 1);
+  const roomy = R.render(barInput(1000, 1, 1000, 1920, 540));
+  assert.equal(roomy.state, "rendered", "the same 1,000 bars draw in a wider frame");
+  assert.equal(roomy.summary.marks, 1000);
 });
 
 test("the boundary is rendered, not fabricated: the exact-one controls go red when < becomes <=", () => {
   const le = densityLe();
   // exactly one pixel: renders on the real engine, refuses on a copy that treats one pixel as too small.
-  for (const mk of [() => barInput(74, 1, 74, 112, 24), () => lineInput(68, false, false, 80, 24)]) {
+  const exactOne = [
+    () => barInput(74, 1, 74, 112, 24),
+    () => lineInput(68, false, false, 80, 24),
+    () => comboInput(37, 3, 160, 24, { tokens: COMBO3_TOKENS }),
+    () => waterfallInput(36, "end", 80, 24, WATERFALL_TOKENS),
+  ];
+  for (const mk of exactOne) {
     assert.equal(R.render(mk()).state, "rendered");
     assert.equal(le.render(mk()).state, "refused", "<= refuses exactly one pixel");
     assert.equal(le.render(mk()).summary.refusal.code, "chart.rule.category-density");
@@ -396,6 +433,36 @@ test("the 60-category three-bar-layer matrix across gaps and widths", () => {
   }
 });
 
+// ---------------------------------------------------------------- sparse domains: null-only categories stay in the domain
+
+/** The sparse refusal controls: one non-null cell in a 20,000-category domain still allocates 20,000 bands. */
+const SPARSE_REFUSALS = [
+  ["bar 20,000 categories at 960 × 540", () => barInput(20000, 1, 1, 960, 540), "x", 20000, 1],
+  ["horizontal bar 20,000 categories at 80 × 24", () => barInput(20000, 1, 1, 80, 24, { horizontal: true }), "y", 20000, 1],
+];
+
+/** The all-null large domains: no occupied mark, so no-data, never a density refusal; `one` is the same with one non-null cell. */
+const ALL_NULL = [
+  ["bar 20,000 categories", (one) => barInput(20000, 1, one ? 1 : 0, 80, 24)],
+  ["heatmap 20,000 × 20,000", (one) => heatmapInput(20000, one ? 1 : 0, 960, 540)],
+];
+
+test("sparse bar: one non-null cell among 20,000 categories refuses at a normal frame, and horizontally on y", () => {
+  for (const [name, mk, axis, categories, groups] of SPARSE_REFUSALS) {
+    const r = R.render(mk());
+    assert.equal(r.state, "refused", name);
+    assertRefusal(r, axis, categories, groups);
+  }
+});
+
+test("all-null large domains are no-data, not a density refusal (bar and heatmap)", () => {
+  for (const [name, mk] of ALL_NULL) {
+    const r = R.render(mk(false));
+    assert.equal(r.state, "no-data", name);
+    assert.equal(r.summary.marks, 0, name);
+  }
+});
+
 // ---------------------------------------------------------------- higher-priority refusals win
 
 test("the row and mark caps win over density", () => {
@@ -419,14 +486,17 @@ test("G2: the exact-one control goes red when < becomes <=", () => {
 
 test("G3: the grouped case reads the grouped width, not the raw band step", () => {
   const raw = engine((s) => plant(s, "types/bar.js", "width: stacked ? groupW : barW }", "width: plot.band.step }"));
-  assert.equal(R.render(barInput(3, 8, 24, 80, 24)).state, "refused", "the grouped width is under a pixel");
+  // 3 categories, 8 series at 80 × 24: each bar is 0.1 px (the final #1130 grouped width), the band step is 20 px.
+  assertRefusal(R.render(barInput(3, 8, 24, 80, 24)), "x", 3, 8);
   assert.equal(raw.render(barInput(3, 8, 24, 80, 24)).state, "rendered", "the raw band step alone would not refuse");
+  assert.equal(densityOff().render(barInput(3, 8, 24, 80, 24)).state, "rendered", "density off renders the grouped bars");
 });
 
 test("G4: the heatmap row case is skipped when only x is checked", () => {
   const skipY = engine((s) => plant(s, "types/heatmap.js", '{ axis: "y", categories: hand.rows.n, groups: 1, width: hand.rows.step - 2 * gy },', ""));
   const f = heatmapInput(20000, 1, 40000, 24);
-  assert.equal(R.render(f).state, "refused", "the y cells are under a pixel");
+  // A wide-but-minimal frame keeps the x cells above a pixel while the y cells stay under one: y fails independently.
+  assertRefusal(R.render(f), "y", 20000, 1);
   assert.equal(skipY.render(f).state, "rendered", "skipping y hides the row failure");
 });
 
@@ -438,4 +508,14 @@ test("G5: counting hidden bar layers as groups keeps the group count wrong (the 
   assertRefusal(mk([], R), "x", 125, 3);
   assertRefusal(mk(["layer:0"], R), "x", 125, 2);
   assert.equal(allBars.render(comboInput(125, 3, 640, 360, { hidden: ["layer:0"] })).summary.refusal.details.groups, 3, "the copy still reports three groups after hiding");
+});
+
+test("G6: the restored sparse controls go red with the shared decision disabled; the no-data controls go red with one non-null cell", () => {
+  const off = densityOff();
+  for (const [name, mk] of SPARSE_REFUSALS) assert.equal(off.render(mk()).state, "rendered", name + ": density off renders where refusal was expected");
+  for (const [name, mk] of ALL_NULL) {
+    const r = R.render(mk(true));
+    assert.notEqual(r.state, "no-data", name + ": one non-null cell is no longer no-data");
+    assert.equal(r.summary.refusal.code, "chart.rule.category-density", name + ": the occupied cell refuses on density");
+  }
 });
