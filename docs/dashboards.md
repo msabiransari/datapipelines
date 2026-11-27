@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, box, waterfall, funnel, gauge and treemap families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge and treemap families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -237,6 +237,12 @@ each as `{field: [values]}` (§2.1.2).
   cell in the adjacent occupied row, Home/End the row's ends, skipping empty cells. Right at a row's end can reach a
   shortened text; Left from the first shortened text returns to the first row's last cell.
 
+  **Histogram (#1071).** The distribution of one numeric column: `{title?, mark: {type: "histogram", bins?}, encoding: {x, y, color?}}`. Required `x` is a quantitative position (field, optional title, format, unit and axis grid). Required `y` is only `{aggregate: "count" | "share"}`, with no field. Optional `color` is a nominal or ordinal series with a sort. A temporal or nominal x is refused. Every explicit x.scale (linear, domain or log) is refused: the bins' edges alone set the horizontal range. A shade color, authored tooltip, value labels and unequal-width bins are refused.
+
+  Null series and null x rows are dropped with one `chart.rule.null-category` and `chart.rule.null-position` warning respectively; non-finite x values give one `chart.rule.non-finite`. Numeric text is read as a number. No counted rows means no data. By default the target is Sturges' ceil(log2(rows)) + 1, bounded to 5–50. An integer `bins` from 5 to 50 overrides the target. Nice edges may give fewer bins; the last bin includes its upper edge. All series set the edges, including hidden ones. Count ticks are whole numbers; share divides by all shown rows. At most 20,000 rows, eight series and 50 bins; nothing is thinned. `mark_count` counts drawn series/bin segments.
+
+  Bins have gaps and stack in series order, rounding only the outermost segment. The card heads with “from … to …”, with the unit after each edge, then each shown series' count or share, top first; the hovered row is kept when space is short. The full bin interval, gap included, is a pointer target. Left/Right walk nonempty bins in a series, Up/Down adjacent drawn series, Home/End the series' ends. Switches hide series and refit the count axis without moving the edges or changing colours. With no drawn switch (minimal size or a null legend), hidden ids are ignored.
+
   **Box (#1072).** The spread of one number in each category: `{title?, mark: {type: "box",
   outliers?: "none" | "points"}, encoding: {x?, y}}`. `x` is an optional band (nominal, ordinal or temporal),
   with required `sort` (ascending, descending, null or an explicit list). Without `x`, one box is named after
@@ -348,9 +354,9 @@ each as `{field: [values]}` (§2.1.2).
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
     quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
     On a value axis or a number axis it also follows that axis's title, never a tick.
-  - `encoding.tooltip` ( a heatmap's, a box's or a waterfall's card is fixed): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
+  - `encoding.tooltip` (bar, line, area, scatter and combo only): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
     show (not on a funnel or gauge; not on a treemap: its card is the type's own).
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie or a histogram's x) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
     on a line, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
@@ -1539,6 +1545,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v0.NEXT | 1071 (#1071) | **§2.1.2:** Histogram distributions, nice target bins, whole count ticks, share, cards and keyboard navigation. |
 | 2026-11-27 | v0.94 | 1069 (#1069) | **§2.1.2:** Combo layers, shared axis scales, per-layer caps, card and bar hover. |
 | 2026-11-27 | v0.93 | 1102 (#1102) — renumbered after #1094’s v0.92 | **§2.1.2:** Linear count value axes mark whole numbers, including domains with whole ends; fractional authored domains, log scales and normalized shares keep their ticks. |
 | 2026-11-26 | v0.92 | 1094 (#1094) | **§2.1.2:** A line or area's number x writes its unit after the axis title and the tooltip's x value, never a tick. |

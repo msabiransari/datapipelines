@@ -60,6 +60,9 @@ enum class ChartType(
     /** Two category bands and a shade per cell; BAR names the rectangle policy, unused by band and shade shapes. */
     HEATMAP("heatmap", ChartChannelNodes.heatmap, ChartMarkPolicy.BAR),
 
+    /** Numeric rows binned on nice edges, optionally stacked by series (§4.5; #1071). */
+    HISTOGRAM("histogram", ChartChannelNodes.histogram, ChartMarkPolicy.AREA),
+
     /** Quartiles and whiskers per category, with outside points (§4.5 box; #1072). */
     BOX("box", ChartChannelNodes.box, ChartMarkPolicy.POINT),
 
@@ -182,6 +185,13 @@ sealed interface ChannelNode {
 
 /** Nodes more than one type shares (§4.2's examples). */
 private object ChartChannelNodes {
+    val histogram: List<ChartChannel> =
+        listOf(
+            ChartChannel("x", required = true, node = ChannelNode.Shape("position")),
+            ChartChannel("y", required = true, node = ChannelNode.Shape("count")),
+            ChartChannel("color", required = false, node = ChannelNode.Shape("series")),
+        )
+
     val combo: List<ChartChannel> =
         listOf(
             ChartChannel("x", required = true, node = ChannelNode.Shape("band")),
