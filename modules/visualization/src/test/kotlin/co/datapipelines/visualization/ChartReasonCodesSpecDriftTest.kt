@@ -18,7 +18,11 @@ class ChartReasonCodesSpecDriftTest {
                 WIRE.matches(reason.wire) shouldBe true
             }
             withClue("${reason.name}: derive the member name from ${reason.wire}") {
-                reason.name shouldBe reason.wire.removePrefix("chart.").uppercase().replace('.', '_')
+                reason.name shouldBe
+                    reason.wire
+                        .removePrefix("chart.")
+                        .uppercase()
+                        .replace('.', '_')
             }
             withClue("${reason.wire}: fromWire must return its member") { ChartReason.fromWire(reason.wire) shouldBe reason }
         }
@@ -118,12 +122,20 @@ class ChartReasonCodesSpecDriftTest {
         val lines = text.lines()
         val headers = lines.indices.filter { lines[it].trim() == header }
         check(headers.size == 1) { "$document: '$header' found ${headers.size} times; keep exactly one table header" }
-        val rows = lines.drop(headers.single() + 1).takeWhile { it.trim().startsWith('|') }
+        val rows =
+            lines
+                .drop(headers.single() + 1)
+                .takeWhile { it.trim().startsWith('|') }
         val codes = linkedSetOf<String>()
         var count = 0
         for (row in rows) {
             if (SEPARATOR.matches(row.trim())) continue
-            val cell = row.trim().removePrefix("|").substringBefore('|').trim()
+            val cell =
+                row
+                    .trim()
+                    .removePrefix("|")
+                    .substringBefore('|')
+                    .trim()
             check(CELL.matches(cell)) { "$document: unreadable row $row; use backticked codes joined by exactly ' / '" }
             for (match in TOKEN.findAll(cell)) {
                 val code = match.groupValues[1]
