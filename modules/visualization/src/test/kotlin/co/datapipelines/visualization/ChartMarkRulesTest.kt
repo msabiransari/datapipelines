@@ -63,17 +63,17 @@ class ChartMarkRulesTest {
         ChartSaveRules.check(body, columns).refusals shouldBe
             listOf(
                 ChartRefusal(
-                    "chart.bands.not_ascending",
+                    ChartReason.BANDS_NOT_ASCENDING,
                     "/config/mark/bands/1/to",
                     "Each band's end must be greater than the ends before it.",
                 ),
                 ChartRefusal(
-                    "chart.bands.outside_domain",
+                    ChartReason.BANDS_OUTSIDE_DOMAIN,
                     "/config/mark/bands/2/to",
                     "A band's end must be above the scale's low end and at most its high end.",
                 ),
                 ChartRefusal(
-                    "chart.target.outside_domain",
+                    ChartReason.TARGET_OUTSIDE_DOMAIN,
                     "/config/mark/target",
                     "The target must lie inside the scale's domain.",
                 ),

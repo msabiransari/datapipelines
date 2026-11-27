@@ -210,6 +210,7 @@ GUARDS[":modules:visualization"]+=" co.datapipelines.visualization.DashboardRunt
 GUARDS[":modules:visualization"]+=" co.datapipelines.visualization.VisualizationConfigKeysSpecDriftTest"  # inventory 995: reads docs/configuration.md modules/app/src/main/kotlin/co/datapipelines/config/VisualizationRules.kt
 GUARDS[":modules:visualization"]+=" co.datapipelines.visualization.VisualizationEnumsSpecDriftTest"  # inventory 995: reads docs/enums.md
 GUARDS[":modules:visualization"]+=" co.datapipelines.visualization.VisualizationErrorCodesSpecDriftTest"  # inventory 995: reads docs/pipeline-contract.md
+GUARDS[":modules:visualization"]+=" co.datapipelines.visualization.ChartReasonCodesSpecDriftTest"  # inventory 995: reads docs/dashboards.md modules/mcp-server/src/main/resources/skill/dashboards.md
 GUARDS[":modules:web"]+=" co.datapipelines.web.TestRedisDefaultsTest"  # inventory 995: reads docs/configuration.md modules
 GUARDS[":modules:web"]+=" co.datapipelines.web.api.AuthorizationVocabularyGuardTest"  # inventory 995: walks the tree (git ls-files)
 GUARDS[":modules:web"]+=" co.datapipelines.web.bootstrap.ExampleContentSeederTest"  # inventory 995: reads scripts/sample-data-trade/content/examples.json scripts/sample-data/content/examples-lake.json
