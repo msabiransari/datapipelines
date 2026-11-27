@@ -127,7 +127,7 @@ test("A.2/A.3 caps thin past 2000, preserve the end and refuse past 10000 rows",
 });
 const I=createRequire(import.meta.url)(join(MODULE,"../web/src/main/resources/static/js/datapipelines-chart-interactions.js"))._internal;
 function scene(f,w,h,datum,mode="key",R=E) {
-  const {r,hand,m}=draw(f,w,h,{},R),measure=R.measure.measurer(null).fn,model=I.modelOf(R,r,measure);model.theme=R.theme.resolve("light");
+  const {r,hand,m}=draw(f,w,h,{},R),measure=R.measure.measurer(null).fn,model=I.modelOf(R,r,measure);model.theme=R.theme.resolve("light");assert.equal(model.crosshair,true,"form 1 crosshair");
   const target={kind:"mark",id:"measure",datum},pointer={x:r.index.series[0].at[r.index.series[0].datum.indexOf(datum)],y:hand.plot.y+hand.plot.h/2};
   const hit=I.lookup(R,model,pointer);const state=mode==="key"?{last:"key",target,hit:null,pointer:null}:{last:"pointer",target:null,hit,pointer};
   return {sc:I.scene(R,model,{frame:{w,h}},I.measures(R,"light"),measure,state),model,r,hand,m};
@@ -159,6 +159,7 @@ test("G2/G3/G4/G6/G7 targeted mutations are detected",()=>{
   for(const [from,to,check] of [
     ['if (lo !== null && m.layout.domain === null && !m.layout.log)', 'if (false)',R=>{const d=draw(FX.rising,400,200,{},R);near(d.hand.value.scale(12),d.hand.plot.y+d.hand.plot.h);} ],
     ['else m.sparkFlat = true;', 'else m.sparkFlat = false;',checkFlat],
+    ['else m.sparkFlat = true;', 'else m.layout.domain = [a - (a === 0 ? 1 : Math.abs(a)/2), a + (a === 0 ? 1 : Math.abs(a)/2)];',checkFlat],
     ['isFinite(span) ?', 'true ?',extremeSpan],
     ['if (m.sparkFill)', 'if (false)',fillCheck],
     ['plot.y, bottom] : null','plot.y + 12, bottom] : null',fillCheck],
@@ -167,4 +168,111 @@ test("G2/G3/G4/G6/G7 targeted mutations are detected",()=>{
     ['hand.reach.kept / hand.reach.asked','1',dotSweep],
     ['m.layout.last = m.sparkLast === "value"','m.layout.last = m.sparkLast !== "none"',R=>assert.equal(labels(draw(FX["dot-only"],160,32,{},R).r).length,0)],
   ]){const R=makeEngine(s=>plant(s,KEY,from,to));assert.throws(()=>check(R),undefined,from);}
+});
+
+test("A.4 LA2 each render token changes its named field and other tokens keep the picture",()=>{
+  const tokens={"--chart-series-1":[255,0,153],"--chart-canvas":[238,238,238],"--chart-ink":[34,34,34],"--chart-title-weight":700,"--chart-line":3,"--chart-gap":4,"--chart-area-top":.6,"--chart-area-bottom":.1,"--chart-text":14,"--chart-point":6};
+  for(const [w,h] of [[160,32],[400,200]]){
+    const base=draw(FX.rising,w,h).r;
+    for(const [key,value] of Object.entries(tokens)) {
+      const changed=draw(FX.rising,w,h,{theme:{base:"light",tokens:{[key]:value}}}).r;
+      assert.notEqual(JSON.stringify(changed.primitives),JSON.stringify(base.primitives),key);
+      const expected=Array.isArray(value)?"#"+value.map(v=>v.toString(16).padStart(2,"0")).join(""):value;
+      const dot=dots(changed)[0],line=paths(changed).find(p=>p.stroke),fill=paths(changed).find(p=>p.fill),label=labels(changed)[0];
+      if(key==="--chart-series-1") {assert.equal(dot.color,expected);assert.equal(line.strokeColor,expected);assert.equal(fill.color,expected);}
+      if(key==="--chart-canvas")assert.equal(dot.strokeColor,expected);
+      if(key==="--chart-ink")assert.equal(label.color,expected);
+      if(key==="--chart-title-weight")assert.equal(label.weight,value);
+      if(key==="--chart-line")assert.equal(line.strokeWidth,value);
+      if(key==="--chart-gap")assert.equal(dot.strokeWidth,value);
+      if(key==="--chart-area-top")assert.equal(fill.fade[0],value);
+      if(key==="--chart-area-bottom")assert.equal(fill.fade[1],value);
+      if(key==="--chart-text")assert.equal(label.size,value);
+      if(key==="--chart-point")assert.equal(dot.r,value-.5);
+    }
+  }
+});
+test("A.5 no cut text, no legend; End then Right stays at the last point",()=>{
+  let pictures=0;
+  for(const f of [FX.rising,FX.flat,FX["negative-unit"],FX["null-gap"],FX["one-point"]])for(const unit of [undefined,"ms","very long unit"])for(const last of ["none","dot","value"])for(const [w,h] of [[80,24],[160,32],[240,48],[400,200],[480,300],[960,540]]){
+    const fx=clone(f);fx.document.config.mark.last=last;fx.document.config.encoding.y.unit=unit;
+    const {r}=draw(fx,w,h),measure=E.measure.measurer(null).fn,m=I.modelOf(E,r,measure);assert.equal(m.cuts.length,0);assert.equal(m.entries.length,0);
+    let t=I.keyTarget(m,null,"ArrowRight").target;t=I.keyTarget(m,t,"End").target;assert.equal(I.keyTarget(m,t,"ArrowRight").target.datum,t.datum);clean(r,w,h);pictures++;
+  }
+  console.log(`A.5 text/key sweep: ${pictures} pictures`);assert.equal(pictures,270);
+});
+test("G2 span plants, G4 index/unit plants and G6 frame fit plants go red",()=>{
+  for(const [file,from,to,check] of [
+    [KEY,'return plot.x + plot.w * fraction;','return hand.x ? hand.x.scale(x.at) : hand.band.start + hand.band.step * (ordinal + 0.5);',checkSpan],
+    [KEY,'if (first === last) return plot.x + plot.w;','first = 0; last = n - 1; if (first === last) return plot.x + plot.w;',checkSpan],
+    [KEY,'axis: "x", plot: plot, series: [index]','plot: plot, marks: []',cardCheck],
+    ['16-lines.js','withUnit(T.value(xe.at, x.format), xUnit)','T.value(xe.at, x.format)',R=>{const f=fixture([12,30,40],[1,2,3]);f.document.config.encoding.x.unit="km";assert.equal(scene(f,480,320,1,"key",R).sc.prims.find(p=>p.k==="text").text,"2 km");}],
+    ['18a-bare.js','H >= line &&','true &&',fitCheck],
+    ['18a-bare.js','last !== null && fits(W, H, w, inset, gap, line)','last !== null && lvl !== "minimal" && fits(W, H, w, inset, gap, line)',fitCheck],
+    ['18a-bare.js','W - 2 * inset - gap - w >= W / 2','W >= 2 * inset + gap + w',fitCheck],
+  ]){
+    const R=makeEngine(s=>plant(s,file,from,to));assert.throws(()=>check(R),undefined,from);
+  }
+});
+
+test("G9 hostile value/unit text is escaped; an unescaped writer copy is red",()=>{
+  function check(R) {
+    const {r}=draw(FX.hostile,960,540,{},R),svg=R.writeString(r.primitives,"standalone","light");
+    assert.ok(svg.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));assert.ok(svg.includes('&quot;q&quot;'));assert.ok(!svg.includes('<script>'));
+  }
+  check(E);
+  const R=makeEngine(s=>plant(s,'31-write-string.js','k.text !== null ? escape(k.text) : ""','k.text !== null ? k.text : ""'));
+  assert.throws(()=>check(R));
+});
+test("A.4 exact values and units retain their exact last text",()=>{
+  const f=fixture(["9007199254740991","9007199254740992","9007199254740993"],undefined,{format:"integer",unit:"USD"});f.types.v="BIGINT";
+  assert.equal(draw(f,960,540).m.layout.last,"9,007,199,254,740,993 USD");
+  const count=fixture([null,null,null],[0,0,1],{aggregate:"count"});delete count.document.config.encoding.y.field;
+  assert.equal(expectedSparklineMarks(count,[]),2);assert.equal(draw(count).r.summary.marks,2);
+});
+test("A.5 flat-series crosshair dot is at the plot middle at the numeric extremes",()=>{
+  for(const a of [0,5,-5,1e-300,1.1e308,1.7e308,-1.7e308,Number.MAX_VALUE,-Number.MAX_VALUE,Number.MIN_VALUE,-Number.MIN_VALUE])for(const values of [[a],[a,a,a,a,a,a],[a,a,null,a,a,a]])for(const [w,h] of [[160,32],[80,24],[400,200]]){
+    const d=scene(fixture(values),w,h,0);near(d.sc.prims.find(p=>p.k==="circle"&&p.role==="guide").cy,d.hand.plot.y+d.hand.plot.h/2);
+  }
+});
+test("A.4 other chart tokens leave the rest picture unchanged",()=>{
+  const active=["--chart-series-1","--chart-canvas","--chart-ink","--chart-title-weight","--chart-line","--chart-gap","--chart-area-top","--chart-area-bottom","--chart-text","--chart-point"];
+  const base=draw().r;let checked=0;
+  for(const [name,spec] of Object.entries(E.theme.TOKENS)){
+    if(!name.startsWith("--chart-")||active.includes(name))continue;
+    const value=spec[0]==="colour"||spec[0]==="opaque"?[17,18,19]:spec[1]===spec[3]?spec[4]:spec[3];
+    const changed=draw(FX.rising,160,32,{theme:{base:"light",tokens:{[name]:value}}}).r;
+    eq(changed.primitives,clone(base.primitives));checked++;
+  }
+  console.log(`A.4 inactive chart tokens: ${checked}`);assert.ok(checked>=45);
+});
+
+test("G3/G7 look-field, interaction-field, dot and cap plants go red",()=>{
+  function fieldChanges(R,name,value) {
+    const before=JSON.stringify(draw(FX.rising,480,320,{},R).r);
+    R.tables.LOOK[name].value=value;
+    assert.notEqual(JSON.stringify(draw(FX.rising,480,320,{},R).r),before,name);
+  }
+  function interactionUnchanged(R,name) {
+    const before=JSON.stringify(draw(FX.rising,480,320,{},R).r);
+    R.tables.LOOK[name].value*=2;
+    assert.equal(JSON.stringify(draw(FX.rising,480,320,{},R).r),before,name);
+  }
+  for(const [from,to,name,value] of [['look("areaFade") === true','true','areaFade',false],['look("sparkLastText")','"Last"','sparkLastText','Latest']]){
+    fieldChanges(makeEngine(),name,value);const R=makeEngine(s=>plant(s,KEY,from,to));assert.throws(()=>fieldChanges(R,name,value),undefined,name);
+  }
+  for(const name of ["crosshairDot","markMove"]){
+    interactionUnchanged(makeEngine(),name);
+    const R=makeEngine(s=>plant(s,KEY,'R.scales.r2((theme.n("--chart-point") - look("sparkDotShrink")) * share)','R.scales.r2((theme.n("--chart-point") - look("sparkDotShrink") + look("'+name+'")) * share)'));
+    assert.throws(()=>interactionUnchanged(R,name),undefined,name);
+  }
+  for(const [from,to,check] of [
+    ['R.scales.r2((theme.n("--chart-point") - look("sparkDotShrink")) * share)','3.5',R=>assert.equal(dots(draw(FX.rising,160,32,theme(6),R).r)[0].r,5.5)],
+    ['m.sparkLast !== "none" && end !== null','m.sparkLast !== "none" && end !== null && theme.n("--chart-point") < 16',R=>assert.equal(dots(draw(FX["one-point"],400,200,theme(16),R).r).length,1)],
+  ]){check(makeEngine());const R=makeEngine(s=>plant(s,KEY,from,to));assert.throws(()=>check(R));}
+  for(const key of ["points","rows"]){
+    const R=makeEngine(s=>{const from=s['06-tables.js'].split('\n').find(l=>l.includes('"sparkline.'+key+'":'));plant(s,'06-tables.js',from,from.replace('"sparkline.'+key+'"','"unused.sparkline.'+key+'"'));});
+    const check=key==="points"?R=>assert.ok(R.tables.CAPS['sparkline.points'],'sparkline.points'):R=>assert.equal(draw(fixture(Array.from({length:10001},(_,i)=>i)),160,32,{},R).r.state,'refused');
+    check(makeEngine());assert.throws(()=>check(R));
+  }
 });

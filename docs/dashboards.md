@@ -102,11 +102,11 @@ each as `{field: [values]}` (§2.1.2).
 
 - **`chart`** — the chart document v1 (`renderer.version` `"1"`; #860, design record 2026-11-06 §4). Its contract is
   the JSON Schema the product serves, public and unauthenticated:
-  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge` and `treemap` — each of which `allOf`s
+  `GET /schemas/chart/1/<family>.schema.json` — `bar`, `line`, `area`, `scatter`, `pie`, `combo`, `heatmap`, `histogram`, `box`, `waterfall`, `funnel`, `gauge`, `sparkline` and `treemap` — each of which `allOf`s
   `/schemas/chart/1/skeleton.schema.json` ([Auth §8.3](auth.md)); the save judges a document by the file its
   `config.mark.type` names. The served
   bytes ARE the save path's schema; where this text and the schema disagree, the schema wins. `config` is one family's
-  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge and treemap families. The bar family:
+  configuration; v1 has the bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline and treemap families. The bar family:
   `{title?: {text, subtitle?}, mark: {type: "bar", labels?: "none" | "values"}, encoding: {x, y, color?, tooltip?}}`. One of
   `x`/`y` is the band — `type` `nominal`, `ordinal` or `temporal`, `sort` required (`ascending`, `descending`, by the
   category's total `y`/`-y`/`x`/`-x`, `null` for input order, or an explicit list) — and the other the value —
@@ -346,6 +346,25 @@ each as `{field: [values]}` (§2.1.2).
   Left/Right walk all cells in layout order, Home/End their ends, Up/Down stay. Right after the last cell
   reaches shortened text if present, otherwise stays.
 
+  **Sparkline (#1076).** One measure over ordered `x`, without axes, title or legend at any size:
+  `{mark: {type: "sparkline", last?: "none" | "dot" | "value", fill?: boolean}, encoding: {x, y}}`.
+  `x` is the line's band or position, without `title`, `axis` or `scale`; `y` is one value, without
+  `fields`, `stack`, `title` or `axis`. There is no `color` or `tooltip` channel. Defaults are `last: value`
+  and `fill: true`: a fade under the line, an end dot and the last value after it. `dot` omits the text;
+  `none` omits both. A null y is a gap; a null x or non-finite value is not a point, with one warning per kind.
+  Rows at the same x aggregate by y's aggregate. Marks count the non-null points.
+  The first and last non-null points span the plot's edges; one point sits at the right edge, without a line.
+  The value scale spans the data's lowest to highest; a flat series sits at the middle. An authored domain
+  is used exactly, `zero: true` includes zero, and a log scale uses the line's scale (values at or below zero
+  are not drawn). The last value is written only when the frame is one text line high and the line retains
+  at least half the frame width after the value and its gap. The dot remains at every size, smaller when
+  the frame cannot hold the theme's dot. The value starts clear of the dot's ring.
+  A value's unit follows the value; a number x's unit follows x in the card heading, nowhere else.
+  The crosshair follows the nearest x, or the point selected by the arrow keys. Its card shows that x,
+  the selected value, Last, Highest and Lowest; a reduced card keeps the selected value. Inherited limits:
+  10,000 rows, 2,000 points in full and then thinned (not measured for sparkline); thinning preserves gaps
+  and each pixel column's first, lowest, highest and last point.
+
   **On every family's shapes, except where an item names its families (#989):**
   - `y.fields`, on bar, line and area only (the bar's value channel likewise): 2 to 8 `{field, title?, unit?}`, each
     field a series in the list's order; it replaces `field`, and `color` is then refused (the fields are the series).
@@ -353,13 +372,13 @@ each as `{field: [values]}` (§2.1.2).
     `aggregate`.
   - `unit`: at most 16 characters, written after a value (`3.7K kWh`); on the value, on a field entry, on a
     quantitative position (scatter's `x` and `y`, and a box's `y`, among them) on a pie's `theta`, and on a tooltip detail.
-    On a value axis or a number axis it also follows that axis's title, never a tick.
+    On a sparkline it follows only values and the card's number x. On a value axis or a number axis it also follows that axis's title, never a tick.
   - `encoding.tooltip` (bar, line, area, scatter and combo only): at most 6 details `{field, title?, format?, unit?}`, carried on each mark for the tooltip to
     show (not on a funnel or gauge; not on a treemap: its card is the type's own).
-  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie or a histogram's x) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
+  - `scale: {domain?, type?: "linear" | "log", zero?}` (not on a pie, a histogram's x or a sparkline's x) on the value and on a quantitative position (not on a funnel's value or a treemap's `size`; a gauge requires only `{domain: [lo, hi]}`). `zero: true`
     makes the axis hold zero; a bar's, an area's and a waterfall's value always holds it (`zero: false` is refused by their
     schema), a line's does not by default, nor either axis of a scatter nor a box's value. `type: "log"` is admitted on an unstacked bar,
-    on a line, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
+    on a line or a sparkline's value, on both axes of a scatter and on a box's value; a value at or below zero is then not drawn (`chart.rule.log-nonpositive`,
     §6.1). A shape inside a layer object is judged by that layer's mark (bar and area hold zero, line and point do
     not; log is refused on an area), any other by the chart's family.
 
@@ -389,7 +408,7 @@ each as `{field: [values]}` (§2.1.2).
   | `chart.category.type_mismatch` | save rules | a `temporal` band or position on a column that is not DATE or TIMESTAMP |
   | `chart.category.nullable` / `chart.color.nullable` | save rules | a nullable band or `level` / series column |
   | `chart.scale.domain_normalize` / `chart.scale.domain_invalid` | save rules | a `scale.domain` on a normalized stack / not increasing or not finite, or without zero where the axis holds zero (a bar's or an area's value, or `zero: true`) |
-  | `chart.scale.log_unsupported` | save rules | `scale.type: "log"` on an area or waterfall, on a stacked or normalized value, or beside `scale.zero` (fix: a linear scale, or an unstacked bar, a line or a scatter) |
+  | `chart.scale.log_unsupported` | save rules | `scale.type: "log"` on an area or waterfall, on a stacked or normalized value, or beside `scale.zero` (fix: a linear scale, or an unstacked bar, a line, a sparkline or a scatter) |
   | `chart.scale.domain_log` | save rules | a log scale whose `domain` is not greater than 0, increasing and finite |
   | `chart.shade.mid_invalid` | save rules | a `shade`'s `mid` that is not a finite number (`1e400` reads as infinity) |
   | `chart.size.range_invalid` | save rules | a `size`'s `range` that is not increasing |
@@ -984,7 +1003,7 @@ drawn by the datapipelines client library"; the message never echoes the host's 
 While drawing, a chart publishes render warnings — `{ scope: "render", severity: "warning", code, name, refreshId }`,
 each code once per occurrence per refresh, superseded by the next refresh's frame: `chart.rule.null-category` (rows
 with a null category or series were left out), `chart.rule.non-finite` (a value too large to draw was left out; a gauge also uses it for an overflowing domain span),
-`chart.rule.negative-part` (a pie, funnel or treemap with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line or an area whose position is null, is a time that cannot be read or is not
+`chart.rule.negative-part` (a pie, funnel or treemap with a negative aggregate): "This chart cannot show negative values."; `chart.rule.null-position` (rows of a line, an area or a sparkline whose position is null, is a time that cannot be read or is not
 a finite number were left out), `chart.rule.log-nonpositive` (on a log axis of any chart type a value at or below
 zero was not drawn), `chart.frame-too-small`, `chart.text.width-missing`, and `chart.token-refused` — once per
 refused token, naming it — when the page's value of a `--chart-*` token is not one that token may hold and its
@@ -1545,6 +1564,7 @@ change (#426). The templates workspace adopts the helper after #398's rework lan
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-11-27 | v0.NEXT | 1076 (#1076) | Sparkline: one measure, bare frame, last-value fit and selected-point card. |
 | 2026-11-27 | v0.NEXT | 1071 (#1071) | **§2.1.2:** Histogram distributions, nice target bins, whole count ticks, share, cards and keyboard navigation. |
 | 2026-11-27 | v0.94 | 1069 (#1069) | **§2.1.2:** Combo layers, shared axis scales, per-layer caps, card and bar hover. |
 | 2026-11-27 | v0.93 | 1102 (#1102) — renumbered after #1094’s v0.92 | **§2.1.2:** Linear count value axes mark whole numbers, including domains with whole ends; fractional authored domains, log scales and normalized shares keep their ticks. |

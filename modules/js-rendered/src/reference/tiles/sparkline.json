@@ -1,0 +1,845 @@
+[
+ {
+  "document": {
+   "display_name": "rising",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    12,
+    18,
+    15,
+    22,
+    30,
+    28,
+    35,
+    31,
+    26,
+    24,
+    29,
+    40
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "value",
+  "title": "Sparkline: value",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "rising",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    12,
+    18,
+    15,
+    22,
+    30,
+    28,
+    35,
+    31,
+    26,
+    24,
+    29,
+    40
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "large",
+  "title": "Sparkline: large",
+  "frame": {
+   "w": 400,
+   "h": 200
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "compact",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "dot-only",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline",
+     "last": "dot",
+     "fill": false
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    12,
+    18,
+    15,
+    22,
+    30,
+    28,
+    35,
+    31,
+    26,
+    24,
+    29,
+    40
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "dot",
+  "title": "Sparkline: dot",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "last-none",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline",
+     "last": "none"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    12,
+    18,
+    15,
+    22,
+    30,
+    28,
+    35,
+    31,
+    26,
+    24,
+    29,
+    40
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "none",
+  "title": "Sparkline: none",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "document": {
+   "display_name": "flat",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "flat",
+  "title": "Sparkline: flat",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "null-gap",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    5,
+    7,
+    null,
+    9,
+    11,
+    10,
+    null,
+    13,
+    14,
+    12,
+    15,
+    null
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "gap",
+  "title": "Sparkline: gap",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "negative-unit",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "ms"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "2024-01-01",
+    "2024-02-01",
+    "2024-03-01",
+    "2024-04-01",
+    "2024-05-01",
+    "2024-06-01",
+    "2024-07-01",
+    "2024-08-01",
+    "2024-09-01",
+    "2024-10-01",
+    "2024-11-01",
+    "2024-12-01"
+   ],
+   "v": [
+    -4,
+    -2,
+    3,
+    5,
+    -1,
+    0,
+    6,
+    8,
+    2,
+    -3,
+    4,
+    9
+   ]
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "unit",
+  "title": "Sparkline: unit",
+  "frame": {
+   "w": 240,
+   "h": 48
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "nominal-x",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f"
+   ],
+   "v": [
+    3,
+    9,
+    4,
+    12,
+    8,
+    15
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "v": "DECIMAL"
+  },
+  "id": "nominal",
+  "title": "Sparkline: nominal",
+  "frame": {
+   "w": 160,
+   "h": 32
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "minimal",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ },
+ {
+  "document": {
+   "display_name": "empty",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "DATE",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "temporal"
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [],
+   "v": []
+  },
+  "types": {
+   "x": "DATE",
+   "v": "DECIMAL"
+  },
+  "id": "empty",
+  "title": "Sparkline: empty",
+  "frame": {
+   "w": 360,
+   "h": 240
+  },
+  "hidden": [],
+  "expect": {
+   "state": "no-data",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 0
+  }
+ },
+ {
+  "document": {
+   "display_name": "<b>bold?</b>",
+   "renderer": {
+    "kind": "chart",
+    "version": "1"
+   },
+   "inputs": {
+    "result": {
+     "columns": [
+      {
+       "name": "x",
+       "type": "STRING",
+       "nullable": true
+      },
+      {
+       "name": "v",
+       "type": "DECIMAL",
+       "nullable": true
+      }
+     ]
+    }
+   },
+   "config": {
+    "mark": {
+     "type": "sparkline"
+    },
+    "encoding": {
+     "x": {
+      "field": "x",
+      "type": "nominal",
+      "sort": null
+     },
+     "y": {
+      "field": "v",
+      "type": "quantitative",
+      "aggregate": "sum",
+      "unit": "<b>bold?</b>"
+     }
+    }
+   }
+  },
+  "columns": {
+   "x": [
+    "<script>alert(1)</script>",
+    "__proto__",
+    "a & b \"c\" 'd'",
+    "constructor"
+   ],
+   "v": [
+    3,
+    5,
+    2,
+    4
+   ]
+  },
+  "types": {
+   "x": "STRING",
+   "v": "DECIMAL"
+  },
+  "id": "hostile",
+  "title": "Sparkline: hostile",
+  "frame": {
+   "w": 480,
+   "h": 300
+  },
+  "hidden": [],
+  "expect": {
+   "state": "rendered",
+   "level": "full",
+   "legend": "none",
+   "struck": [],
+   "dots": 1
+  }
+ }
+]

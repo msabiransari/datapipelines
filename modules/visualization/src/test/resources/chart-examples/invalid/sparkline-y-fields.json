@@ -30,12 +30,14 @@
         "type": "quantitative"
       },
       "y": {
-        "field": "v",
         "type": "quantitative",
         "aggregate": "sum",
         "fields": [
           {
             "field": "v"
+          },
+          {
+            "field": "x"
           }
         ]
       }

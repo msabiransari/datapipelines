@@ -152,7 +152,7 @@ test("D1: exact cells sum exactly (a DECIMAL total past 2^53); a float total bey
   assert.deepEqual(far.index.totals, [null, "1"], "two finite cells whose sum is not finite: no total, shown whole or not at all");
 });
 
-test("D1.3: an unstacked bar, a normalized stack, a line, an area and a scatter have no totals member", () => {
+test("D1.3: an unstacked bar, a normalized stack, a line, an area, a scatter and a sparkline have no totals member", () => {
   const unstacked = ["parity-bar-grouped", "parity-bar-vertical"];
   const normalized = chartFixtures().filter((f) => f.wire === "bar" && channels(f.fixture.document).value.stack === "normalize");
   assert.ok(normalized.length >= 2, "normalized fixtures: " + normalized.length);

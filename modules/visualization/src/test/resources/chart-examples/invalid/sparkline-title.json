@@ -35,6 +35,8 @@
         "aggregate": "sum"
       }
     },
-    "title": "Trend"
+    "title": {
+      "text": "Trend"
+    }
   }
 }

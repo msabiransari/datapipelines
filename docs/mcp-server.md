@@ -2086,7 +2086,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2098,7 +2098,7 @@ Create a visualization: version 1 lands as a DRAFT (no tool releases anything), 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       },
       "confirm_new_root": {
         "type": "boolean",
@@ -2166,7 +2166,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "config": {
         "type": "object",
-        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title} (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
+        "description": "The renderer's configuration, stored verbatim. chart: one family's {mark, encoding, title?} (sparkline refuses title) (mark.type bar, line, area, scatter, pie, combo, heatmap, histogram, box, waterfall, funnel, gauge, sparkline or treemap), validated against that family's v1 JSON Schema (https://datapipelines.co/schemas/chart/1/<family>.schema.json, served at /schemas/chart/1/<family>.schema.json) and then the chart save rules; table and kpi: their own shapes. At most 262,144 bytes."
       },
       "bindings": {
         "type": "object",
@@ -2178,7 +2178,7 @@ The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first 
       },
       "tests": {
         "type": "object",
-        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's or an area's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, mark_count (chart only, with equals: the marks drawn — a bar's bars, a line's, an area's or a sparkline's data points, a scatter's rows drawn, a pie's slices drawn, a combo's cells with a value, a heatmap's cells, a histogram's segments drawn, a box's boxes, a waterfall's bars including its total, a funnel's stages, a gauge's one arc, a treemap's positive leaf cells), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
       }
     },
     "additionalProperties": false
@@ -3187,7 +3187,7 @@ the audit green over the exported set.
 | 2026-11-21 | v1.86 | 1038 (#1038) | **§6.2.3 `pipelines_execute` (additive):** optional `request_body` input — one JSON object or array of objects for a pipeline that declares `request_body` (pipeline-contract §3.4); bounded decoding, part of the idempotency fingerprint, never stored in parameters; refusal `pipeline.execution.request_body_invalid`. The transport-parsing difference from framework execute is stated. |
 | 2026-11-21 | v1.85 | 1035 r3 (#1035) | **§6.2.3 `pipelines_execute`:** a confirmed run whose caller result cannot be delivered returns `status: "SUCCESS"` with `result_unavailable: true` and no rows (before: a `result.expired` error); the attached replay of the same key says the same. No new tool, no new permission. |
 | 2026-11-20 | v1.84 | 1035 (#1035) | **§6.2.13 `executions_list`:** the `status` filter gains `OUTCOME_UNKNOWN`. **§6.2.14 `executions_get`:** `status` may be `OUTCOME_UNKNOWN`; the record gains `result_unavailable`; a family child stays `RUNNING` until its root settles. **§6.2.15:** `result.execution_failed` covers `OUTCOME_UNKNOWN`, `result.storage_unavailable` a confirmed SUCCESS whose result was not delivered. No new tool, no new permission. |
-| 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's or an area's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
+| 2026-11-15 | v1.83 | 989 (#989, js-rendered F5) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` (additive):** the `config` description names the three chart families (bar, line, area) and the schema address per family; the `tests` description's `mark_count` names a line's, an area's or a sparkline's data points beside a bar's bars. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-15 | v1.82 | 988 (#988, js-rendered F4) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update`:** the `renderer` description no longer names the kind retired by #860; it reads "html and svg are reserved and refused". Text only: the input schema, the accepted kinds and every refusal are unchanged. |
 | 2026-11-15 | v1.81 | 986 (#986, js-rendered F2) | **§6.2.52 `visualizations_create`, §6.2.53 `visualizations_update` — deliberate break, decided by the js-rendered charts record O-13:** the answer is `{id, name, version, status, body_hash}`; the `warnings` array and the descriptions' sentence about it are gone with the server's chart library layer. Input schemas, permission rows and the tool count unchanged. |
 | 2026-11-11 | v1.80 | #877 G7 (importer arm, ruling A.0 option 1) | **§6.2.32 `templates_purge_draft`: the guard gains its FOURTH arm** — a template version (any status; a DISCARDED one while its template keeps a live version) whose `imports` pin any version of the draft refuses `template.in_use` with `details.referencing_templates`, narrowed by the caller's view with `pins_hidden` exactly as the other three arms (#300). A guard CORRECTION, not a dependency feature (record §22, Draft 9 erratum): before it a library draft could be purged out from under a draft importer. The tool's description names the arm; schema, permission row and tool count (61) unchanged; `templates_used_by` unchanged. |

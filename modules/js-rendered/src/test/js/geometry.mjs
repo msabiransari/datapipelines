@@ -99,17 +99,17 @@ export function expectedBarMarks(fx, hiddenIds) {
   return n;
 }
 
+/** Sparkline uses the line aggregation count, including its log exclusion, without mutating the fixture. */
+export function expectedSparklineMarks(fx, hiddenIds) {
+  return expectedLineMarks({ ...fx, document: { ...fx.document, config: { ...fx.document.config, mark: { type: "line" } } } }, hiddenIds);
+}
+
 /**
  * I3's expected count for a line or area fixture (brief 989 D8: mark_count counts the data's non-null points), computed
  * by this test from the delivered columns, never by the engine: rows sharing x and series are one point, aggregated; a
  * null x, a null series or a null aggregate is no point; on a log value axis (a line's) a value at or below 0 is none.
  * A temporal x counts any non-null text (the fixtures carry only valid dates); a quantitative one any finite number.
  */
-/** Sparkline uses the line aggregation count, including its log exclusion, without mutating the fixture. */
-export function expectedSparklineMarks(fx, hiddenIds) {
-  return expectedLineMarks({ ...fx, document: { ...fx.document, config: { ...fx.document.config, mark: { type: "line" } } } }, hiddenIds);
-}
-
 export function expectedLineMarks(fx, hiddenIds) {
   const e = fx.document.config.encoding, x = e.x, y = e.y, color = e.color || null;
   const col = (f) => (f && Object.prototype.hasOwnProperty.call(fx.columns, f) ? fx.columns[f] : []);
