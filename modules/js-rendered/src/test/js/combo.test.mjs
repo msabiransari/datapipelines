@@ -135,12 +135,31 @@ test('A.2: layer, row and per-layer mark caps refuse only above their boundary; 
       e.layers[0].mark=mark;
       f.columns={m:Array.from({length:n},(_,j)=>'c'+j),rev:Array(n).fill(2),rate:Array(n).fill(3)};
     });
-    const r=draw(f).r;
+    // The per-layer mark-cap boundary in a frame that gives every category a whole pixel (the cap beats density, #1117).
+    const r=draw(f,1920,540).r;
     assert.equal(r.state,(mark==='bar'||mark==='point')&&n>1000?'refused':'rendered',`${mark} ${n}`);
+    if((mark==='bar'||mark==='point')&&n>1000)assert.equal(r.summary.refusal.code,'chart.too_many_marks');
+  }
+  // 1,000 categories at 640 px give each mark under a pixel: the category-axis density refusal (#1117).
+  for(const mark of ['bar','point','line','area']) {
+    const f=variant('bar-line',(f,e)=>{e.layers[0].mark=mark;f.columns={m:Array.from({length:1000},(_,j)=>'c'+j),rev:Array(1000).fill(2),rate:Array(1000).fill(3)};});
+    const r=draw(f).r;
+    assert.equal(r.state,'refused',`${mark} 1000 at 640`);
+    assert.equal(r.summary.refusal.code,'chart.rule.category-density');
+    assert.equal(r.summary.refusal.details.axis,'x');
   }
   for(const n of [10000,10001]) {
     const f=variant('two-lines-two-axes',f=>{f.columns={m:Array.from({length:n},(_,j)=>'c'+j),rev:Array(n).fill(2),cost:Array(n).fill(3)};});
-    assert.equal(draw(f).r.state,n===10000?'rendered':'refused');
+    // 10,000 rows at 640 px refuse on density; one row over the cap refuses on the row cap first.
+    const r=draw(f).r;
+    assert.equal(r.state,'refused');
+    assert.equal(r.summary.refusal.code,n===10000?'chart.rule.category-density':'chart.too_many_rows');
+    // The row-cap boundary stays observable in a roomy frame beside the dense expectation (#1117): 10,000 rows render
+    // as 20,000 marks (two lines) at 11000 × 540, and one row over the cap refuses on rows at every width.
+    const roomy=draw(f,11000,540).r;
+    assert.equal(roomy.state,n===10000?'rendered':'refused');
+    if(n===10000){assert.equal(roomy.summary.marks,20000);assert.equal(roomy.summary.refusal,null);}
+    else assert.equal(roomy.summary.refusal.code,'chart.too_many_rows');
   }
 });
 
@@ -170,8 +189,10 @@ test('A.3: L10 extreme dots retain all marks and keep their ring inside 80 by 24
 
 test('A.3: spans equal every drawn bar box; category centres agree across layers at six frames',()=>{
   let spans=0;
-  for(const fx of Object.values(FX)) for(const [w,h] of [[960,540],[480,320],[320,240],[240,140],[160,160],[80,24]]) {
-    const {r,hand,m}=draw(fx,w,h); if(r.state!=='rendered')continue;
+  for(const [name, fx] of Object.entries(FX)) for(const [w,h] of [[960,540],[480,320],[320,240],[240,140],[160,160],[80,24]]) {
+    // many-categories (400 categories) refuses on category-axis density under a 640 px plot (#1117): widen it so its
+    // spans stay in the geometry check; the refusal itself is asserted in category-density.test.mjs.
+    const {r,hand,m}=draw(fx, name==='many-categories' && w<640 ? 640 : w, h); if(r.state!=='rendered')continue;
     for(const s of r.index.series) {
       const sub=m.subs[Number(s.id.slice(6))];
       if(sub.mark!=='bar') {assert.equal(s.spans,undefined); continue;}

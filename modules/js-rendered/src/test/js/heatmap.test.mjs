@@ -9,14 +9,21 @@ import { expectedHeatmapMarks, WIDTHS, HEIGHTS } from "./geometry.mjs";
 import { plant } from "./forms.mjs";
 const FILE = "types/heatmap.js";
 const REGISTER = 'R.type("heatmap", { channels: CHANNELS, model: model, marks: marks,';
-const E = engine((s) => plant(s, FILE, REGISTER, 'R.heatModel = model; R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m, hand, h) { R.seen = {m, hand, h, marks}; return marks(m, hand, h); },'));
+const CAPTURE = 'R.heatModel = model; R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m, hand, h) { R.seen = {m, hand, h, marks}; return marks(m, hand, h); },';
+const E = engine((s) => plant(s, FILE, REGISTER, CAPTURE));
+// The same engine with the category-axis density decision disabled (owner 2026-11-24, #1117): the dense fixtures the
+// geometry and lookup checks draw would refuse on density first; the density refusal itself is asserted separately.
+const Off = engine((s) => {
+  plant(s, FILE, REGISTER, CAPTURE);
+  plant(s, "20-render.js", "var dens = R.cartesian.density(hand);", "var dens = null;");
+});
 const I = createRequire(import.meta.url)(join(MODULE, "../web/src/main/resources/static/js/datapipelines-chart-interactions.js"))._internal;
 const FX = Object.fromEntries(chartFixtures().filter((f) => f.wire === "heatmap").map((f) => [f.name, f.fixture]));
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const same = (a,b) => assert.deepEqual(plain(a),plain(b));
 const rects = (r) => r.primitives.filter((p) => p.role === "mark" && p.k === "rect");
 const variant = (name, edit) => { const f = structuredClone(FX[name]); edit(f, f.document.config.encoding); return f; };
-function draw(f, w=960, h=540, extra={}) { E.seen=null; const r=E.render(inputOf(f,w,h,extra)); return {r,...E.seen}; }
+function draw(f, w=960, h=540, extra={}, R=E) { R.seen=null; const r=R.render(inputOf(f,w,h,extra)); return {r,...R.seen}; }
 const model = (r) => I.modelOf(E,r,E.measure.measurer(null).fn);
 const target = (datum) => ({kind:"mark",id:null,datum});
 const key = (m,datum,k) => I.keyTarget(m,datum===null?null:target(datum),k).target;
@@ -69,8 +76,11 @@ test("A.2 sparse model Map work is bounded by rows, never the category grid",()=
   for(const values of [1,20000]) {
     const f=sparse(20000,values), before=C.hmCalls();C.heatModel(f.document,f.columns,f.types);const calls=C.hmCalls()-before;
     assert.ok(calls>=20000 && calls<=800000,'Map calls '+calls);console.log('A.2 sparse values='+values+' Map calls='+calls);
-    const r=C.render(inputOf(f,80,24));assert.equal(r.state,values===1?'rendered':'refused');
-    if(values===1)assert.equal(r.summary.marks,1);else same(r.summary.refusal.details,{marks:20000,limit:1000});
+    const r=C.render(inputOf(f,80,24));
+    // One occupied cell in a 20,000-category domain refuses on density; 20,000 cells refuse on the mark cap first.
+    assert.equal(r.state,'refused');
+    assert.equal(r.summary.refusal.code,values===1?'chart.rule.category-density':'chart.too_many_marks');
+    if(values===1)same(r.summary.refusal.details,{axis:'x',categories:20000,groups:1});else same(r.summary.refusal.details,{marks:20000,limit:1000});
   }
 });
 
@@ -102,11 +112,12 @@ test("A.3 geometry over every fixture and sweep frame; gap/radius tokens; dense 
   for(const f of Object.values(FX))for(const w of [...WIDTHS,80])for(const ht of [...HEIGHTS,24]) {
     const d=draw(f,w,ht);if(d.r.state==='rendered')cells+=checkGeometry(d);
   }
-  for(const radius of [0,8,32])for(const gap of [0,8])checkGeometry(draw(FX['narrow-cells'],80,24,{theme:{base:'light',tokens:{'--chart-cell-radius':radius,'--chart-gap':gap}}}));
-  for(const n of [2000,20000])for(const frame of [[80,24],[480,320]])checkGeometry(draw(sparse(n),...frame));
-  const d=draw(sparse(20000),80,24), p=rects(d.r)[0],b=d.r.index.marks[0].shape;
+  for(const radius of [0,8,32])for(const gap of [0,8])checkGeometry(draw(FX['narrow-cells'],80,24,{theme:{base:'light',tokens:{'--chart-cell-radius':radius,'--chart-gap':gap}}},Off));
+  // Dense floors and the sub-pixel cell reduction are verified with the density decision off (they now refuse first).
+  for(const n of [2000,20000])for(const frame of [[80,24],[480,320]])checkGeometry(draw(sparse(n),...frame,{},Off));
+  const d=draw(sparse(20000),80,24,{},Off), p=rects(d.r)[0],b=d.r.index.marks[0].shape;
   same([p.w,p.h,b.w,b.h],[0.01,0.01,0.01,0.01]);close(p.x,d.hand.plot.x);close(p.y,d.hand.plot.y);
-  checkGeometry(draw(sparse(20000,1000),80,24));assert.ok(cells>300000);console.log('A.3 cells checked='+cells);
+  checkGeometry(draw(sparse(20000,1000),80,24,{},Off));assert.ok(cells>300000);console.log('A.3 cells checked='+cells);
 });
 
 const luminance = rgb => rgb.reduce((sum,c,i)=>sum+[0.2126,0.7152,0.0722][i]*(c/255<=0.04045?c/255/12.92:((c/255+0.055)/1.055)**2.4),0);
@@ -134,8 +145,9 @@ test("A.4 labels fit, equal card values, follow authored/default options and nev
 
 test("A.5 slot lookup, gap, empty slots, ring/card and row-major key plan including minimal",()=>{
   let empty=0;
-  for(const f of Object.values(FX)) {
-    const d=draw(f,480,320);if(d.r.state!=='rendered')continue;const lm=model(d.r), measures=I.measures(E,'light');
+  for(const [name, f] of Object.entries(FX)) {
+    // dense-empty's 2,000 × 2,000 domain refuses on density first: its empty-slot lookup runs with density off.
+    const d=draw(f,480,320,{}, name==='dense-empty'?Off:E);if(d.r.state!=='rendered')continue;const lm=model(d.r), measures=I.measures(E,'light');
     for(let i=0;i<d.r.index.marks.length;i++) {
       const e=d.r.index.marks[i],b=e.shape;assert.equal(e.key,true);assert.equal(e.emphasis,'ring');assert.equal(e.card.rows.length,1);assert.equal(e.card.keep,0);same(e.card.extra,[]);
       assert.equal(E.lookup.at(d.r.index,b.x+b.w/2,b.y+b.h/2,24),i);
@@ -161,13 +173,13 @@ test("A.5 slot lookup, gap, empty slots, ring/card and row-major key plan includ
 
 test("A.5 dense overlap follows boxes and last containment, and shortened-text exit follows the shared layer",()=>{
   for(const frame of [[80,24],[480,320]]) {
-    const d=draw(sparse(20000),...frame),lm=model(d.r), pos=(c,r)=>({x:d.hand.band.start+(c+0.5)*d.hand.band.step,y:d.hand.rows.start+(r+0.5)*d.hand.rows.step});
+    const d=draw(sparse(20000),...frame,{},Off),lm=model(d.r), pos=(c,r)=>({x:d.hand.band.start+(c+0.5)*d.hand.band.step,y:d.hand.rows.start+(r+0.5)*d.hand.rows.step});
     const p=pos(1,1), got=E.lookup.at(d.r.index,p.x,p.y,24);assert.equal(got,frame[0]===80?0:-1);
     assert.equal(I.lookup(E,lm,p).mark?.datum ?? null,frame[0]===80?0:null);
     const b=d.r.index.marks[0].shape, c=Math.ceil((b.x+b.w-d.hand.band.start)/d.hand.band.step),r=Math.ceil((b.y+b.h-d.hand.rows.start)/d.hand.rows.step);
     for(const p of [pos(c,r),pos(10000,10000)])assert.equal(E.lookup.at(d.r.index,p.x,p.y,24),-1);
   }
-  const d=draw(sparse(20000,2),80,24),b=d.r.index.marks[0].shape;assert.equal(d.r.index.marks[E.lookup.at(d.r.index,b.x+b.w/2,b.y+b.h/2,24)].datum,20001);
+  const d=draw(sparse(20000,2),80,24,{},Off),b=d.r.index.marks[0].shape;assert.equal(d.r.index.marks[E.lookup.at(d.r.index,b.x+b.w/2,b.y+b.h/2,24)].datum,20001);
   const f=variant('single',f=>f.columns={x:['a-name-that-is-much-too-long-to-fit-on-this-axis','b','a-name-that-is-much-too-long-to-fit-on-this-axis','b'],y:['r1','r1','r2','r2'],v:[1,2,3,4]});
   for(const frame of [[200,140],[480,320]]) {const lm=model(draw(f,...frame).r);assert.equal(lm.cuts.length,1);for(const datum of [1,3]){const cut=key(lm,datum,'ArrowRight');assert.equal(cut.kind,'cut');assert.equal(I.keyTarget(lm,cut,'ArrowLeft').target.datum,1);for(const k of ['ArrowRight','ArrowUp','ArrowDown'])same(I.keyTarget(lm,cut,k).target,cut);}}
   const lm=model(draw(f,160,160).r);assert.equal(lm.cuts.length,0);assert.equal(key(lm,3,'ArrowRight').datum,3);
@@ -208,7 +220,7 @@ test("G2–G8 model geometry labels lookup and cap falsifications name the chang
     ['G6 row zero','row: c.r,','row: 0,',keyCheck],
     ['G6 no emphasis','emphasis: "ring"','emphasis: null',r=>{const out=full(r,fx('single')),lm=I.modelOf(r,out,r.measure.measurer(null).fn);assert.equal(I.ringPrims(r,lm,0,I.measures(r,'light')).length,1);}],
   ];
-  const make=(from,to)=>engine(s=>{plant(s,FILE,from,to);plant(s,FILE,REGISTER,'R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m,hand,h) { R.seen={m,hand,h}; return marks(m,hand,h); },');});
+  const make=(from,to)=>engine(s=>{plant(s,FILE,from,to);plant(s,FILE,REGISTER,'R.type("heatmap", { channels: CHANNELS, model: model, marks: function(m,hand,h) { R.seen={m,hand,h}; return marks(m,hand,h); },');plant(s,'20-render.js','var dens = R.cartesian.density(hand);','var dens = null;');});
   for(const [name,from,to,verify] of plants) {
     const good=make('var STEP = 0.01;','var STEP = 0.01; ');verify(good);const bad=make(from,to);
     assert.throws(()=>verify(bad),undefined,name+' must turn red');verify(good);console.log(name+': GREEN / targeted RED / GREEN');

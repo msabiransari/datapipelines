@@ -1,0 +1,67 @@
+{
+ "display_name": "Rows by region",
+ "description": "Number of rows per region, 2024 to 2025.",
+ "renderer": {
+  "kind": "chart",
+  "version": "1"
+ },
+ "inputs": {
+  "sales": {
+   "columns": [
+    {
+     "name": "region",
+     "type": "STRING"
+    },
+    {
+     "name": "month",
+     "type": "DATE"
+    },
+    {
+     "name": "channel",
+     "type": "STRING"
+    },
+    {
+     "name": "amount",
+     "type": "DECIMAL",
+     "nullable": true
+    },
+    {
+     "name": "units",
+     "type": "INTEGER"
+    },
+    {
+     "name": "payload",
+     "type": "BINARY",
+     "nullable": true
+    },
+    {
+     "name": "segment",
+     "type": "STRING",
+     "nullable": true
+    }
+   ]
+  }
+ },
+ "config": {
+  "mark": {
+   "type": "bar"
+  },
+  "encoding": {
+   "x": {
+    "field": "region",
+    "type": "nominal",
+    "sort": "ascending",
+    "title": "Region"
+   },
+   "y": {
+    "type": "quantitative",
+    "aggregate": "count",
+    "title": "Rows",
+    "format": "integer"
+   }
+  },
+  "title": {
+   "text": "Rows by region"
+  }
+ }
+}

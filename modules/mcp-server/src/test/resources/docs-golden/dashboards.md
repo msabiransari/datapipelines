@@ -90,6 +90,11 @@ same files — so you never write a charting library's configuration, and one do
 (Plus `name`, `display_name` and `tests`, as for any visualization.) A chart reads exactly one input (or the one
 output of its pinned script template), and every `field` names one of its columns.
 
+A chart can refuse at render for **density**: when an occupied mark's final category-band allocation (after grouping
+and gaps) is under one CSS pixel — too many categories for the frame — the draw refuses with
+`chart.rule.category-density`, naming the displayed axis, the category count and the group count. Widen the frame or
+aggregate categories to recover; the same document draws in a larger frame. The row and mark caps are judged first.
+
 - **Five bar forms.** `x` the band and `y` the value draws **vertical** bars; `y` the band and `x` the value,
   **horizontal** ones. A `color` field splits each band into series, and then the value's `stack` is required:
   `"zero"` **stacked** (above), `null` **grouped** side by side, `"normalize"` **normalized** to 100 % of each band

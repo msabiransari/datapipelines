@@ -196,22 +196,48 @@
     // 100 % and carries no label.
     var option = doc.config.mark.labels === undefined ? look("labelsDefault") : doc.config.mark.labels;
     var labelsOn = option === "values" && !normalize;
-    var endLabels = null;
-    if (labelsOn) {
-      endLabels = [];
-      for (var c3 = 0; c3 < categories.length; c3++) {
-        var tot = 0, any = false;
-        for (var s4 = 0; s4 < series.length; s4++) {
-          var cv = cells[s4][c3];
-          if (cv.num === null) continue;
-          if (stacked) {
-            tot += cv.num;
-            any = true;
-          } else endLabels.push(cv.text);
-        }
-        if (stacked && any) endLabels.push(T.value(tot, look("stackTotalFormat")));
+    // A stack's total label text: the exact decimal sum of the visible cells when every one carries exact text, else the
+    // float sum (owner 2026-11-24, #1118). The room reservation and the painted label share it, in the short form
+    // (stackTotalFormat), so a hidden series never leaves the two out of step.
+    var stackTotalText = function (visible, c) {
+      var texts = [], sum = 0, allExact = true, any = false;
+      for (var s = 0; s < series.length; s++) {
+        if (visible[series[s].id] !== true) continue;
+        var cv = cells[s][c];
+        if (cv.num === null) continue;
+        any = true;
+        texts.push(cv.exact);
+        if (cv.exact === null) allExact = false;
+        sum += cv.num;
       }
-    }
+      if (!any) return null;
+      if (allExact) return T.value(D.aggregate(texts, "sum", value.field).exact, look("stackTotalFormat"));
+      return T.value(sum, look("stackTotalFormat"));
+    };
+    // The texts the layout reserves room for at the value axis's data end (look contract §4.3): per category the stack's
+    // total (a stacked bar) or the cells' own texts (grouped), in the short form. It keeps the layout's array contract
+    // (null, or the texts) and is refreshed by extent(visible) — which the layout calls before it reads endLabels in
+    // both orientations — so the reservation follows the same series the label paints, with no change to the shared
+    // layout part.
+    var endLabels = labelsOn ? [] : null;
+    var refreshEndLabels = function (visible) {
+      if (endLabels === null) return;
+      endLabels.length = 0;
+      if (stacked) {
+        for (var c3 = 0; c3 < categories.length; c3++) {
+          var text = stackTotalText(visible, c3);
+          if (text !== null) endLabels.push(text);
+        }
+      } else {
+        for (var c3 = 0; c3 < categories.length; c3++) {
+          for (var s4 = 0; s4 < series.length; s4++) {
+            var cv = cells[s4][c3];
+            if (cv.num === null) continue;
+            endLabels.push(cv.text);
+          }
+        }
+      }
+    };
     var a0 = value.aggregate.charAt(0).toUpperCase() + value.aggregate.slice(1);
     var vt = titleOf(value, value.field ? a0 + " of " + value.field : fields ? a0 : "Count");
     if (vt !== null && !fields && typeof value.unit === "string" && value.unit !== "") vt = vt + " (" + value.unit + ")";
@@ -268,6 +294,7 @@
       format: format,
       details: details,
       totals: totals,
+      stackTotalText: stackTotalText,
       layout: {
         vertical: vertical,
         log: log,
@@ -283,6 +310,7 @@
         whole: agg === "count" && !normalize,
         endLabels: endLabels,
         extent: function (visible) {
+          refreshEndLabels(visible);
           if (log) return logExtent(series, cells, visible);
           var lo = 0, hi = 0;
           for (var c2 = 0; c2 < categories.length; c2++) {
@@ -349,7 +377,14 @@
     var k = Math.max(1, vis.length), stacked = m.stack === "zero" || m.stack === "normalize";
     var step = plot.band.step, groupW = step * look(stacked ? "stackShare" : "barShare");
     var gap = theme.n("--chart-gap"), radius = theme.n("--chart-bar-radius"), maxShare = look("radiusMaxShare");
-    var barW = stacked ? groupW : Math.max(0, (groupW - gap * (k - 1)) / k);
+    // Grouped bars keep the requested gap while it fits. An overfull group — a nondefault gap whose total separation
+    // reaches the group's width — compresses the separation so every bar keeps a positive width (brief 1130); a
+    // zero-width group takes zero separation. The default gap and every fitting group keep their geometry unchanged.
+    var sep = gap;
+    if (!stacked && k > 1 && gap !== 2 && gap * (k - 1) >= groupW) {
+      sep = groupW > 0 ? gap * groupW / (groupW + gap * (k - 1)) : 0;
+    }
+    var barW = stacked ? groupW : Math.max(0, (groupW - sep * (k - 1)) / k);
     var lo = plot.value.lo, hi = plot.value.hi, sc = plot.value.scale, base = sc(clampTo(0, lo, hi));
     var vertical = m.vertical, rects = [];
     var pos = [], neg = [];
@@ -388,7 +423,7 @@
           first = true;
         }
         var p0 = sc(clampTo(from, lo, hi)), p1 = sc(clampTo(to, lo, hi));
-        var off = plot.band.start + step * ci + (step - groupW) / 2 + (stacked ? 0 : j * (barW + gap));
+        var off = plot.band.start + step * ci + (step - groupW) / 2 + (stacked ? 0 : j * (barW + sep));
         var len = Math.abs(p1 - p0), shift = !first && len > 0 ? Math.min(gap, len) : 0;
         len -= shift;
         var isOuter = !stacked || look("roundOuterOnly") !== true || (v >= 0 ? outer[ci].pos === si : outer[ci].neg === si);
@@ -415,6 +450,9 @@
       if (stacked) stackTotals(m, plot, hp, rects, groupW, labels);
       else barLabels(m, plot, hp, rects, barW, groupW, labels);
     }
+    // The final occupied band allocation (owner 2026-11-24, #1117): a grouped bar's actual width, a stack's full
+    // group width; groups = the visible series that split the band (1 for an undivided stack).
+    if (rects.length > 0) plot.density = [{ axis: m.vertical ? "x" : "y", categories: m.categories.length, groups: stacked ? 1 : k, width: stacked ? groupW : barW }];
     return out.concat(labels);
   }
 
@@ -492,7 +530,9 @@
       var total = sums.get(c), en = ends.get(c), box = total >= 0 ? en.pos || en.neg : en.neg || en.pos;
       var outerBox = { x: box.x, y: box.y, w: box.w, end: box.end, up: total >= 0 ? true : false };
       if (total >= 0 && en.pos === null) outerBox.end = plot.value.scale(Math.max(plot.value.lo, Math.min(plot.value.hi, 0)));
-      var lb = labelAt(m, plot, hp, outerBox, T.value(total, look("stackTotalFormat")), groupW, groupW, placed);
+      // The text is the exact decimal sum of the visible cells when every one is exact (owner 2026-11-24, #1118); the
+      // float sum still decides the label's side and place (numeric accumulation for geometry).
+      var lb = labelAt(m, plot, hp, outerBox, m.stackTotalText(plot.visible, c), groupW, groupW, placed);
       if (lb !== null) out.push(lb);
     }
   }

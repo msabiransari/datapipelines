@@ -3,11 +3,11 @@
 // plot background and no frame line, at every size: the layout levels take nothing from it, and it never reads the
 // level for what it draws. It reads the cartesian layout part's members a line needs (bands or x, extent, log, domain,
 // reach) and one of its own, `last`: null, or the last value's text as the template wrote it (the short form is the
-// template's). The plot is the frame inside max(edge, kept reach) on four sides (kept at most a quarter of its smaller
-// side, the dot and ring drawn smaller by kept / asked; L10, #1128), less the last value's room at the right
-// where the fit rule writes it; the scales are those the minimal level computes for the same layout part (the cartesian
-// file's `minimal`, called, not copied). The template receives the cartesian frame's four fields {plot, value, band, x},
-// so a line-like template draws on either frame.
+// template's). The plot is the frame inside min(max(edge, kept reach), side / 4) on each side (kept at most a quarter
+// of the side it insets, the dot and ring drawn smaller by kept / asked; L10, #1128, #1131), less the last value's room
+// at the right where the fit rule writes it; the scales are those the minimal level computes for the same layout part
+// (the cartesian file's `minimal`, called, not copied). The template receives the cartesian frame's four fields
+// {plot, value, band, x}, so a line-like template draws on either frame.
 (function (R) {
   "use strict";
   var look = R.tables.look;
@@ -30,7 +30,7 @@
       var last = typeof L.last === "string" ? L.last : null;
       // The reach the frame can hold (L10, #1128); the value starts clear of the dot: the label gap, or the kept reach where larger.
       var kept = R.cartesian.keep(R.cartesian.reach(L, h), W, H).kept;
-      var inset = Math.max(e, kept), gap = Math.max(h.em("directGap"), kept), line = look("lineHeight") * h.text;
+      var inset = R.cartesian.insets(e, kept, W, H).x, gap = Math.max(h.em("directGap"), kept), line = look("lineHeight") * h.text;
       var w = last === null ? 0 : h.width(last, h.text, h.titleWeight);
       // Decided BEFORE the plot is fixed and the marks are drawn: the plot cannot widen after them.
       var room = last !== null && fits(W, H, w, inset, gap, line) ? gap + w : 0;

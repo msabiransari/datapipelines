@@ -151,6 +151,18 @@
     return { asked: asked, kept: Math.min(asked, Math.min(W, H) / 4) };
   }
 
+  /**
+   * The minimal level's per-side inset (the owner's ruling of 2026-11-24, #1131): the frame's edge or the kept reach,
+   * whichever is larger, capped on each side at a quarter of that side — min(max(edge, kept), W/4) horizontally and
+   * min(max(edge, kept), H/4) vertically — before a separately reserved right-side room for a last value. Each cap is
+   * the side it insets, so a frame wider than it is tall keeps more room left and right than top and bottom, and the
+   * plot never loses more than half of either dimension.
+   */
+  function insetsOf(e, kept, W, H) {
+    var asked = Math.max(e, kept);
+    return { x: Math.min(asked, W / 4), y: Math.min(asked, H / 4) };
+  }
+
   /** The room a layout part asks for inside the plot's edges (pad(h), px), or null when it has no `pad`; a bad value throws. */
   function padOf(L, h) {
     if (!has(L.pad)) return null;
@@ -473,15 +485,16 @@
   }
 
   /**
-   * The minimal level (record §4.6, contract §4.5): marks only, the plot the whole frame inside its edge, less `right`
-   * px at the right when given (the bare frame's last value, brief 1051 D7; absent for every other caller). The scales
-   * are computed: with rows no value axis (extent is not called), with second the right axis on the left's ticks.
+   * The minimal level (record §4.6, contract §4.5): marks only, the plot the whole frame inside the per-side inset (the
+   * edge or the kept reach, whichever is larger, capped at a quarter of each side — #1131), less `right` px at the right
+   * when given (the bare frame's last value, brief 1051 D7; absent for every other caller). The scales are computed: with
+   * rows no value axis (extent is not called), with second the right axis on the left's ticks.
    */
   function minimal(h, W, H, e, L, visible, right) {
     checkForms(L);
     var keep = keepOf(reachOf(L, h), W, H);
-    var inset = Math.max(e, keep.kept), room = typeof right === "number" && right > 0 ? right : 0;
-    var plot = { x: r2(inset), y: r2(inset), w: r2(Math.max(1, W - 2 * inset - room)), h: r2(Math.max(1, H - 2 * inset)) };
+    var ins = insetsOf(e, keep.kept, W, H), room = typeof right === "number" && right > 0 ? right : 0;
+    var plot = { x: r2(ins.x), y: r2(ins.y), w: r2(Math.max(1, W - 2 * ins.x - room)), h: r2(Math.max(1, H - 2 * ins.y)) };
     var n = L.bands.length, len = L.vertical ? plot.h : plot.w;
     var step = (L.vertical ? plot.w : plot.h) / Math.max(1, n);
     var out = { plot: plot, value: null, band: { start: L.vertical ? plot.x : plot.y, step: step, n: n }, x: null, under: [], over: [], axes: [], corner: "clear", rotated: false, labelTop: plot.y + plot.h, boxTop: plot.y };
@@ -559,6 +572,19 @@
   }
 
   /**
+   * The category-axis density decision (owner 2026-11-24, #1117): the first occupied allocation strictly below one
+   * CSS pixel, x before y as the type wrote them, or null. A type's marks writes `hand.density` — a list of
+   * {axis, categories, groups, width} in the displayed coordinates — from its own final layout, so no allocation is
+   * re-derived here.
+   */
+  function density(hand) {
+    var a = hand.density;
+    if (!Array.isArray(a)) return null;
+    for (var i = 0; i < a.length; i++) if (typeof a[i].width === "number" && a[i].width < 1) return a[i];
+    return null;
+  }
+
+  /**
    * The cartesian frame as the frame registry takes it (18-frames.js adds it as `cartesian`; brief 1049 D2). Its room is
    * legendRoom over the model's layout part. Its lay keeps the end labels' room right of the plot (brief 989 D6, D7:
    * the names on the lines and the values of `labels: last`) before the frame is laid out, and hands the template
@@ -588,5 +614,5 @@
     },
   };
 
-  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, keep: keepOf, hand: handOf };
+  R.cartesian = { cartesian: cartesian, positionAxis: positionAxis, frame: frame, minimal: minimal, reach: reachOf, keep: keepOf, insets: insetsOf, hand: handOf, density: density };
 })(JsRendered);

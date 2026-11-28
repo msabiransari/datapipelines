@@ -846,10 +846,10 @@ test("G9: the test for a draw by mark made true for every draw turns chart-inter
   }
   const red = run(text);
   console.log(`G9 red: ${red.fail} of ${red.tests} tests of chart-interactions.test.mjs fail; first: ${red.names.slice(0, 3).join(" | ")}`);
-  assert.equal(red.tests, 37);
+  assert.equal(red.tests, 43);
   assert.ok(red.fail > 0 && red.status !== 0, "the plant must turn the old tests red");
   const green = run(LAYER_TEXT);
-  assert.deepEqual([green.status, green.tests, green.fail], [0, 37, 0], "the same copy without the plant is green");
+  assert.deepEqual([green.status, green.tests, green.fail], [0, 43, 0], "the same copy without the plant is green");
 });
 
 // The look fields are read (A.9's Node half; G13): each field changed in the look table changes what it governs.

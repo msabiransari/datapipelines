@@ -154,11 +154,17 @@ class ChartJudgeEngineTest {
     }
 
     @Test
-    fun `a chart whose many categories exceed the frame is still judged - 1,000 rows draw what the engine says`() {
+    fun `a chart whose many categories exceed the frame is still judged - the density refusal is reported, not a crash`() {
         rows.clear()
         rows += (1..1_000).map { mapOf("month_labels" to "row-$it", "amounts" to it.toDouble()) }
         val report = run(spec().also { assertion(it, 1).put("equals", 1_000) })
-        withClue(report.failures) { report.ok shouldBe true }
+        // 1,000 categories at 640 × 400 put each bar under a pixel: the engine refuses with
+        // chart.rule.category-density, and the judge reports that refusal on both assertions, never a crash.
+        report.failures.forEach { failure ->
+            failure.code shouldBe VisualizationErrorCodes.TEST_CASE_INVALID
+            failure.message shouldContain "chart.rule.category-density"
+        }
+        report.failures.size shouldBe 2
         report.cases.values
             .single()
             .rows shouldBe 1_000

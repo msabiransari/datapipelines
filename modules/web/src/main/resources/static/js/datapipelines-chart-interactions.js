@@ -1006,8 +1006,30 @@
     return at.y + m.p + (i + 0.5) * m.h + ((m.ascent - m.descent) / 2) * m.s;
   }
 
+  /**
+   * The guide dot's radius and ring that fit inside the frame (the owner's ruling of 2026-11-24, issue 1132): the dot stays
+   * centered on its data point and its whole ink (its radius and half its ring) stays inside the frame. The fit is
+   * judged at the emitted precision (the center and the radius to hundredths, the ring as a number): a dot whose emitted
+   * radius and half ring already fit keeps its size; one that does not is scaled by available ÷ asked (asked = radius +
+   * ring ÷ 2), the ring kept at the scaled value and the radius rounded DOWN to a hundredth, bounded by the available
+   * reach minus half the scaled ring, so the emitted circle (whose radius is rounded to hundredths) never leaves the
+   * frame. At zero room both are zero.
+   */
+  function dotFit(R, frame, cx, cy, r, ring) {
+    var x = R.scales.r2(cx);
+    var y = R.scales.r2(cy);
+    var rr = R.scales.r2(r);
+    var available = Math.max(0, Math.min(x, y, frame.w - x, frame.h - y));
+    if (rr + ring / 2 <= available) return { r: r, ring: ring };
+    if (available <= 0) return { r: 0, ring: 0 };
+    var share = available / (r + ring / 2);
+    var scaledRing = ring * share;
+    var radius = Math.floor(100 * Math.max(0, Math.min(r * share, available - scaledRing / 2))) / 100;
+    return { r: radius, ring: scaledRing };
+  }
+
   /** The crosshair (D3): one vertical guide at x across the plot, and a dot on every visible series' point there. */
-  function crosshairPrims(R, model, datum, m) {
+  function crosshairPrims(R, model, datum, m, frame) {
     var P = R.prim;
     var t = m.theme;
     var out = [];
@@ -1021,7 +1043,8 @@
       var y = pointY(model, ser.id, x);
       var c = model.colours[ser.id];
       if (y === null || !c) continue;
-      dots.push(P.circle({ role: "guide", cx: x, cy: y, r: m.dot, fill: c.token, color: c.css, stroke: "--chart-canvas", strokeColor: t.css("--chart-canvas"), strokeWidth: t.n("--chart-gap"), series: ser.id }));
+      var fit = dotFit(R, frame, x, y, m.dot, t.n("--chart-gap"));
+      dots.push(P.circle({ role: "guide", cx: x, cy: y, r: fit.r, fill: c.token, color: c.css, stroke: "--chart-canvas", strokeColor: t.css("--chart-canvas"), strokeWidth: fit.ring, series: ser.id }));
     }
     if (x === null) return out;
     out.push(P.line({ role: "guide", x1: x, y1: model.plot.y, x2: x, y2: model.plot.y + model.plot.h, stroke: "--chart-axis", strokeColor: t.css("--chart-axis"), strokeWidth: t.n("--chart-stroke") }));
@@ -1152,7 +1175,7 @@
       } else if (markT) {
         active = markT.id;
         var lines = cardLines(model, markT.id, markT.datum);
-        if (model.crosshair) under = crosshairPrims(R, model, markT.datum, m);
+        if (model.crosshair) under = crosshairPrims(R, model, markT.datum, m, frame);
         var c = lines === null ? null : markCard(R, width, lines, markT.id, frame, m);
         var anchor = show.anchor || anchorOf(model, markT.id, markT.datum);
         if (c !== null && anchor !== null) card = cardPrims(R, c, place(c.box, anchor, frame, m.dist), m, false);
@@ -1469,6 +1492,7 @@
       ringPrims: ringPrims,
       moveOf: moveOf,
       targetBox: targetBox,
+      dotFit: dotFit,
       MORE: MORE,
       PLUS: PLUS,
     },
