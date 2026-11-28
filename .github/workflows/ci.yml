@@ -72,6 +72,9 @@
 #         1.5 times its observed duration, rounded UP to five minutes. The job's 70 keeps
 #         20 minutes for setup, reports and uploads. These replace the initial 60/80
 #         projections; one cold run is the measurement, the headroom is a sizing choice.
+#         2026-11-28: the js-rendered Node suite reached 1,352 tests and run 46102983573's
+#         build step exceeded 50 min (killed with jsRenderedTest still running; the previous
+#         green run 46034937325 measured 43m13s). Step 50 → 70, job 70 → 90.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
@@ -188,7 +191,9 @@ jobs:
     # 90 since #290 over a measured 48–57 min; 120 as #669's stopgap (2026-10-21); 170 as the
     # serial stopgap's last form (2026-11-13, 9c22b3404); 70 from the first sharded run
     # (43574307936): the measured 32.48-minute step gets 50, plus 20 for reports (header).
-    timeout-minutes: 70
+    # 90 on 2026-11-28: run 46102983573's build step hit the 50-minute ceiling with the grown
+    # js-rendered Node suite still running; the previous green run 46034937325 measured 43m13s.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         # #1023: all history, not the action's default single commit. FontPathLedgerTest (module web,
@@ -254,7 +259,10 @@ jobs:
         # outgrew each one; the suite is now the `browser` job's, excluded here the way
         # scripts/gate.sh does, its test classes still compiled. Run 43574307936 measured
         # 32.48 minutes here: 1.5 times that, rounded UP to five minutes, gives 50 (header).
-        timeout-minutes: 50
+        # 70 on 2026-11-28: the js-rendered Node suite grew to 1,352 tests; run 46102983573
+        # was killed at 50 min with jsRenderedTest still running, and the previous green
+        # run 46034937325 measured 43m13s. The whole job gets 90 (20 for reports, header).
+        timeout-minutes: 70
         run: >-
           ./gradlew build ktlintCheck detekt --continue
           -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
